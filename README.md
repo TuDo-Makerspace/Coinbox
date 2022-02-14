@@ -5,6 +5,17 @@
 ![Untitled 0_modified-500](https://user-images.githubusercontent.com/51839738/153445603-24081088-35aa-4f89-b935-e29f22ea072e.jpg)
 
 
+## what you need:
+## 1.[Soldering Equipment] + [small circuit board]
+## 2.[Arduino Nano] or something similar
+## 3.[small circuit board]
+## 4.[Audio Amplifier  3 Watt + 3 Watt DC 5V ]
+## 5.[Speaker]
+## 6.[KY-033 Line Tracking Sensor Arduino] or something smilar
+
+
+
+
 1. layout
 2. cut the wood
 3. glue the parts together
