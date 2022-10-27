@@ -26,7 +26,7 @@ MoneyBox Tutorial
 8. draw the pixels
 9. paint the pixelart on it :)
 
-## making your own sounds follow the very well written tutorial on https://highlowtech.org/?p=1963
+## if you want to make your own costum sounds follow the superb tutorial on https://highlowtech.org/?p=1963
 
 ## MoneyBox
 ## 1. layout
