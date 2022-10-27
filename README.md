@@ -15,7 +15,7 @@
 
 
 
-
+Box Tutorial
 1. layout
 2. cut the wood
 3. glue the parts together
@@ -26,7 +26,9 @@
 8. draw the pixels
 9. paint the pixelart on it :)
 
+## making your own sounds follow the very well written tutorial on https://highlowtech.org/?p=1963
 
+## Box
 ## 1. layout
 
 ![part1-400](https://user-images.githubusercontent.com/51839738/153498322-d41aa19a-7822-48ec-84c9-8f5459ff3cdb.jpeg)
