@@ -17,9 +17,6 @@
 // Sound is on pin 11
 #define SENSOR_PIN A7
 
-// Sensor Parameters
-#define SENSOR_THRESHOLD 512
-
 // Number of coins to trigger sound
 #define POWER_UP 4
 #define ONE_UP 10
@@ -27,8 +24,16 @@
 // Function
 #define WAIT_AFTER_COIN 100 // ms
 
-// Macros
-#define SENSOR_READ() (analogRead(SENSOR_PIN) > SENSOR_THRESHOLD ? HIGH : LOW)
+/* From: https://docs.arduino.cc/language-reference/en/functions/digital-io/digitalread/:
+ *   The analog input pins can be used as digital pins, referred to as A0, A1, etc.
+ *   The exception is the Arduino Nano, Arduino Pro Mini, and Arduino Mini’s A6 and A7 pins,
+ *   which can only be used as analog inputs. */
+#if SENSOR_PIN == A6 || SENSOR_PIN == A7
+    #define SENSOR_THRESHOLD 512
+    #define SENSOR_READ() (analogRead(SENSOR_PIN) > SENSOR_THRESHOLD ? HIGH : LOW)
+#else
+    #define SENSOR_READ() digitalRead(SENSOR_PIN)
+#endif
 
 void print_boot_msg() {
   Serial.println("@@@@/////////////////////////////////////////////////@@@@\n");
