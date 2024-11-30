@@ -1,8 +1,6 @@
 # Mario [ ? ] Block Cash Box  <!-- omit in toc -->
 
-<div align="center">
-  <img src="https://user-images.githubusercontent.com/51839738/198265458-6dcc52a0-6237-4805-95cb-5a1fca83f22e.mp4" alt="Video Preview" />
-</div>
+![Video Preview](docs/Showcase.mp4)
 
 ## Table of Contents <!-- omit in toc -->
 
