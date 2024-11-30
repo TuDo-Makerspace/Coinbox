@@ -1,6 +1,6 @@
 # Mario [ ? ] Block Cash Box  <!-- omit in toc -->
 
-![Video Preview](docs/Showcase.mp4)
+https://github.com/user-attachments/assets/d0408c2e-4ff7-413f-b0c4-15ff709d9556
 
 ## Table of Contents <!-- omit in toc -->
 
@@ -79,6 +79,10 @@ Apply a white base layer of paint to the box. This will make the final colors mo
 </div>
 
 ### Step 5. **Draw the Pixel Grid**
+
+
+https://github.com/user-attachments/assets/013efbc2-d232-44b7-a74b-76aa4c2a7c2e
+
 
 Sketch a 16x16 pixel grid on the box. This will serve as a guide for your Super Mario-inspired design.
 
