@@ -1,6 +1,6 @@
 # Mario [ ? ] Block Cash Box  <!-- omit in toc -->
 
-https://github.com/user-attachments/assets/d0408c2e-4ff7-413f-b0c4-15ff709d9556
+https://github.com/user-attachments/assets/13c91ebd-0a8e-42fc-bb54-711a1d9b547c
 
 ## Table of Contents <!-- omit in toc -->
 
