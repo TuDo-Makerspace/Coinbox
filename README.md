@@ -1,115 +1,236 @@
-# MarioQuestionBlockCashBox
-## A cashbox in Super Mario style with coin sounds if you put money inside
+# Mario [ ? ] Block Cash Box  <!-- omit in toc -->
+
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/198265458-6dcc52a0-6237-4805-95cb-5a1fca83f22e.mp4" alt="Video Preview" />
+</div>
+
+## Table of Contents <!-- omit in toc -->
+
+- [Building the Box](#building-the-box)
+  - [Step 1. **Cut the Wood**](#step-1-cut-the-wood)
+  - [Step 2. **Glue the Pieces Together**](#step-2-glue-the-pieces-together)
+  - [Step 3. **Secure the Bottom**](#step-3-secure-the-bottom)
+  - [Step 4. **Lid slit**](#step-4-lid-slit)
+  - [Step 5. **Hole for DC Jack**](#step-5-hole-for-dc-jack)
+  - [Step 4. **Paint the Base Coat**](#step-4-paint-the-base-coat)
+  - [Step 5. **Draw the Pixel Grid**](#step-5-draw-the-pixel-grid)
+  - [Step 6. **Paint the Pixel Art**](#step-6-paint-the-pixel-art)
+  - [Step 7. **Magnets for the Lid**](#step-7-magnets-for-the-lid)
+- [Electronics](#electronics)
+  - [**Components Required**](#components-required)
+  - [**Wiring the Components**](#wiring-the-components)
+- [Software](#software)
+  - [**Overview**](#overview)
+  - [**Configurable Parameters**](#configurable-parameters)
+  - [**Sound Playback Implementation**](#sound-playback-implementation)
+- [Flashing the Arduino](#flashing-the-arduino)
+- [Electronics Enclosure](#electronics-enclosure)
+  - [**Enclosure Components**](#enclosure-components)
+  - [**Assembly Instructions**](#assembly-instructions)
+    - [1. **Mounting the Perfboard:**](#1-mounting-the-perfboard)
+    - [2. **Attaching Speaker and Sensor:**](#2-attaching-speaker-and-sensor)
+    - [3. **Connecting Components:**](#3-connecting-components)
+    - [4. **Securing the Enclosure:**](#4-securing-the-enclosure)
+    - [5. **Sensor Calibration:**](#5-sensor-calibration)
+    - [6. **Screwing on the Lid:**](#6-screwing-on-the-lid)
 
 
-![Untitled 0_modified-500](https://user-images.githubusercontent.com/51839738/153445603-24081088-35aa-4f89-b935-e29f22ea072e.jpg)
+## Building the Box
 
-https://user-images.githubusercontent.com/51839738/198265458-6dcc52a0-6237-4805-95cb-5a1fca83f22e.mp4
+### Step 1. **Cut the Wood**
 
+For the box, we cut 2 slightly larger pieces (dimensions: X x Y x Z) and 4 slightly smaller pieces (dimensions: X x Y x Z). The larger pieces make up the top and bottom, while the smaller pieces form the sides.
 
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153499010-4d637198-48a1-4b8a-b381-e79d648df92e.jpg" alt="Cutting Wood" />
+</div>
 
+### Step 2. **Glue the Pieces Together**
 
-## what you need:
-## 1.[Soldering Equipment] + [small circuit board]
-## 2.[Arduino Nano] or something similar
-## 3.[small circuit board]
-## 4.[Audio Amplifier  3 Watt + 3 Watt DC 5V ]
-## 5.[Speaker]
-## 6.[KY-033 Line Tracking Sensor Arduino] or something smilar
+Once the pieces are cut, glue them together to form the box. Make sure the edges are flush and the corners are square.
 
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153499739-e9e8fa30-efbd-40df-8945-f49845dbe8e0.jpeg" alt="Gluing" />
+</div>
 
+### Step 3. **Secure the Bottom**
 
-MoneyBox Tutorial
-1. layout
-2. cut the wood
-3. glue the parts together
-4. screw the bottom
-5. color the box first layer
-6. glue your infrared sensor
-7. put in your hardware
-8. draw the pixels
-9. paint the pixelart on it :)
+Attach the bottom of the box using screws or nails for extra stability. Glue alone can work but might not be as durable.
 
-if you want to make your own costum sounds follow the superb tutorial on https://highlowtech.org/?p=1963
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153499869-d872f6ef-bdfb-473d-8788-0da4efaf0446.jpeg" alt="Screwing the Bottom" />
+</div>
 
-## MoneyBox
-## 1. layout
+### Step 4. **Lid slit**
 
-![part1-400](https://user-images.githubusercontent.com/51839738/153498322-d41aa19a-7822-48ec-84c9-8f5459ff3cdb.jpeg)
+Cur a slit in the lid to allow coins to be inserted into the box. Make sure the slit is wide enough to accommodate different coin sizes.
+We used a size of X x Y.
 
-make a box like in this example https://de.wikihow.com/Eine-Holzkiste-bauen no german skillz needed for the pictures.
+TODO: Add Image
 
-## 2 cut the wood
+### Step 5. **Hole for DC Jack**
 
-![part2-400](https://user-images.githubusercontent.com/51839738/153499010-4d637198-48a1-4b8a-b381-e79d648df92e.jpg)
+Drill a hole into the bottom of any side of the box to make room for a DC jack. We didn't have a panel mount DC jack, so we used a PCB one and simply glued it into the hole. We also soldered a JST connector to the jack so that it can be easily connected to the electronics, while still allowing the other electrnics to be removed from the box for maintenance.
 
-Use a saw you like if possible one you can make clean cuts with, like a circular saw or a good jigsaw or if your are
-comfortable enough use a hand saw.
+### Step 4. **Paint the Base Coat**
 
-## 3. glue the parts together
+Apply a white base layer of paint to the box. This will make the final colors more vibrant. Acrylic paint is recommended.
 
-![part3-400](https://user-images.githubusercontent.com/51839738/153499739-e9e8fa30-efbd-40df-8945-f49845dbe8e0.jpeg)
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153500396-c1f125a4-5aea-4728-abd4-97b094f3d93c.jpeg" alt="Base Paint" />
+</div>
 
-nothing really other to sayinfrared sensor then, glue the parts together :)
+### Step 5. **Draw the Pixel Grid**
 
-## 4. screw the bottom
+Sketch a 16x16 pixel grid on the box. This will serve as a guide for your Super Mario-inspired design.
 
-![part4-400](https://user-images.githubusercontent.com/51839738/153499869-d872f6ef-bdfb-473d-8788-0da4efaf0446.jpeg)
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153502027-1c454a92-3491-416e-a708-a103b61ad5f6.jpeg" alt="Pixel Grid" />
+</div>
 
-screw the botton together to make it more stable if you want to but glue could be sufficient aswell.
-you can also use nails instead of screws.
+### Step 6. **Paint the Pixel Art**
 
+Fill in the grid with bright colors to create the iconic Mario Question Block design.
 
-## 5. color the box first layer
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153502996-5a992c59-d1f3-417b-be92-9eab55340730.jpeg" alt="Painting Pixels" />
+</div>
 
-![part5-400](https://user-images.githubusercontent.com/51839738/153500396-c1f125a4-5aea-4728-abd4-97b094f3d93c.jpeg)
+### Step 7. **Magnets for the Lid**
 
-color your box white to make it look better when you color it later with other colors 
-I used acrylic colors.
+Drill a hole into each corner of the box and lid. Insert and glue magnets into the holes. This allows the lid to remain in place, while still being easy to open.
 
-## 6. glue your infrared sensor
+<div align="center">
+  <img src="https://user-images.githubusercontent.com/51839738/153504756-97e27ee4-8590-4f95-a772-9cb7b98df5ab.jpg" alt="Finished Product" />
+</div>
 
+## Electronics
 
-![part6-400](https://user-images.githubusercontent.com/51839738/153500629-efe14592-cf37-49f4-86b4-c506f3e02edd.jpeg)
+### **Components Required**
 
-next comes your infrared sensor. glue it to a new piece of infrared sensorwood and put it in the middle of the box, if you close your box it is under the hole where your change goes inside.
-It will reflect and triggers the signal.
+For the electronics setup, you'll need the following components:
 
+- **Arduino Nano**
+- **PAM8403 Audio Amplifier Board**
+- **KY-033 Line Tracking Sensor**
+- **Speaker**
+- **Perfboard**
 
-## 7. put in your hardwareinfrared sensor
+### **Wiring the Components**
 
-![part7-400](https://user-images.githubusercontent.com/51839738/153501250-c78d2f2e-56e3-43a0-9aea-2b74ccbd5065.jpeg)
-![part12-400](https://user-images.githubusercontent.com/51839738/153503516-590d6e50-992e-4392-ba62-e7a5900afb80.jpeg)
+Connect the components as illustrated in the circuit diagram below:
 
-(later I changed with a bigger speaker because it was not loud enough otherwise.)
+> **TODO:** *Add Circuit Diagram*
 
-put in your existing hardware and put it in the smaller part of the box, drill a hole in the middle part of that wood, that way your connecting cables can connect to your Arduino. don't glue the middle wood part, safe that for later when you managed the place for your hardware and everything is working propely.
+![Circuit Diagram](docs/CircuitDiagram.png)
 
-At last make a hole in the middle of the top of the box for your coin money to go inside :)
+For our project, we soldered the components onto a perfboard to ensure a stable and organized layout. Below is an image of our perfboard setup:
 
-## 8. draw the pixels
-![part8-400](https://user-images.githubusercontent.com/51839738/153502027-1c454a92-3491-416e-a708-a103b61ad5f6.jpeg)
+![Perfboard](docs/Perfboard.png)
 
+> **Tip:** We utilized JST connectors for connecting the speaker, sensor, and power supply to the perfboard. This allows for better maintainability.
 
-![part9-400](https://user-images.githubusercontent.com/51839738/153502045-75cd89ac-92e0-43a6-9705-5ef6d8890e15.jpeg)
+## Software
 
-it's more easy to mark your end of the line on the other sides than to measure it again.
-your pixelgrid shoud be 16x16 if you want the same style
+### **Overview**
 
-## 9. paint the pixelart on it :)
+The project's software can be found in the [`src/`](src/) directory. It performs the following actions:
 
-![part10-400](https://user-images.githubusercontent.com/51839738/153502996-5a992c59-d1f3-417b-be92-9eab55340730.jpeg)
+1. **Initialization:**
+   - Initializes GPIO's and serial communication.
+   - Displays a playful ASCII art message in the serial monitor.
 
-![part12-400](https://user-images.githubusercontent.com/51839738/153503244-cf22dbef-1ccc-445a-b701-69f73cb47981.jpeg)
+2. **Sensor Monitoring:**
+   - Continuously monitors input from the KY-033 line tracking sensor.
+   - Detects objects (e.g., coins) passing over the sensor by detecting a transition from LOW to HIGH on the sensor pin.
 
+3. **Sound Playback:**
+   Once a coin is detected:
+      - **Standard:** Plays the classic Mario coin sound effect each time a coin is detected, except: See next case.
+      - **Special:** On every *n-th* coin (configurable), it plays either a One-Up or Power-Up sound effect instead of the standard coin sound. Currently the Power-Up sound is played on every 4th coin and the One-Up sound on every 10th coin.
 
-I used 8 magnets to close the top and hold it stable. just drill some holes in the right size and put them inside with a
-little bit of glue.
+### **Configurable Parameters**
 
-when your hardware is properly installed and glued, glue also your middle wood part with it to keep it stable.
+At the top of the main file, you can adjust the following parameters:
 
-manage to put the Infrared-Sensor right under the hole for the coins to get it triggered
+- **`POWER_UP`**: Determines the number of coins required to play the Power-Up sound effect.
+- **`ONE_UP`**: Determines the number of coins required to play the One-Up sound effect.
+- **`SENSOR_PIN`**: Specifies the pin connected to the KY-033 sensor.
+- **`WAIT_AFTER_COIN`**: Sets the waiting time between consecutive sound playbacks. This prevents spam if the coin is detected for a longer duration.
 
-![Untitled 0_modified-500](https://user-images.githubusercontent.com/51839738/153504756-97e27ee4-8590-4f95-a772-9cb7b98df5ab.jpg)
+### **Sound Playback Implementation**
 
+We utilize [Damellis's PCM Library](https://github.com/damellis/PCM) to handle audio playback. To play a sound, we can use the startPlayback() function, which takes an array of raw 8-bit audio values. The Mario audio samples are stored in the `sounds.h` file as byte arrays, however, due to copyright restrictions, `sounds.h` is not included in this repository. Makerspace Members can access the file on our file server. For others, refer to this [Tutorial](https://highlowtech.org/?p=1963) for instructions.
 
+## Flashing the Arduino
+
+To upload the software to your Arduino Nano, follow these steps:
+
+1. **Install PlatformIO:**
+   - Download and install [PlatformIO](https://platformio.org/) as an extension for your preferred IDE (e.g., VS Code).
+
+2. **Open the Project:**
+   - Launch PlatformIO and open this project by navigating to `File > Open Folder` and selecting the project's root directory.
+
+3. **Connect Your Arduino:**
+   - Use a USB cable to connect your Arduino Nano to your computer.
+
+4. **Upload the Firmware:**
+   - In PlatformIO, click the **Upload** button (usually represented by an arrow icon) to compile and flash the software to your Arduino.
+
+## Electronics Enclosure
+
+To securely house the electronics and ensure protection, we designed and 3D printed a custom enclosure. Below is an overview of the enclosure and assembly instructions:
+
+![Enclosure](docs/Enclosure.png)
+
+**Note:** This enclosure is tailored to our specific components (e.g., speaker and perfboard). You may need to design a custom enclosure to fit your particular setup.
+
+### **Enclosure Components**
+
+The enclosure consists of three main parts. Click on the links below to download the corresponding `.3mf` files:
+
+- [**Back Part**](enclosure/Back.3mf): Holds the perfboard containing the Arduino Nano and the Audio Amplifier.
+- [**Front Part**](enclosure/Front.3mf): Houses the speaker and the sensor.
+- [**Lid**](enclosure/Lid.3mf): Covers the enclosure once the front and back parts are assembled.
+
+### **Assembly Instructions**
+
+#### 1. **Mounting the Perfboard:**
+
+Secure the perfboard onto the **Back Part** of the enclosure using **M2 screws**.
+
+   ![Back Part](docs/Back.jpg)
+
+#### 2. **Attaching Speaker and Sensor:**
+   
+Attach the speaker and KY-033 sensor to the **Front Part** of the enclosure using **M3 screws** and a **nut**.
+
+> **Note:** Do **not** fully tighten the nut for the sensor yet, as you may need to adjust its position later.
+   
+   ![Front Part](docs/FrontSpeaker.jpg)
+   ![Front Part](docs/FrontSensor.jpg)
+
+#### 3. **Connecting Components:**
+Connect the sensor, speaker, and DC barrel jack to the perfboard. 
+
+![Components](docs/Components.jpg)
+
+#### 4. **Securing the Enclosure:**
+
+Screw the front and back parts together using **M3 screws**. Then insert the assembled electronics into the wooden box. This may require some force. Use two **wooden screws** from the bottom of the wooden box to secure the enclosure in place through the designated holes.
+
+![Assembled](docs/Assembly.jpg)
+![Bottom Screws](docs/BottomScrews.jpg)
+
+#### 5. **Sensor Calibration:** 
+
+- Before attaching the lid, power up the electronics and calibrate the sensor sensitivity to detect coins.
+- Place the box lid on top of the enclosure.
+- Test the sensor by inserting small coins. If the sensor misses any coins, adjust its position by loosening the nut, repositioning the sensor, and then tightening the nut once satisfied.
+
+#### 6. **Screwing on the Lid:**
+
+Once the sensor is properly positioned, secure the 3d printed lid onto the enclosure using three **M3 screws** and one **M2 screw**.
+
+![Lid](docs/Lid.jpg)
