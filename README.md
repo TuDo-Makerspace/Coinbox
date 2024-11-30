@@ -80,10 +80,6 @@ Apply a white base layer of paint to the box. This will make the final colors mo
 
 ### Step 5. **Draw the Pixel Grid**
 
-
-https://github.com/user-attachments/assets/013efbc2-d232-44b7-a74b-76aa4c2a7c2e
-
-
 Sketch a 16x16 pixel grid on the box. This will serve as a guide for your Super Mario-inspired design.
 
 <div align="center">
@@ -128,9 +124,11 @@ Connect the components as illustrated in the circuit diagram below:
 
 For our project, we soldered the components onto a perfboard to ensure a stable and organized layout. Below is an image of our perfboard setup:
 
-![Perfboard](docs/Perfboard.png)
-
 > **Tip:** We utilized JST connectors for connecting the speaker, sensor, and power supply to the perfboard. This allows for better maintainability.
+
+<div align="center">
+    <img src="docs/Perfboard.png" alt="Perfboard" style="max-height: 700px;" />
+</div>
 
 ## Software
 
