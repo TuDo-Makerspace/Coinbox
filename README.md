@@ -126,9 +126,7 @@ For our project, we soldered the components onto a perfboard to ensure a stable 
 
 > **Tip:** We utilized JST connectors for connecting the speaker, sensor, and power supply to the perfboard. This allows for better maintainability.
 
-<div align="center">
-    <img src="docs/Perfboard.png" alt="Perfboard" style="max-height: 700px;" />
-</div>
+![Perfboard](docs/Perfboard.png)
 
 ## Software
 
