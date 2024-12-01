@@ -107,11 +107,10 @@ Drill a hole into each corner of the box and lid. Insert and glue magnets into t
 
 For the electronics setup, you'll need the following components:
 
-- Arduino Nano
-- PAM8403 Audio Amplifier Board
-- KY-033 Line Tracking Sensor
-- Speaker
-- Perfboard
+- [Arduino Nano](https://www.amazon.de/s?k=Arduino+Nano&__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=3MXT58JWGCI1J&sprefix=arduino+nano%2Caps%2C266&ref=nb_sb_noss_1)
+- [PAM8403 Audio Amplifier Board](https://www.amazon.de/DollaTek-5V-Audioverst%C3%A4rker-Digitalendstufenmodul-Stereo-Verst%C3%A4rker-Potentiometer/dp/B07DJWGQVY?__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=1J93G4RTHNOFI&dib=eyJ2IjoiMSJ9.VhFuJe_HzTWLwSzEMBKpXFbfVtzs2xYtEsEcFcNJW79MmodkhwESMPAF4hMxpNsp0-RtEiSU0jpFWjLN6wg4Uh0vlSXejNPPZRRUxNYW6l2bvtorope1h_9zDVZtlMFMt0HjKH_Bk_8RWcQRxPCO4W1f2i8Bn9ZUj9mRGoBzgtLDuuWy1e2-qZlDaqRN5sK5nutfB3Dzmlis4UT9MsrU4Z4mUlF12QH7MGjD_NL6tp0.1uOtyvjElgoe6sIg9TxoRxXoK5-NXYwmV4qZVtqTFH4&dib_tag=se&keywords=PAM8403&nsdOptOutParam=true&qid=1733056713&sprefix=pam8403%2Caps%2C105&sr=8-2)
+- [KY-033 Line Tracking Sensor](https://www.amazon.de/KY-033-Anwendbar-Erkennung-Hindernissen-Infrarot-Detektionssensor/dp/B0D3XHR2VL?__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=MDH7EVJABT7X&dib=eyJ2IjoiMSJ9.RlWEZOeTZ6sX26dyjT0VmGvXaeIfe0fNiByvESi-JRt_FZR3Czo7iebwAGvBumJAelrtNeD11kGk4plvt2SibF7ZavvEvt6HKnx9A1VgZRml4DGNf-TgQ_SI-_ZS7jZzyRd70TkvhrM8Ig6ntrBxQ1nZQlnfWuBosK6gG7Xac6ihUxQLUWqaLZ8wOClqj3F31IZYP-n7x6sgGrzlViW510Wuwf9rC21fS7sicuKGQy-2l57FHOTPyvg5kidcf0uDQc1LAN3Xo-Z77ALUQ3fuT8ywZoZEUQqflm4GeRQ55Sw.gUU66QJH7FSnTXfdb2mQlKu5cXOdB008n-60jFciu4c&dib_tag=se&keywords=KY-033+Line+Tracking+Sensor&nsdOptOutParam=true&qid=1733056743&sprefix=ky-033+line+tracking+sensor%2Caps%2C95&sr=8-2)
+- [Speaker (8- or 4-ohm, rated for 3W or higher)](https://www.amazon.de/s?k=3w+speaker&__mk_de_DE=%C3%85M%C3%85%C5%BD%C3%95%C3%91&crid=1BIROBN0IAU2I&sprefix=3w+speake%2Caps%2C105&ref=nb_sb_noss_2)
 
 ### Wiring the Components
 
