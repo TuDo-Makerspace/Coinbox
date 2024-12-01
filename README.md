@@ -121,7 +121,7 @@ Connect the components as illustrated in the circuit diagram below:
 
 ![Circuit Diagram](docs/CircuitDiagram.png)
 
-For our project, we soldered the components onto a perfboard to ensure a stable and organized layout. Below is an image of our perfboard setup:
+For our project, we soldered the components onto a perfboard:
 
 > Tip: We utilized JST connectors for connecting the speaker, sensor, and power supply to the perfboard. This allows for better maintainability.
 
@@ -173,17 +173,13 @@ To upload the software to your Arduino Nano, follow these steps:
    - Use a USB cable to connect your Arduino Nano to your computer.
 
 4. Upload the Firmware:
-   - In PlatformIO, click the Upload button
-
- (usually represented by an arrow icon) to compile and flash the software to your Arduino.
+   - In PlatformIO, click the Upload button (usually represented by an arrow icon) to compile and flash the software to your Arduino.
 
 ## Electronics Enclosure
 
-To securely house the electronics and ensure protection, we designed and 3D printed a custom enclosure. Below is an overview of the enclosure and assembly instructions:
+To securely house the electronics and ensure proper protection, we designed and 3D printed a custom enclosure tailored specifically to our components (i.e. our Speaker, Perfboard etc.). Provided that you likely have different components, you will need to come up with your own enclosure design. **This section mostly serves as a reference for members of our makerspace to repair or modify our coin box.**
 
 ![Enclosure](docs/Enclosure.png)
-
-Note: This enclosure is tailored to our specific components (e.g., speaker and perfboard). You may need to design a custom enclosure to fit your particular setup.
 
 ### Enclosure Components
 
