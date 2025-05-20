@@ -1,4 +1,6 @@
-# Mario [ ? ] Block Cash Box <!-- omit in toc -->
+# Coinbox <!-- omit in toc -->
+
+Our sacred Mario-themed coinbox!
 
 https://github.com/user-attachments/assets/13c91ebd-0a8e-42fc-bb54-711a1d9b547c
 
