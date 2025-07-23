@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "CoinBoxV2Lib")(type "KiCad")(uri "${KIPRJMOD}/CoinBoxV2Lib.kicad_sym")(options "")(descr ""))
+)
