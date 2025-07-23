@@ -1,0 +1,349 @@
+(footprint "PAM8403 Module"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 15.5 12 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "36bbf89d-99fc-4597-b1b3-9fdc2f58a0df")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "PAM8403 Module"
+		(at 0 -1 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "f36f5bbd-83f9-4c40-b86d-9a3bae72e76d")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 -2 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "c124bd80-65a8-4f7d-b300-c6eac71d3565")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 -2 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "c12e2e94-9f78-4c59-93b7-ab51cb2b054e")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(fp_rect
+		(start -14 -10)
+		(end 14 10)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill no)
+		(layer "F.SilkS")
+		(uuid "e6548cc7-3e71-403c-98cc-3a4cd1436c10")
+	)
+	(fp_text user "G"
+		(at 9.61 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "155365c8-96cc-456b-adfe-5c4ad3967a78")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "R"
+		(at 12.15 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "164b6772-fe6f-4909-8b0a-b2dc44b8391a")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "-"
+		(at -13.369047 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "1fe8150d-d5c1-4ad5-ad49-7ffb41f94395")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "-"
+		(at -0.629047 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "20fa04bc-86db-40da-92ea-36c32526097d")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "rout"
+		(at -13 5.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "255ea6b1-3982-486b-aa61-3089ee701715")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "+"
+		(at -10.829047 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "3a7bae5f-241f-4021-a0e5-f917829a7079")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "-"
+		(at -8.249047 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "62c1c246-2e35-4abd-8f2d-3e6b729389d1")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "power"
+		(at -0.926667 5.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "841ac8e1-6edb-4bd6-adb7-7dd964d67d11")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "lout"
+		(at -7.852381 5.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "8c873ec5-69e2-42b8-aed8-9ab7ed339dbb")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "L"
+		(at 7.205238 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "c88236a5-6a36-43ad-b8dc-09b6ac49d213")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "+"
+		(at -5.749047 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "cef557a4-5a02-4133-b5c4-048dd4a2b1ad")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "+"
+		(at 1.870953 7 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "d2614586-b4fa-4210-a134-b543e4b73201")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+			(justify left bottom)
+		)
+	)
+	(fp_text user "PAM8403 Module"
+		(at 0 0.664 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "deb7ec9d-ffe9-4c21-a317-a3a67a8421fb")
+		(effects
+			(font
+				(size 1.3 1.3)
+				(thickness 0.26)
+				(bold yes)
+			)
+			(justify bottom)
+		)
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 0.5 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "64a911c5-460a-4d14-a98c-46f615386008")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" thru_hole circle
+		(at -12.7 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "6b48c25a-8ef0-4d66-9388-a293c9e13fe9")
+	)
+	(pad "2" thru_hole circle
+		(at -10.16 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "0666b71e-99e2-4f2b-abb9-7edd224a7c89")
+	)
+	(pad "3" thru_hole circle
+		(at -7.58 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "e9032b5e-c52b-432c-906c-38ba29b5cf57")
+	)
+	(pad "4" thru_hole circle
+		(at -5.08 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "fc129a63-9cc9-42df-b896-01bef990ba52")
+	)
+	(pad "5" thru_hole circle
+		(at 0.04 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "fee320ac-9325-4331-83b2-a25aee321281")
+	)
+	(pad "5" thru_hole circle
+		(at 10.16 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "8a889be8-5c6f-4a01-8e82-b63baa9c46c3")
+	)
+	(pad "6" thru_hole circle
+		(at 2.54 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "a9ad5f4d-6e18-4a2d-a269-d108ac53bbd9")
+	)
+	(pad "7" thru_hole circle
+		(at 7.66 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "639d7e4b-66ec-49f9-a45f-a66bc9ef5223")
+	)
+	(pad "8" thru_hole circle
+		(at 12.7 8.5 180)
+		(size 2 2)
+		(drill 0.8)
+		(layers "*.Cu" "*.Mask")
+		(remove_unused_layers no)
+		(uuid "5c15ae2c-c55c-4f71-899a-b396ef698fb6")
+	)
+	(group ""
+		(uuid "546b6d70-a54d-4017-a9e2-5bbe2041b81c")
+		(members "a9ad5f4d-6e18-4a2d-a269-d108ac53bbd9" "fee320ac-9325-4331-83b2-a25aee321281")
+	)
+	(group ""
+		(uuid "0609bf52-0e5c-47d6-bc6c-b7fa62779793")
+		(members "20fa04bc-86db-40da-92ea-36c32526097d" "d2614586-b4fa-4210-a134-b543e4b73201")
+	)
+	(group ""
+		(uuid "5cc35ee3-6f13-4098-a7ca-529e6a9897c6")
+		(members "1fe8150d-d5c1-4ad5-ad49-7ffb41f94395" "3a7bae5f-241f-4021-a0e5-f917829a7079")
+	)
+	(group ""
+		(uuid "ce7f1d19-d9ca-4b01-a175-374342c92e01")
+		(members "62c1c246-2e35-4abd-8f2d-3e6b729389d1" "cef557a4-5a02-4133-b5c4-048dd4a2b1ad")
+	)
+	(embedded_fonts no)
+	(model "/home/patrick/Downloads/Telegram Desktop/pam8403_5v_2_channel_usb_digital_audio_with_potentionmeter_switch/PAM8403 5V 2 Channel USB Digital Audio with Potentionmeter Switch.stp"
+		(offset
+			(xyz -0.37 0.3 0)
+		)
+		(scale
+			(xyz 1.015 1 1)
+		)
+		(rotate
+			(xyz -0 -0 -180)
+		)
+	)
+)
