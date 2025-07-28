@@ -1,0 +1,75 @@
+menu "Coinbox Configuration"
+
+    menu "Network Settings"
+
+        config NETWORK_WIFI_AP
+          bool "Create Wi‑Fi Access Point"
+          default y
+          help
+            Enable Coinbox’s own Wi‑Fi AP.
+      
+        if NETWORK_WIFI_AP
+          config NETWORK_WIFI_AP_SSID
+            string "AP SSID"
+            default "Coinbox-AP"
+            help
+              The SSID for Coinbox’s Access Point.
+      
+          config NETWORK_WIFI_AP_PASSWORD
+            string "AP Password"
+            default "coinbox1234"
+            help
+              WPA2 password (min. 8 chars).
+
+            config NETWORK_WIFI_AP_CHANNEL
+              int "AP Channel"
+              default 1
+              range 1 14
+              help
+                The channel for Coinbox’s Access Point.
+                If you have problems with Wi‑Fi interference, try changing this value.
+            
+            config NETWORK_WIFI_AP_MAX_CONNECTIONS
+              int "AP Max Connections"
+              default 4
+              help
+                The maximum number of clients that can connect to Coinbox’s Access Point.
+                Default is 4, which is enough for most use cases.
+        endif
+      
+        config NETWORK_WIFI_STA
+          bool "Enable Station mode"
+          default n
+          help
+            Let Coinbox join an existing AP.
+      
+        if NETWORK_WIFI_STA
+          config NETWORK_WIFI_STA_SSID
+            string "STA SSID"
+            default ""
+            help
+              The SSID of the network to join.
+      
+          config NETWORK_WIFI_STA_PASSWORD
+            string "STA Password"
+            default ""
+            help
+              The password for the network to join.
+
+          config NETWORK_WIFI_STA_RETRY
+            int "Maximum retry"
+            default 5
+            help
+                Set the maximum retry value to prevent the station from continuously
+                attempting to reconnect to the Access Point (AP) when the AP doesn't exist.
+        endif
+
+    endmenu
+
+    config EXAMPLE_HTTPD_CONN_CLOSE_HEADER
+        bool "Send connection close header from request handlers"
+        default y
+        help
+            If this config item is set, Connection: close header will be set in handlers.
+            This closes HTTP connection and frees the server socket instantly.
+endmenu
