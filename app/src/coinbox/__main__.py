@@ -162,6 +162,7 @@ class _PingWorker(QObject):
     def run(self):
         self.done.emit(discover_coinbox())
 
+
 class SearchScreen(QWidget):
     found = Signal()
 
@@ -174,7 +175,7 @@ class SearchScreen(QWidget):
         title.setFont(font)
 
         subtitle = QLabel(
-            "Ensure the Coinbox is powered on and no coins are being inserted.",
+            "Please unplug and replug the Coinbox, and make sure no coins are inserted!",
             alignment=Qt.AlignCenter,
         )
 
@@ -414,7 +415,7 @@ class MainWindow(QWidget):
 def main() -> None:
     app = QApplication(sys.argv)
     win = MainWindow()
-    win.setFixedSize(450, 350)
+    win.setFixedSize(600, 350)
     win.show()
     sys.exit(app.exec())
 
