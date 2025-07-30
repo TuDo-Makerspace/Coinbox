@@ -90,6 +90,12 @@ std::vector<uint16_t> adc_values;     // Stores recent ADC values for debugging
 std::vector<uint16_t> avg_adc_values; // Stores recent averaged ADC values for debugging
 
 ///////////////////////////////////////////////////////////////////////////////
+// Configuration Globals
+///////////////////////////////////////////////////////////////////////////////
+
+static unsigned long config_timeout = 0; // Timestamp when config mode should time out
+
+///////////////////////////////////////////////////////////////////////////////
 // Coin Detection Globals
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -283,6 +289,8 @@ void init_samples() {
 void handle_upload(unsigned int nsample, AsyncWebServerRequest *request,
                    String filename, size_t index, uint8_t *data, size_t len, bool final) {
 
+    config_timeout = millis() + CONFIG_TIMEOUT;
+
     if (nsample >= N_SAMPLES) {
         log("Sample %u: Rejecting upload, invalid sample number (max %d)\n", nsample, N_SAMPLES - 1);
     }
@@ -328,6 +336,8 @@ void handle_upload(unsigned int nsample, AsyncWebServerRequest *request,
 // Reset samples to factory defaults
 void reset_samples() {
     log("Factory reset: resetting samples to defaults...\n");
+
+    config_timeout = millis() + CONFIG_TIMEOUT;
 
     for (int i = 0; i < N_SAMPLES; ++i) {
         String fn = "/" + String(i) + ".wav";
@@ -642,6 +652,9 @@ void init_routes() {
         request->send(200, "text/plain", "Entering Config mode...\n");
         ArduinoOTA.begin();
         mode = CONFIG;
+
+        // Failsafe so device is not accidentally stuck in config mode forever
+        config_timeout = millis() + CONFIG_TIMEOUT;
     });
 
     server.on("/restart", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -758,6 +771,14 @@ void loop() {
      * e.g., by sending a GET request to /restart.
      */
     case CONFIG: {
+        if (millis() >= config_timeout) {
+            log("Config mode timed out, restarting...\n");
+            ArduinoOTA.end();
+            udp.stop();
+            mode = RESTART; // Signal to restart
+            return;
+        }
+
         ArduinoOTA.handle();
         DacAudio.FillBuffer();
         break;
