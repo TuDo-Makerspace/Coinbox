@@ -831,7 +831,9 @@ void loop() {
 
             play_sample(pick);
 
-        } else if (!wifi_active && millis() >= reactive_wifi_at) {
+        }
+#if REACTIVATE_WIFI_AFTER > 0
+        else if (!wifi_active && millis() >= reactive_wifi_at) {
             // Reactivate WiFi after REACTIVATE_WIFI_AFTER ms
             log("Reactivating WiFi after %d ms\n", REACTIVATE_WIFI_AFTER);
             WiFi.mode(WIFI_STA);
@@ -839,6 +841,7 @@ void loop() {
             wifi_active = true;
             server.begin();
         }
+#endif
 
         DacAudio.FillBuffer();
         break;

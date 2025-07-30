@@ -31,7 +31,12 @@
 #define STATIC_IP 192, 168, 0, 31
 #define WIFI_CONNECT_TIMEOUT 5000 // ms
 #define BOOT_TIME 2
-#define REACTIVATE_WIFI_AFTER 10000 // ms
+// #define REACTIVATE_WIFI_AFTER 10000 // ms - Comment out to not reactivate WiFi automatically
+
+// DO NOT EDIT
+#ifndef REACTIVATE_WIFI_AFTER
+#define REACTIVATE_WIFI_AFTER 0
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // Configuration
