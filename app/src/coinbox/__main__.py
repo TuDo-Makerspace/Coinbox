@@ -27,6 +27,7 @@ import os
 import requests
 import numpy as np
 import pyloudnorm as pyln
+import importlib.resources as res
 from pydub import AudioSegment
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QSize
 from PySide6.QtGui import QPixmap
@@ -52,10 +53,19 @@ COINBOX_IP = "192.168.0.31"  # Static IP of the Coinbox
 # Path resolution
 #################################################################################
 
+_pkg_root = Path(__file__).parent
 
-def res(relpath: str) -> str:
-    base = getattr(sys, "_MEIPASS", Path(__file__).parent)
-    return os.path.join(base, relpath)
+
+def path(rel: str) -> Path:
+    p = _pkg_root / rel
+    if p.exists():
+        return str(p)
+    try:
+        res_path = res.files(__package__).joinpath(rel)
+        with res.as_file(res_path) as tmp:
+            return os.fspath(tmp)
+    except (FileNotFoundError, ModuleNotFoundError):
+        raise FileNotFoundError(f"resource '{rel}' not found in package")
 
 
 #################################################################################
@@ -162,7 +172,7 @@ class SearchScreen(QWidget):
 
         icon = QLabel(alignment=Qt.AlignCenter)
         icon.setPixmap(
-            QPixmap(res("icons/magnifier.svg")).scaled(96, 96, Qt.KeepAspectRatio)
+            QPixmap(path("icons/magnifier.svg")).scaled(96, 96, Qt.KeepAspectRatio)
         )
 
         lay = QVBoxLayout(self)
@@ -194,7 +204,7 @@ class FoundScreen(QWidget):
 
         btn = QPushButton()
         btn.setIconSize(QSize(96, 96))
-        btn.setIcon(QPixmap(res("icons/gear.svg")))
+        btn.setIcon(QPixmap(path("icons/gear.svg")))
         btn.setFixedSize(120, 120)
         btn.clicked.connect(self.configure.emit)
 

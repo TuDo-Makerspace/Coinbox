@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coinbox"
+version = "1.0.0"
+description = "GUI tool to upload MP3 samples to the TuDo Makerspace Coinbox"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Patrick Pedersen", email = "ctx.xda@gmail.com" }]
+requires-python = ">=3.8"
+
+dependencies = [
+    "PySide6",
+    "pydub",
+    "pyloudnorm",
+    "numpy",
+    "requests",
+]
+
+[tool.setuptools.package-data]
+# include everything under icons/ in the wheel
+"coinbox" = ["icons/*.svg"]
+
+[project.scripts]
+coinbox = "coinbox.__main__:main"
