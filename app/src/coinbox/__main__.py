@@ -271,7 +271,7 @@ class ConfigScreen(QWidget):
         btn_row = QHBoxLayout()
         for label, subtitle in button_specs:
             btn = self._make_upload_button(label, subtitle)
-            btn_row.addWidget(btn, 1)
+            btn_row.addWidget(btn, alignment=Qt.AlignCenter)
 
         reset_btn = QPushButton("Factory reset samples")
         reset_btn.setFixedHeight(40)
