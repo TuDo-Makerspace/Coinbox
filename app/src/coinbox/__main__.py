@@ -21,16 +21,19 @@ this program. If not, see <https://www.gnu.org/licenses/>.
 
 """ GUI to Configure the Coinbox """
 
-from pathlib import Path
 import sys
 import os
 import requests
 import numpy as np
 import pyloudnorm as pyln
 import importlib.resources as res
+import sys, tempfile
+
+from pathlib import Path
 from pydub import AudioSegment
-from PySide6.QtCore import Qt, QTimer, Signal, Slot, QSize
-from PySide6.QtGui import QPixmap
+from PySide6 import QtSvg
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QSize, QObject, QThread
+from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -42,9 +45,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QMessageBox,
 )
-
 from pathlib import Path
-import sys, tempfile
 from pydub import AudioSegment, silence
 
 COINBOX_IP = "192.168.0.31"  # Static IP of the Coinbox
@@ -154,6 +155,13 @@ def discover_coinbox() -> bool:
     return False
 
 
+class _PingWorker(QObject):
+    done = Signal(bool)
+
+    @Slot()
+    def run(self):
+        self.done.emit(discover_coinbox())
+
 class SearchScreen(QWidget):
     found = Signal()
 
@@ -166,7 +174,7 @@ class SearchScreen(QWidget):
         title.setFont(font)
 
         subtitle = QLabel(
-            "Ensure the Coinbox is powered on and no coins are inserted.",
+            "Ensure the Coinbox is powered on and no coins are being inserted.",
             alignment=Qt.AlignCenter,
         )
 
@@ -182,11 +190,31 @@ class SearchScreen(QWidget):
         lay.addWidget(icon)
         lay.addStretch(1)
 
-        self._timer = QTimer(self, interval=500, timeout=self._probe)
+        self._timer = QTimer(self, interval=500, timeout=self._start_probe)
         self._timer.start()
+        self._thread = None
+        self._worker = None
 
-    def _probe(self):
-        if discover_coinbox():
+    def _start_probe(self):
+        if self._thread and self._thread.isRunning():
+            return
+
+        self._thread = QThread()
+        self._worker = _PingWorker()
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.done.connect(self._on_result)
+        self._worker.done.connect(lambda *_: self._thread.quit())
+        self._worker.done.connect(lambda *_: self._worker.deleteLater())
+        self._thread.finished.connect(lambda: setattr(self, "_thread", None))
+        self._thread.finished.connect(self._thread.deleteLater)
+
+        self._thread.start()
+
+    @Slot(bool)
+    def _on_result(self, coinbox_found: bool):
+        if coinbox_found:
             self._timer.stop()
             self.found.emit()
 
@@ -351,7 +379,8 @@ class ConfigScreen(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Coinbox Uploader")
+        self.setWindowTitle("Coinbox")
+        self.setWindowIcon(QIcon(path("icons/gear.svg")))
         self.setFixedSize(560, 415)  # matches your mock-up resolution
 
         self.stack = QStackedWidget(self)
