@@ -175,7 +175,7 @@ class SearchScreen(QWidget):
         title.setFont(font)
 
         subtitle = QLabel(
-            "Please unplug and replug the Coinbox, and make sure no coins are inserted!",
+            "Please unplug and replug the Coinbox, and make sure no coins are being inserted!",
             alignment=Qt.AlignCenter,
         )
 
