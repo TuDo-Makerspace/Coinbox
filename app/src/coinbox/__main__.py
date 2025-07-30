@@ -251,6 +251,8 @@ class FoundScreen(QWidget):
 # Coinbox Configuration
 #################################################################################
 
+exited = False  # Flag to track if we exited config mode
+
 
 class ConfigScreen(QWidget):
     exit_config = Signal()  # emitted when Exit button is pressed
@@ -369,12 +371,23 @@ class ConfigScreen(QWidget):
             QMessageBox.critical(self, "Network error", str(err))
 
     def _exit_clicked(self):
+        global exited
+        exited = True  # Set the flag to indicate we exited config mode
         try:
             requests.get(f"http://{COINBOX_IP}/restart", timeout=3)
         except requests.RequestException as err:
-            QMessageBox.critical(self, "Failed to exit config mode", str(err))
+            QMessageBox.critical(
+                self,
+                "Failed to exit config mode",
+                "Please manually restart the Coinbox.",
+            )
             return
         self.exit_config.emit()
+
+
+#################################################################################
+# Main Window
+#################################################################################
 
 
 class MainWindow(QWidget):
@@ -396,6 +409,8 @@ class MainWindow(QWidget):
         lay = QVBoxLayout(self)
         lay.addWidget(self.stack)
 
+        # QApplication.instance().aboutToQuit.connect(_restart_coinbox)
+
         # wiring
         self.search.found.connect(lambda: self.stack.setCurrentIndex(1))
         self.found.configure.connect(self._configure_coinbox)
@@ -410,6 +425,21 @@ class MainWindow(QWidget):
             QMessageBox.critical(self, "Failed to put Coinbox in config mode", str(err))
             return
         self.stack.setCurrentIndex(2)
+
+    def closeEvent(self, event):
+        global exited
+        if self.stack.currentIndex() == 2 and not exited:
+            # If in config mode, try to restart Coinbox
+            try:
+                requests.get(f"http://{COINBOX_IP}/restart", timeout=3)
+            except requests.RequestException:
+                QMessageBox.critical(
+                    self,
+                    "Failed to exit config mode",
+                    "Please manually restart the Coinbox.",
+                )
+                event.ignore()
+                return
 
 
 def main() -> None:
