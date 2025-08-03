@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>How to Upload Sound to the Coin Box / Sounds auf die Coin-Box laden</title>
+
+    <!-- Pixel-style heading font -->
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet">
+
+    <style>
+        /* ---------- Page basics ---------- */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 2rem auto;
+            max-width: 1080px;
+            line-height: 1.6;
+            background: url("img/background.png") center/cover no-repeat;
+        }
+
+        p {
+            font-size: large
+        }
+
+        /* ---------- Card ---------- */
+        .box {
+            position: relative;
+            background: #fff;
+            padding: 4rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, .1);
+        }
+
+        /* ---------- Heading ---------- */
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            font: 600 2.5rem 'Pixelify Sans', sans-serif;
+        }
+
+        /* ---------- Language toggle ---------- */
+        #langToggle {
+            position: absolute;
+            top: 1.2rem;
+            right: 1.2rem;
+            padding: .6rem 1.4rem;
+            min-width: 110px;
+            font-size: 1.05rem;
+            background: #f1f1f1;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            cursor: pointer;
+            touch-action: manipulation;
+            /* improves mobile tap-response */
+        }
+
+        @media(max-width:600px) {
+            #langToggle {
+                top: .8rem;
+                right: .8rem;
+                padding: 1rem 1.8rem;
+                /* bigger tap area on phones */
+                font-size: 1.2rem;
+                border-radius: 8px;
+            }
+        }
+
+        /* ---------- Lists, alerts, images ---------- */
+        ol {
+            padding-left: 1.2rem
+        }
+
+        ol>li {
+            margin: 1.5rem 0
+        }
+
+        .alert {
+            font-weight: 600;
+            color: #c44747
+        }
+
+        figure {
+            margin: 1rem 0;
+            text-align: center
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .08);
+        }
+
+        figure figcaption {
+            font-size: .9rem;
+            color: #666;
+            margin-top: .5rem
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 3rem 0
+        }
+
+        /* ---------- Icon rows ---------- */
+        .icon-row,
+        .icon-row-larger {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        .icon-row figure {
+            flex: 0 0 320px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0
+        }
+
+        .icon-row img {
+            height: 200px;
+            width: auto;
+            object-fit: contain
+        }
+
+        .icon-row figcaption {
+            margin-top: 1rem;
+            font-size: .95rem
+        }
+
+        .icon-row-larger figure {
+            flex: 0 0 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0
+        }
+
+        .icon-row-larger img {
+            height: 250px;
+            width: auto;
+            object-fit: contain
+        }
+
+        /* ---------- German block hidden by default ---------- */
+        #de {
+            display: none
+        }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <button id="langToggle">Deutsch</button>
+
+        <!-- English -->
+        <div id="en">
+            <h1>How to Upload Sounds to the Coin Box</h1>
+
+            <ol>
+                <hr>
+                <li>
+                    <p>Log into the electronics-lab PC (<em>Windows</em> or <em>Ubuntu</em>).</p>
+                </li>
+
+                <hr>
+                <li>
+                    <p>Open the Coin Box application.</p>
+                    <div class="icon-row">
+                        <figure><img src="img/appwin.png" alt="Coin Box application icon on Windows">
+                            <figcaption>Windows</figcaption>
+                        </figure>
+                        <figure><img src="img/appubuntu.png" alt="Coin Box application icon on Ubuntu">
+                            <figcaption>Ubuntu</figcaption>
+                        </figure>
+                    </div>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        While the application is searching for the Coin Box, unplug and re-plug the device.
+                        <span class="alert">Please don’t insert any coins yet.</span>
+                    </p>
+                    <div class="icon-row-larger">
+                        <figure><img src="img/searching.png" alt="Application searching for Coin Box">
+                            <figcaption>Searching…</figcaption>
+                        </figure>
+                        <figure><img src="img/plug.png" alt="Unplugging and re-plugging the Coin Box">
+                            <figcaption>Quick re-plug</figcaption>
+                        </figure>
+                    </div>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        Once the Coin Box appears, click <strong>Enter Config Mode</strong>.
+                        <span class="alert">The box will ignore coins until it restarts.</span>
+                    </p>
+                    <figure><img src="img/found.png" alt="Coin Box found – Enter Config Mode"></figure>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        Pick an MP3 for the slot you want.
+                        <span class="alert">Keep it to 5 s or shorter.</span>
+                        The app shows how often each slot plays.
+                    </p>
+                    <figure><img src="img/upload.png" alt="Uploading sounds to slots"></figure>
+                </li>
+
+                <hr>
+                <li>
+                    <p>If you ever want the defaults back, hit <strong>Factory reset samples</strong>.</p>
+                    <figure><img src="img/factory.png" alt="Factory reset samples"></figure>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        All done? Click <strong>Exit and restart Coin Box</strong>. The box restarts and starts taking
+                        coins
+                        with your new sounds.
+                    </p>
+                    <figure><img src="img/exit.png" alt="Exit and restart Coin Box"></figure>
+                </li>
+            </ol>
+        </div>
+
+        <!-- German -->
+        <div id="de">
+            <h1>Sounds auf die Coin-Box laden</h1>
+
+            <ol>
+                <hr>
+                <li>
+                    <p>Melde dich am Feinwerkstatt-PC an (<em>Windows</em> oder <em>Ubuntu</em>).</p>
+                </li>
+
+                <hr>
+                <li>
+                    <p>Starte das Coin-Box-Programm.</p>
+                    <div class="icon-row">
+                        <figure><img src="img/appwin.png" alt="Coin-Box-Symbol unter Windows">
+                            <figcaption>Windows</figcaption>
+                        </figure>
+                        <figure><img src="img/appubuntu.png" alt="Coin-Box-Symbol unter Ubuntu">
+                            <figcaption>Ubuntu</figcaption>
+                        </figure>
+                    </div>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        Während die App sucht: kurz Stecker raus, wieder rein.
+                        <span class="alert">Wichtig: Jetzt noch keine Münzen einwerfen!</span>
+                    </p>
+                    <div class="icon-row-larger">
+                        <figure><img src="img/searching.png" alt="App sucht nach Coin-Box">
+                            <figcaption>Suchen…</figcaption>
+                        </figure>
+                        <figure><img src="img/plug.png" alt="Box kurz aus- und wieder einstecken">
+                            <figcaption>Stecker ziehen &amp; rein</figcaption>
+                        </figure>
+                    </div>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        Sobald die Box da ist, klicke <strong>Enter Config Mode</strong>.
+                        <span class="alert">Bis zum Neustart reagiert sie nicht auf Münzen.</span>
+                    </p>
+                    <figure><img src="img/found.png" alt="Coin-Box gefunden – Config-Modus"></figure>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        Such dir eine MP3 (max. 5 s) für den Slot aus.
+                        Unter jedem Slot steht, wie oft er drankommt.
+                    </p>
+                    <figure><img src="img/upload.png" alt="Sounds in Slots hochladen"></figure>
+                </li>
+
+                <hr>
+                <li>
+                    <p>Mit <strong>Factory reset samples</strong> holst du die Standard-Sounds zurück.</p>
+                    <figure><img src="img/factory.png" alt="Werkseinstellungen wiederherstellen"></figure>
+                </li>
+
+                <hr>
+                <li>
+                    <p>
+                        Fertig? Dann <strong>Exit and restart Coin Box</strong>. Die Box startet neu und nimmt wieder
+                        Münzen an –
+                        jetzt mit deinen Sounds.
+                    </p>
+                    <figure><img src="img/exit.png" alt="Box neu starten"></figure>
+                </li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const btn = document.getElementById('langToggle');
+        const en = document.getElementById('en');
+        const de = document.getElementById('de');
+
+        btn.addEventListener('click', () => {
+            const showGerman = en.style.display !== 'none';
+            en.style.display = showGerman ? 'none' : 'block';
+            de.style.display = showGerman ? 'block' : 'none';
+            btn.textContent = showGerman ? 'English' : 'Deutsch';
+        });
+    </script>
+</body>
+
+</html>
