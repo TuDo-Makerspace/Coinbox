@@ -1,0 +1,9 @@
+#include "esp_err.h"
+#include "esp_http_server.h"
+
+#ifndef OTA_H
+#define OTA_H
+
+esp_err_t ota_update_handler(httpd_req_t *req);
+
+#endif // OTA_H

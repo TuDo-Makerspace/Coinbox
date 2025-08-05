@@ -26,6 +26,8 @@
 #include "esp_littlefs.h"
 #include "esp_http_server.h"
 
+#include "ota.h"
+
 /* Max length a file path can have on storage */
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + CONFIG_LITTLEFS_OBJ_NAME_LEN)
 
@@ -544,6 +546,14 @@ esp_err_t start_ws_server(const char *base_path)
         .user_ctx  = server_data    // Pass server data as context
     };
     httpd_register_uri_handler(server, &file_delete);
+
+    httpd_uri_t ota_update = {
+        .uri = "/update",
+        .method = HTTP_POST,
+        .handler = ota_update_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &ota_update);
 
     return ESP_OK;
 }
