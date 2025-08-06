@@ -6,8 +6,8 @@
 	(paper "A4" portrait)
 	(title_block
 		(title "Coin Box")
-		(date "2025-07-20")
-		(rev "2.0")
+		(date "2025-08-06")
+		(rev "2.1")
 		(company "TuDo Makerspace")
 	)
 	(lib_symbols
@@ -1108,8 +1108,8 @@
 			(exclude_from_sim no)
 			(in_bom yes)
 			(on_board yes)
-			(property "Reference" "J"
-				(at 0 5.334 0)
+			(property "Reference" "J2"
+				(at 0 8.89 0)
 				(effects
 					(font
 						(size 1.27 1.27)
@@ -1117,14 +1117,14 @@
 				)
 			)
 			(property "Value" "Jack-DC"
-				(at 0 -5.08 0)
+				(at 0 6.35 0)
 				(effects
 					(font
 						(size 1.27 1.27)
 					)
 				)
 			)
-			(property "Footprint" ""
+			(property "Footprint" "Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical"
 				(at 1.27 -1.016 0)
 				(effects
 					(font
@@ -1252,7 +1252,7 @@
 							)
 						)
 					)
-					(number "1"
+					(number "2"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -1270,7 +1270,7 @@
 							)
 						)
 					)
-					(number "2"
+					(number "1"
 						(effects
 							(font
 								(size 1.27 1.27)
@@ -2202,304 +2202,6 @@
 			)
 			(embedded_fonts no)
 		)
-		(symbol "Transistor_FET:2N7000"
-			(pin_names
-				(hide yes)
-			)
-			(exclude_from_sim no)
-			(in_bom yes)
-			(on_board yes)
-			(property "Reference" "Q"
-				(at 5.08 1.905 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(justify left)
-				)
-			)
-			(property "Value" "2N7000"
-				(at 5.08 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(justify left)
-				)
-			)
-			(property "Footprint" "Package_TO_SOT_THT:TO-92_Inline"
-				(at 5.08 -1.905 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-						(italic yes)
-					)
-					(justify left)
-					(hide yes)
-				)
-			)
-			(property "Datasheet" "https://www.vishay.com/docs/70226/70226.pdf"
-				(at 5.08 -3.81 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(justify left)
-					(hide yes)
-				)
-			)
-			(property "Description" "0.2A Id, 200V Vds, N-Channel MOSFET, 2.6V Logic Level, TO-92"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "ki_keywords" "N-Channel MOSFET Logic-Level"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(property "ki_fp_filters" "TO?92*"
-				(at 0 0 0)
-				(effects
-					(font
-						(size 1.27 1.27)
-					)
-					(hide yes)
-				)
-			)
-			(symbol "2N7000_0_1"
-				(polyline
-					(pts
-						(xy 0.254 1.905) (xy 0.254 -1.905)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.254 0) (xy -2.54 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 2.286) (xy 0.762 1.27)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 0.508) (xy 0.762 -0.508)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 -1.27) (xy 0.762 -2.286)
-					)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 0.762 -1.778) (xy 3.302 -1.778) (xy 3.302 1.778) (xy 0.762 1.778)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 1.016 0) (xy 2.032 0.381) (xy 2.032 -0.381) (xy 1.016 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(circle
-					(center 1.651 0)
-					(radius 2.794)
-					(stroke
-						(width 0.254)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.54 2.54) (xy 2.54 1.778)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(circle
-					(center 2.54 1.778)
-					(radius 0.254)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(circle
-					(center 2.54 -1.778)
-					(radius 0.254)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type outline)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.54 -2.54) (xy 2.54 0) (xy 0.762 0)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 2.794 0.508) (xy 2.921 0.381) (xy 3.683 0.381) (xy 3.81 0.254)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-				(polyline
-					(pts
-						(xy 3.302 0.381) (xy 2.921 -0.254) (xy 3.683 -0.254) (xy 3.302 0.381)
-					)
-					(stroke
-						(width 0)
-						(type default)
-					)
-					(fill
-						(type none)
-					)
-				)
-			)
-			(symbol "2N7000_1_1"
-				(pin input line
-					(at -5.08 0 0)
-					(length 2.54)
-					(name "G"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "2"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at 2.54 5.08 270)
-					(length 2.54)
-					(name "D"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "3"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-				(pin passive line
-					(at 2.54 -5.08 90)
-					(length 2.54)
-					(name "S"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-					(number "1"
-						(effects
-							(font
-								(size 1.27 1.27)
-							)
-						)
-					)
-				)
-			)
-			(embedded_fonts no)
-		)
 		(symbol "power:GND"
 			(power)
 			(pin_numbers
@@ -2754,7 +2456,8 @@
 			(type solid)
 		)
 		(fill
-			(type outline)
+			(type color)
+			(color 0 0 0 0)
 		)
 		(uuid 781ac93b-d4e5-485d-b7e1-4421ce69f22e)
 	)
@@ -2821,7 +2524,8 @@
 			(type solid)
 		)
 		(fill
-			(type outline)
+			(type color)
+			(color 0 0 0 0)
 		)
 		(uuid a6b526a2-9864-40c9-b8d6-c4c37da766ab)
 	)
@@ -2882,7 +2586,8 @@
 			(type solid)
 		)
 		(fill
-			(type outline)
+			(type color)
+			(color 0 0 0 0)
 		)
 		(uuid aa3a83eb-1390-4860-ab9d-634150cd02a7)
 	)
@@ -2926,7 +2631,8 @@
 			(type solid)
 		)
 		(fill
-			(type outline)
+			(type color)
+			(color 0 0 0 0)
 		)
 		(uuid b186edba-81fa-46a5-bcf3-a76918172817)
 	)
@@ -2994,7 +2700,8 @@
 			(type solid)
 		)
 		(fill
-			(type outline)
+			(type color)
+			(color 0 0 0 0)
 		)
 		(uuid d4f51174-7a5a-4980-83b2-662c3734d1c8)
 	)
@@ -3021,7 +2728,7 @@
 		)
 		(uuid "8f8c0385-543b-48e9-a87b-7d3df9734c48")
 	)
-	(text "Coin Box Revision 2.0"
+	(text "Coin Box Revision 2.1"
 		(exclude_from_sim no)
 		(at 14.732 23.114 0)
 		(effects
@@ -3045,19 +2752,6 @@
 			)
 		)
 		(uuid "b21cc343-57b1-483d-a90d-ea5ea310b85d")
-	)
-	(text "The speaker stays muted via Q2 until\nthe first coin is inserted. After \ndetecting a coin, the system disables \nWi-Fi (which is used for device\nconfiguration) and unmutes the \nspeaker. This is done because Wi-Fi\nintroduces noticeable noise on the\nDAC output. For more details, refer\nto the firmware source code."
-		(exclude_from_sim no)
-		(at 154.686 128.27 0)
-		(effects
-			(font
-				(face "KiCad Font")
-				(size 1.27 1.27)
-				(thickness 0.1588)
-			)
-			(justify left)
-		)
-		(uuid "ea95f5bc-1827-4270-a47b-2e62450919c9")
 	)
 	(junction
 		(at 170.18 187.96)
@@ -3174,6 +2868,10 @@
 	(no_connect
 		(at 87.63 106.68)
 		(uuid "aca9c1dd-4bcb-4799-9fd8-04b0da43705d")
+	)
+	(no_connect
+		(at 87.63 109.22)
+		(uuid "ad7e0d91-3b35-43a8-b5ec-4bc3a655e5c0")
 	)
 	(no_connect
 		(at 129.54 109.22)
@@ -3413,16 +3111,6 @@
 	)
 	(wire
 		(pts
-			(xy 87.63 109.22) (xy 104.14 109.22)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "464b08da-32c0-4632-99d0-42bd1cbd0a92")
-	)
-	(wire
-		(pts
 			(xy 157.48 160.02) (xy 163.83 160.02)
 		)
 		(stroke
@@ -3443,7 +3131,7 @@
 	)
 	(wire
 		(pts
-			(xy 140.97 128.27) (xy 140.97 132.08)
+			(xy 140.97 115.57) (xy 140.97 119.38)
 		)
 		(stroke
 			(width 0)
@@ -3490,16 +3178,6 @@
 			(type default)
 		)
 		(uuid "5bacdb0d-968d-43aa-bd46-c0ab29018ea7")
-	)
-	(wire
-		(pts
-			(xy 140.97 115.57) (xy 140.97 118.11)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "5eeeda9c-56ef-49db-a11a-ad82b57097ee")
 	)
 	(wire
 		(pts
@@ -3570,16 +3248,6 @@
 			(type default)
 		)
 		(uuid "81b3f811-0399-4b50-b49b-a373c30a4239")
-	)
-	(wire
-		(pts
-			(xy 133.35 123.19) (xy 104.14 123.19)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "848fffec-d06b-49e9-939e-9fdac8c98897")
 	)
 	(wire
 		(pts
@@ -3730,16 +3398,6 @@
 			(type default)
 		)
 		(uuid "cc2fdeb6-3535-4839-86b4-6547b05b0789")
-	)
-	(wire
-		(pts
-			(xy 104.14 123.19) (xy 104.14 109.22)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "d007a285-4b9b-4740-86ec-2ea56ef91b3c")
 	)
 	(wire
 		(pts
@@ -4166,82 +3824,6 @@
 			(project ""
 				(path "/9253c832-1fb2-4ef4-b559-448e617d6971"
 					(reference "R3")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Transistor_FET:2N7000")
-		(at 138.43 123.19 0)
-		(unit 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "3734a89b-bd67-4ae2-a216-855dfb8a25f7")
-		(property "Reference" "Q2"
-			(at 144.78 121.9199 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Value" "2N7000"
-			(at 144.78 124.4599 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-			)
-		)
-		(property "Footprint" "Package_TO_SOT_THT:TO-92_Inline"
-			(at 143.51 125.095 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-					(italic yes)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Datasheet" "https://www.vishay.com/docs/70226/70226.pdf"
-			(at 143.51 127 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify left)
-				(hide yes)
-			)
-		)
-		(property "Description" "0.2A Id, 200V Vds, N-Channel MOSFET, 2.6V Logic Level, TO-92"
-			(at 138.43 123.19 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(hide yes)
-			)
-		)
-		(pin "1"
-			(uuid "ddad837e-1646-4db2-8e4c-89af14d7dd91")
-		)
-		(pin "3"
-			(uuid "b1021e70-30ab-4f84-a24b-81cf8565d924")
-		)
-		(pin "2"
-			(uuid "12ecd1e4-67f7-42f2-8460-2c5b47cd6e67")
-		)
-		(instances
-			(project ""
-				(path "/9253c832-1fb2-4ef4-b559-448e617d6971"
-					(reference "Q2")
 					(unit 1)
 				)
 			)
@@ -5092,7 +4674,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 140.97 132.08 0)
+		(at 140.97 119.38 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -5100,7 +4682,7 @@
 		(dnp no)
 		(uuid "94f7b347-5ac0-4583-999e-daa68e5c397f")
 		(property "Reference" "#PWR01"
-			(at 140.97 138.43 0)
+			(at 140.97 125.73 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5109,7 +4691,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 140.97 137.16 0)
+			(at 140.97 124.46 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5117,7 +4699,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 140.97 132.08 0)
+			(at 140.97 119.38 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5126,7 +4708,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 140.97 132.08 0)
+			(at 140.97 119.38 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5135,7 +4717,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 140.97 132.08 0)
+			(at 140.97 119.38 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -5174,7 +4756,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "C"
+		(property "Value" "100n"
 			(at 185.42 175.2599 0)
 			(effects
 				(font
@@ -5386,7 +4968,6 @@
 		(in_bom yes)
 		(on_board yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "add9a30c-e6c3-443b-acc6-f73b173f3514")
 		(property "Reference" "J2"
 			(at 22.86 74.93 0)
@@ -5737,7 +5318,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "Connector_JST:JST_XH_S3B-XH-A-1_1x03_P2.50mm_Horizontal"
+		(property "Footprint" "Connector_Wire:SolderWire-0.1sqmm_1x03_P3.6mm_D0.4mm_OD1mm"
 			(at 127 173.99 0)
 			(effects
 				(font

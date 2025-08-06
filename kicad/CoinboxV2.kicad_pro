@@ -54,10 +54,6 @@
       "diff_pair_dimensions": [],
       "drc_exclusions": [
         [
-          "hole_clearance|89773093|62063093|5dbec6aa-f75e-4717-946e-e7f50e37c229|6bbe3ec0-9db7-4df6-b5a0-d35a77e71a80",
-          ""
-        ],
-        [
           "missing_courtyard|57473093|65433280|4086df80-87c7-47f8-afa0-45051a9a646e|00000000-0000-0000-0000-000000000000",
           ""
         ],
