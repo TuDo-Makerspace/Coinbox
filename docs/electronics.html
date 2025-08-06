@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Assembling the Coin Box Electronics</title>
+
+    <!-- Prevent mobile “zoom-out” -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Pixel-style heading font -->
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet" />
+
+    <style>
+        /* ---------- Page basics ---------- */
+        :root {
+            --card-padding: clamp(1.25rem, 4vw, 4rem);
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            /* kill accidental horizontal scroll */
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1080px;
+            /* centre on wide screens */
+            margin: 2rem auto;
+            background: url("img/background.png") center/cover no-repeat;
+        }
+
+        p {
+            font-size: large;
+        }
+
+        /* ---------- Card ---------- */
+        .box {
+            background: #fff;
+            padding: var(--card-padding);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, .1);
+        }
+
+        h1 {
+            text-align: center;
+            margin: 0 0 2rem;
+            font: 600 2.5rem 'Pixelify Sans', sans-serif;
+        }
+
+        h2 {
+            font: 600 1.6rem 'Pixelify Sans', sans-serif;
+            margin-top: 3rem;
+        }
+
+        h3 {
+            font: 600 1.25rem 'Pixelify Sans', sans-serif;
+            margin: 2rem 0 1rem;
+        }
+
+        /* ---------- Lists & images ---------- */
+        ul,
+        ol {
+            padding-left: 1.3rem;
+        }
+
+        ul li,
+        ol li {
+            margin: .8rem 0;
+        }
+
+        figure {
+            margin: 1rem auto;
+            text-align: center;
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .08);
+        }
+
+        figure figcaption {
+            font-size: .9rem;
+            color: #666;
+            margin-top: .5rem;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 3rem 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <h1>Assembling the Coin Box Electronics</h1>
+
+        <figure>
+            <img src="img/Assembly.png" alt="Coin Box Assembly"
+                style="max-width: 50%; border: 0px; border-radius: 0px; box-shadow: 0 0px 0px rgba(0, 0, 0, 0);">
+        </figure>
+
+        <!-- ------------------------------------------------------------------ -->
+        <h2 id="electronics">Electronics</h2>
+
+        <h3 id="components-required">Components&nbsp;Required</h3>
+        <ul>
+            <li><a href="https://www.espressif.com/en/products/devkits/esp32-devkitc/overview">ESP32 Dev Kit C</a> (or
+                similar)</li>
+            <li><a href="https://www.amazon.de/s?k=PAM8403">PAM8403 Audio Amplifier&nbsp;Board</a></li>
+            <li><a href="https://www.amazon.de/s?k=3w+speaker">Speaker (4 Ω / 8 Ω, ≥3 W)</a></li>
+            <li>1x 10nf Ceramic Capacitor (<code>Capacitor_THT:C_Disc_D6.0mm_W2.5mm_P5.00mm</code>)</li>
+            <li>1x 5mm RED LED</li>
+            <li>1x 5mm Photodiode</li>
+            <li>1x DC Jack 2.1mm (<code>DC_Jack:DC_Jack_2.1mm_P5.50mm</code>)</li>
+            <li>1x JST PH Connect 1x02 (<code>JST_PH_B2B-XH-A_1x02 P2.00mm Vertical</code>)</li>
+            <li>1x JST XH Connector 1x03 (<code>JST_XH_B3B-XH-A_1x03 P2.50mm Vertical</code>)</li>
+            <li>1x JST XH Connector 1x02 (<code>JST_XH_B2B-XH-A_1x02 P2.50mm Vertical</code>)</li>
+            <li>1x SMD Resistor 220Ω (<code>R_1206_3216Metric</code>)</li>
+            <li>1x SMD Resistor 100kΩ (<code>R_1206_3216Metric</code>)</li>
+            <li>1x SMD Capacitor 100nF (<code>C_1206_3216Metric</code>)</li>
+            <li>1x THT Resistor 3.3kΩ (<code>R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm</code>)</li>
+            <li>1x JST XH 1x03 to JST XH 1x03 cable to connect the sensor board to the main board</li>
+            <li>1x JST XH 1x02 cable to connect the speaker to the main board</li>
+            <li>1x JST PH 1x02 cable to connect the DC jack to the main board</li>
+            <li>3mm Screws (20x) &amp; Nuts (5x) to mount the electronics in the enclosure</li>
+        </ul>
+
+        <h3 id="pcbs">PCBs</h3>
+        <p>
+            The electronics are split across two custom PCBs. A Main Board hosting the ESP32 and
+            PAM8403 amplifier:
+        </p>
+        <figure>
+            <img src="img/mainboard.png" alt="Main board with ESP32 and PAM8403" style="max-width: 500px">
+            <figcaption>Main Board</figcaption>
+        </figure>
+        <p>
+            And a Sensor Board carrying the photodiode and LED:
+        </p>
+        <figure>
+            <img src="img/sensor.png" alt="Sensor board with photodiode and LED" style="max-width: 500px">
+            <figcaption>Sensor Board</figcaption>
+        </figure>
+        <p>
+            The complete KiCad project for both boards is included in the <code>kicad/</code> folder of the repository.
+            The PCBs were designed for self-etching, but you can also order them from a PCB manufacturer.
+        </p>
+
+        <!-- ------------------------------------------------------------------ -->
+        <h2 id="software">Software</h2>
+
+        <!-- ------------------------------------------------------------------ -->
+        <h2 id="flashing-the-arduino">Flashing the ESP32</h2>
+        <ol>
+            <li>Install the <strong>PlatformIO</strong> extension in VS Code.</li>
+            <li>Open the project folder via <em>File → Open Folder</em>.</li>
+            <li>Connect the ESP32 devboard USB.</li>
+            <li>Hit <em>Upload</em> (arrow icon). PlatformIO compiles &amp; flashes automatically.</li>
+        </ol>
+
+        <figure>
+            <img src="img/pioupload.png" alt="PlatformIO Upload Button">
+            <figcaption>PlatformIO Upload Button</figcaption>
+        </figure>
+
+        <!-- ------------------------------------------------------------------ -->
+        <h2 id="electronics-enclosure">Electronics Enclosure</h2>
+
+        <h3 id="enclosure-components">Enclosure Components</h3>
+        <p>The enclosure consists of three parts:</p>
+        <ul>
+            <li><a href="enclosure/Back.3mf">Back Part</a> - mounts the main board </li>
+            <li><a href="enclosure/Front.3mf">Front Part</a> - holds the speaker &amp; sensor</li>
+            <li><a href="enclosure/Lid.3mf">Lid</a> - closes everything up</li>
+        </ul>
+
+        <p>They were 3D Printed with a Prusa i3 MK3 using PLA filament.</p>
+
+        <h3 id="assembly-instructions">Assembly Instructions</h3>
+
+        <p>
+            This section provides a short guide for assembling the electronics into the enclosure.
+            It assumes that a DC jack has already been installed in the wooden box.
+        </p>
+
+        <ol>
+            <li>Mount the main board to the back part using 3mm screws and nuts.</li>
+            <li>Mount the speaker to the front part using 3mm screws and nuts.</li>
+            <li>Mount the sensor board to the front part using a 3mm screw and a nut.</li>
+            <li>Connect the sensor board to the main board using a JST XH 1x03 cable.</li>
+            <li>Connect the speaker to the main board using a JST XH 1x02 cable.</li>
+            <li>Connect the DC jack to the main board using a JST PH 1x02 cable.</li>
+            <li>Mount the front part to the back part using 3mm screws.</li>
+            <li>Place the lid on top and secure it with screws.</li>
+            <li>Slide the enclosure into the coin box.</li>
+            <li>The bottom of the coin box has two holes. Insert two wooden screws to secure the enclosure.</li>
+        </ol>
+
+
+    </div>
+</body>
+
+</html>

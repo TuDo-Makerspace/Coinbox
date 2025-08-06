@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Building the Coin Box Enclosure</title>
+
+    <!-- Prevent mobile “zoom‑out” -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Pixel‑style heading font -->
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet" />
+
+    <style>
+        /* ---------- Page basics ---------- */
+        :root {
+            --card-padding: clamp(1.25rem, 4vw, 4rem);
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            /* eliminate accidental horizontal scroll */
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1080px;
+            /* centre on wide screens */
+            margin: 2rem auto;
+            background: url("img/background.png") center/cover no-repeat;
+        }
+
+        p {
+            font-size: large;
+        }
+
+        /* ---------- Card ---------- */
+        .box {
+            background: #fff;
+            padding: var(--card-padding);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin: 0 0 2rem;
+            font: 600 2.5rem 'Pixelify Sans', sans-serif;
+        }
+
+        h2 {
+            font: 600 1.6rem 'Pixelify Sans', sans-serif;
+            margin-top: 3rem;
+        }
+
+        h3 {
+            font: 600 1.2rem 'Pixelify Sans', sans-serif;
+            margin: 2.5rem 0 1rem;
+        }
+
+        /* ---------- Lists, alerts, images ---------- */
+        ol {
+            padding-left: 1.2rem;
+        }
+
+        ol>li {
+            margin: 1.5rem 0;
+        }
+
+        figure {
+            margin: 1rem auto;
+            text-align: center;
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+        }
+
+        figure figcaption {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 0.5rem;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 3rem 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <h1>Building the Coin&nbsp;Box&nbsp;Enclosure</h1>
+
+        <h2 id="building-the-box">Building the Box</h2>
+
+        <h3 id="step-1-cut-the-wood">Step&nbsp;1. Cut the Wood</h3>
+        <p>Cut two slightly larger pieces (<em>top&nbsp;&amp;&nbsp;bottom</em>) and four slightly smaller pieces
+            (<em>the sides</em>). Exact dimensions depend on your desired box size.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153499010-4d637198-48a1-4b8a-b381-e79d648df92e.jpg"
+                alt="Cutting wood">
+            <figcaption>Freshly cut panels for the coin box</figcaption>
+        </figure>
+
+        <h3 id="step-2-glue-the-pieces-together">Step&nbsp;2. Glue the Pieces Together</h3>
+        <p>Glue the six panels to form a box. Ensure all edges are flush and corners perfectly square.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153499739-e9e8fa30-efbd-40df-8945-f49845dbe8e0.jpeg"
+                alt="Gluing the panels">
+            <figcaption>Clamping the joints while the glue cures</figcaption>
+        </figure>
+
+        <h3 id="step-3-secure-the-bottom">Step&nbsp;3. Secure the Bottom</h3>
+        <p>Reinforce the bottom with a handful of countersunk screws or nails. Glue alone can work, but fasteners add
+            durability.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153499869-d872f6ef-bdfb-473d-8788-0da4efaf0446.jpeg"
+                alt="Securing bottom with screws">
+            <figcaption>Adding screws for extra strength</figcaption>
+        </figure>
+
+        <h3 id="step-4-lid-slit">Step&nbsp;4. Lid Slit</h3>
+        <p>Cut a coin slot through the lid. Ours is <code>X&nbsp;mm × Y&nbsp;mm</code>—wide enough for the biggest coin
+            you expect.</p>
+        <!-- TODO: Add image of lid slit when available -->
+
+        <h3 id="step-5-hole-for-dc-jack">Step&nbsp;5. Hole for DC Jack</h3>
+        <p>Drill a hole on one side for the DC power jack. We used a PCB‑mount jack glued in place and soldered a JST
+            lead for easy disconnection.</p>
+
+        <h3 id="step-6-paint-the-base-coat">Step&nbsp;6. Paint the Base Coat</h3>
+        <p>Apply a white acrylic base coat. It makes the final colours pop and seals the wood.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153500396-c1f125a4-5aea-4728-abd4-97b094f3d93c.jpeg"
+                alt="White base coat">
+            <figcaption>Let the base coat dry thoroughly before the next step</figcaption>
+        </figure>
+
+        <h3 id="step-7-draw-the-pixel-grid">Step&nbsp;7. Draw the Pixel Grid</h3>
+        <p>Lightly sketch a <strong>16&nbsp;× 16</strong> pixel grid on every visible face. This guides the Mario
+            Question‑Block artwork.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153502027-1c454a92-3491-416e-a708-a103b61ad5f6.jpeg"
+                alt="Drawing pixel grid">
+            <figcaption>16&nbsp;×&nbsp;16 grid laid out in pencil</figcaption>
+        </figure>
+
+        <h3 id="step-8-paint-the-pixel-art">Step&nbsp;8. Paint the Pixel Art</h3>
+        <p>Fill the grid with bright colours to create the iconic Question Block.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153502996-5a992c59-d1f3-417b-be92-9eab55340730.jpeg"
+                alt="Painting pixel art">
+            <figcaption>Layering yellow, orange, and brown for that 8‑bit look</figcaption>
+        </figure>
+
+        <h3 id="step-9-magnets-for-the-lid">Step&nbsp;9. Magnets for the Lid</h3>
+        <p>Drill shallow holes in each corner of the box and lid, then epoxy small magnets inside. The lid now snaps on
+            and off for maintenance.</p>
+        <figure>
+            <img src="https://user-images.githubusercontent.com/51839738/153504756-97e27ee4-8590-4f95-a772-9cb7b98df5ab.jpg"
+                alt="Finished coin box">
+            <figcaption>Finished and ready for coins!</figcaption>
+        </figure>
+    </div>
+</body>
+
+</html>
