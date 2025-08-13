@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Coin Box – Hardware Documentation</title>
+
+    <!-- Prevent mobile zoom-out -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Pixel-style heading font -->
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=swap" rel="stylesheet" />
+
+    <style>
+        /* ---------- Page basics ---------- */
+        :root {
+            --card-padding: clamp(1.25rem, 4vw, 4rem);
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1080px;
+            /* centre on wide screens */
+            margin: 2rem auto;
+            background: url("img/background.png") center/cover no-repeat;
+        }
+
+        p {
+            font-size: large;
+        }
+
+        /* ---------- Card ---------- */
+        .box {
+            background: #fff;
+            padding: var(--card-padding);
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, .1);
+        }
+
+        h1 {
+            text-align: center;
+            margin: 0 0 2rem;
+            font: 600 2.5rem 'Pixelify Sans', sans-serif;
+        }
+
+        h2 {
+            font: 600 1.6rem 'Pixelify Sans', sans-serif;
+            margin-top: 3rem;
+        }
+
+        /* ---------- Images ---------- */
+        figure {
+            margin: 1rem auto;
+            text-align: center;
+        }
+
+        figure img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .08);
+        }
+
+        figure figcaption {
+            font-size: .9rem;
+            color: #666;
+            margin-top: .5rem;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px solid #ddd;
+            margin: 3rem 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <h1>Hardware Documentation</h1>
+
+        <p>The coinbox hardware is rather simple, consisting of two main components: the main board and the sensor
+            board.</p>
+
+        <!-- ------------------------------------------------------------- -->
+        <h2 id="main-board">Main board</h2>
+        <figure>
+            <img src="img/mainschem.png" alt="Main board schematic">
+        </figure>
+        <p>
+            The main board carries the ESP32 dev board, the PAM8403 amplifier module, and a simple low-pass filter. It
+            accepts 5V
+            input and provides headers for the sensor board and speaker. The ESP32 handles both sensor data processing
+            and audio
+            playback via its DAC (note that some ESP32 variants, such as the ESP32-C3, lack a DAC). The PAM8403 drives
+            the 4Ω / 3W
+            speaker, while the low-pass filter tames high-frequency noise from the DAC output. Because the ESP32's DAC
+            is not
+            optimised for Hi-Fi audio, raw playback quality is inherently limited.
+        </p>
+
+        <!-- ------------------------------------------------------------- -->
+        <h2 id="sensor-board">Sensor board</h2>
+        <figure>
+            <img src="img/sensorschem.png" alt="Sensor board schematic">
+        </figure>
+        <p>
+            The sensor board is very simple: it consists of a red LED and a photodiode.
+            An IR LED with a matching photodiode would generally be more suitable, but we used what was available in the
+            workshop.
+            The LED is powered continuously, while the photodiode is placed in series with a resistor to form a voltage
+            divider.
+            The divider's midpoint provides an output voltage that is read by the ESP32's ADC.
+        </p>
+        <p>
+            The principle is straightforward: the more light the photodiode receives, the more current flows through it,
+            and the lower the output voltage becomes. With the coinbox closed, only little light reaches the photodiode,
+            resulting in a relatively high voltage. When a coin passes through the slit, the LED's light is reflected
+            off the coin
+            and onto the photodiode, causing the measured voltage to drop sharply. This change is used to detect coins.
+        </p>
+        <p>
+            While this describes the basic principle of coin detection, it should be noted that the ESP32 applies
+            additional filtering and signal processing
+            to the raw sensor signal to make it more robust against noise and false positives. These steps are explained
+            in more detail in the software documentation.
+        </p>
+    </div>
+</body>
+
+</html>
