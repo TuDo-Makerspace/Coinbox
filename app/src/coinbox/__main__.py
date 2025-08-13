@@ -30,7 +30,7 @@ import importlib.resources as res
 import sys, tempfile
 
 from pathlib import Path
-from pydub import AudioSegment
+from pydub import AudioSegment, silence
 from PySide6 import QtSvg
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QSize, QObject, QThread
 from PySide6.QtGui import QPixmap, QIcon
@@ -44,9 +44,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QStackedWidget,
     QMessageBox,
+    QCheckBox,
 )
-from pathlib import Path
-from pydub import AudioSegment, silence
 
 COINBOX_IP = "192.168.0.31"  # Static IP of the Coinbox
 
@@ -75,13 +74,12 @@ def path(rel: str) -> Path:
 
 SILENCE_THRESH = -50  # dBFS.  Higher = less aggressive trimming
 CHUNK_MS = 10  # Analysis granularity for silence detect
-# TARGET_PEAK_DB = -0.5  # Desired peak after normalisation
 MAX_LENGTH_MS = 5_000  # 5 seconds
 TARGET_LUFS = -16.0
 CUTOFF_HZ = 1000
 
 
-def strip_silence(seg):
+def strip_silence(seg: AudioSegment) -> AudioSegment:
     lead = silence.detect_leading_silence(
         seg, silence_threshold=SILENCE_THRESH, chunk_size=CHUNK_MS
     )
@@ -92,46 +90,43 @@ def strip_silence(seg):
 
 
 def normalize_lufs(seg: AudioSegment, target_lufs: float = TARGET_LUFS) -> AudioSegment:
-    # 1. pydub ➜ np.float32 array in range [-1.0, 1.0)
+    # pydub ➜ np.float32 array in range [-1.0, 1.0)
     samples = np.array(seg.get_array_of_samples()).astype(np.float32)
     peak = float(1 << (8 * seg.sample_width - 1))
     samples /= peak
 
-    # 2. measure loudness
-    meter = pyln.Meter(seg.frame_rate)  # uses true‑peak by default
+    meter = pyln.Meter(seg.frame_rate)  # true-peak
     loudness = meter.integrated_loudness(samples)
 
-    # 3. loudness offset
     gain = target_lufs - loudness  # dB to add (±)
     return seg.apply_gain(gain)
 
 
-def mp3tosample(inp, out):
+def mp3tosample(
+    inp, out, enable_hp: bool = True, enable_lufs: bool = True, enable_trim: bool = True
+):
     audio = AudioSegment.from_file(inp)
 
-    # 1.  Trim silence
-    audio = strip_silence(audio)
+    # 1) Optional auto-trim silence at start/end
+    if enable_trim:
+        audio = strip_silence(audio)
 
-    # 2.  Trim to 5 s
+    # 2) Trim to 5 s
     if len(audio) > MAX_LENGTH_MS:
         audio = audio[:MAX_LENGTH_MS]
 
-    # # 3.  Peak-normalise to -0.5 dB
-    # change = TARGET_PEAK_DB - audio.max_dBFS  # dB to add (may be + or –)
-    # audio = audio.apply_gain(change)
+    # 3) Optional high-pass to remove low rumble
+    if enable_hp:
+        audio = audio.high_pass_filter(CUTOFF_HZ)
 
-    # 3. High-pass filter to remove low rumble
-    audio = audio.high_pass_filter(CUTOFF_HZ)
+    # 4) Optional loudness normalisation to -16 LUFS
+    if enable_lufs:
+        audio = normalize_lufs(audio, TARGET_LUFS)
 
-    # 4.  Loudness normalisation to -16 LUFS
-    audio = normalize_lufs(audio, TARGET_LUFS)
+    # 5) Format conversion: mono, 16 kHz, 8-bit unsigned PCM
+    audio = audio.set_frame_rate(16_000).set_channels(1).set_sample_width(1)
 
-    # 5.  Format conversion: mono, 16 kHz, 8-bit unsigned PCM
-    audio = (
-        audio.set_frame_rate(16_000).set_channels(1).set_sample_width(1)
-    )  # 1 byte = 8-bit
-
-    # 6.  Export. pydub hands off to ffmpeg; the extra parameter forces pcm_u8
+    # 6) Export (force pcm_u8)
     audio.export(out, format="wav", parameters=["-acodec", "pcm_u8"])
 
     print(
@@ -233,7 +228,7 @@ class FoundScreen(QWidget):
 
         btn = QPushButton()
         btn.setIconSize(QSize(96, 96))
-        btn.setIcon(QPixmap(path("icons/gear.svg")))
+        btn.setIcon(QIcon(QPixmap(path("icons/gear.svg"))))
         btn.setFixedSize(120, 120)
         btn.clicked.connect(self.configure.emit)
 
@@ -265,6 +260,27 @@ class ConfigScreen(QWidget):
         font.setBold(True)
         title.setFont(font)
 
+        # Processing options (default ON)
+        opts_row = QHBoxLayout()
+        self.chk_trim = QCheckBox("Auto-trim silence")
+        self.chk_trim.setChecked(True)
+        self.chk_trim.setToolTip("Remove leading/trailing silence before export.")
+        self.chk_hp = QCheckBox("High-pass filter (1 kHz)")
+        self.chk_hp.setChecked(True)
+        self.chk_hp.setToolTip("Remove low frequencies below ~1 kHz.")
+
+        self.chk_lufs = QCheckBox("Normalize to -16 LUFS")
+        self.chk_lufs.setChecked(True)
+        self.chk_lufs.setToolTip("Loudness normalization to target -16 LUFS.")
+
+        opts_row.addStretch(1)
+        opts_row.addWidget(self.chk_trim)
+        opts_row.addSpacing(24)
+        opts_row.addWidget(self.chk_hp)
+        opts_row.addSpacing(24)
+        opts_row.addWidget(self.chk_lufs)
+        opts_row.addStretch(1)
+
         button_specs = [
             ("1", "70% probability"),
             ("2", "20% probability"),
@@ -285,6 +301,7 @@ class ConfigScreen(QWidget):
 
         lay = QVBoxLayout(self)
         lay.addWidget(title)
+        lay.addLayout(opts_row)  # add options row
         lay.addStretch(1)
         lay.addLayout(btn_row)
         lay.addStretch(1)
@@ -306,17 +323,22 @@ class ConfigScreen(QWidget):
         return box
 
     def _upload_sample(self, slot: int):
-        path, _ = QFileDialog.getOpenFileName(
+        file_path, _ = QFileDialog.getOpenFileName(
             self, f"Select MP3 for slot {slot}", str(Path.home()), "MP3 files (*.mp3)"
         )
 
-        if not path:
+        if not file_path:
             return
 
-        # Convert MP3 to trimmed U8 PCM 16 kHz WAV
         out_path = Path(tempfile.gettempdir()) / f"coinbox_slot{slot}.wav"
         try:
-            mp3tosample(path, out_path)
+            mp3tosample(
+                file_path,
+                out_path,
+                enable_hp=self.chk_hp.isChecked(),
+                enable_lufs=self.chk_lufs.isChecked(),
+                enable_trim=self.chk_trim.isChecked(),
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to convert MP3: {e}")
             return
@@ -375,7 +397,7 @@ class ConfigScreen(QWidget):
         exited = True  # Set the flag to indicate we exited config mode
         try:
             requests.get(f"http://{COINBOX_IP}/restart", timeout=3)
-        except requests.RequestException as err:
+        except requests.RequestException:
             QMessageBox.critical(
                 self,
                 "Failed to exit config mode",
@@ -408,8 +430,6 @@ class MainWindow(QWidget):
 
         lay = QVBoxLayout(self)
         lay.addWidget(self.stack)
-
-        # QApplication.instance().aboutToQuit.connect(_restart_coinbox)
 
         # wiring
         self.search.found.connect(lambda: self.stack.setCurrentIndex(1))
