@@ -27,7 +27,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #define SSID "TUDOMakerspace"
-#define PASSWORD "SECRET"
+#define PASSWORD "diyordie"
 #define STATIC_IP 192, 168, 0, 31
 #define WIFI_CONNECT_TIMEOUT 5000 // ms
 #define BOOT_TIME 2
@@ -50,7 +50,7 @@
 
 #define DAC_PIN 25                                  // Pin used for audio output
 #define SAMPLE_RATE 16000                           // Sample rate (only used for sample size calculation)
-#define MAX_DURATION 5                              // Maximum duration of a sample in seconds
+#define MAX_DURATION 3                              // Maximum duration of a sample in seconds
 #define SAMPLE_SIZE (SAMPLE_RATE * MAX_DURATION)    // Maximum sample size in bytes (16000 samples * 2 bytes/sample = 32000 bytes)
 #define N_SAMPLES 3                                 // Number of samples (probability decreases with higher index)
 #define PROBABILITY_MAIN_SAMPLE 70                  // Probability of the main sample (sample 0). Remaining probability is distributed among the other samples.
