@@ -11,27 +11,6 @@
       box-sizing: border-box;
     }
 
-    /* Navbar styling */
-    nav {
-      background: #333;
-      padding: 1em;
-      display: flex;
-      justify-content: center;
-    }
-    nav a {
-      color: #fff;
-      text-decoration: none;
-      margin: 0 1em;
-      padding: 0.5em 1em;
-      border-radius: 4px;
-      font-weight: bold;
-      transition: background 0.2s;
-    }
-    nav a:hover,
-    nav a.active {
-      background: #555;
-    }
-
     /* Page content */
     .content {
       padding: 2em;
@@ -41,11 +20,8 @@
   </style>
 </head>
 <body>
-  <nav>
-    <a href="/" class="active">Coinbox</a>
-    <a href="/file-server">File Server</a>
-    <a href="/mt">Maintenance</a>
-  </nav>
+  <div id="navbar"></div>
+  <script src="/navbar.js"></script>
 
   <div class="content">
     <h1>Welcome to your Coinbox</h1>

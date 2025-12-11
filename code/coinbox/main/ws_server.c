@@ -14,6 +14,8 @@
 #include "ws_server.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
 #include <sys/param.h>
 #include <sys/unistd.h>
 #include <sys/stat.h>
@@ -92,6 +94,16 @@ static esp_err_t http_resp_mt_html(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t http_resp_navbar_js(httpd_req_t *req)
+{
+    extern const unsigned char navbar_js_start[] asm("_binary_navbar_js_start");
+    extern const unsigned char navbar_js_end[] asm("_binary_navbar_js_end");
+    const size_t navbar_js_size = (navbar_js_end - navbar_js_start);
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_send(req, (const char *)navbar_js_start, navbar_js_size);
+    return ESP_OK;
+}
+
 /* Send HTTP response with a run-time generated html consisting of
  * a list of all files and folders under the requested path.
  * In case of SPIFFS this returns empty list when path is any
@@ -123,7 +135,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
     extern const unsigned char upload_script_end[]   asm("_binary_upload_script_html_end");
     const size_t upload_script_size = (upload_script_end - upload_script_start);
 
-    /* Add file upload form and script which on execution sends a POST request to /upload */
+    /* Add file upload form and script which on execution sends a POST request to /file-server/<path> */
     httpd_resp_send_chunk(req, (const char *)upload_script_start, upload_script_size);
 
     /* Send file-list table definition and column labels */
@@ -166,10 +178,10 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, "</td><td>");
         httpd_resp_sendstr_chunk(req, entrysize);
         httpd_resp_sendstr_chunk(req, "</td><td>");
-        httpd_resp_sendstr_chunk(req, "<form method=\"post\" action=\"/delete");
+        httpd_resp_sendstr_chunk(req, "<form method=\"get\" action=\"");
         httpd_resp_sendstr_chunk(req, req->uri);
         httpd_resp_sendstr_chunk(req, entry->d_name);
-        httpd_resp_sendstr_chunk(req, "\"><button type=\"submit\">Delete</button></form>");
+        httpd_resp_sendstr_chunk(req, "?delete=1\"><button type=\"submit\">Delete</button></form>");
         httpd_resp_sendstr_chunk(req, "</td></tr>\n");
     }
     closedir(dir);
@@ -253,10 +265,18 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
         return ESP_FAIL;
     }
-    ESP_LOGE(TAG, "Fileserver found : %s, filename: %s, filenamestrlen: %c", filepath, filename, filename[strlen(filename) - 1]);
+    size_t filename_len = strlen(filename);
+    char filename_last_char = filename_len ? filename[filename_len - 1] : '\0';
+    ESP_LOGE(TAG, "Fileserver found : %s, filename: %s, filenamestrlen: %c", filepath, filename,
+             filename_last_char ? filename_last_char : ' ');
 
-    if (filename[strlen(filename) - 1] == '/') {
-        return http_resp_index_html(req);
+    if (filename_len == 0) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Trailing slash required");
+        return ESP_FAIL;
+    }
+
+    if (filename_last_char == '/') {
+        return http_resp_dir_html(req, filepath);
     }
     
     if (stat(filepath, &file_stat) == -1) {
@@ -266,16 +286,10 @@ static esp_err_t download_get_handler(httpd_req_t *req)
             return index_html_get_handler(req);
         } else if (strcmp(filename, "/favicon.ico") == 0) {
             return favicon_get_handler(req);
+        } else if (strcmp(filename, "/navbar.js") == 0) {
+            return http_resp_navbar_js(req);
         } else if (strcmp(filename, "/mt") == 0) {
             return http_resp_mt_html(req);
-        } else if (strcmp(filename, "/file-server/") == 0) {
-            ESP_LOGE(TAG, "Fileserver found : %s, filename: %s", filepath, filename);
-            /* Remove "file-server" from the filepath */
-            /*char *file_server_pos = strstr(filepath, "/file-server");
-            if (file_server_pos) {
-                memmove(file_server_pos, file_server_pos + strlen("/file-server"), strlen(file_server_pos + strlen("/file-server")) + 1);
-            }*/
-            return http_resp_dir_html(req, filepath);
         }
         ESP_LOGE(TAG, "Failed to stat file : l%sl", filepath);
         /* Respond with 404 Not Found */
@@ -336,18 +350,20 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     FILE *fd = NULL;
     struct stat file_stat;
 
-    /* Skip leading "/upload" from URI to get filename */
+    /* Skip leading "/file-server" from URI to get filename */
     /* Note sizeof() counts NULL termination hence the -1 */
     const char *filename = get_path_from_uri(filepath, ((struct file_server_data *)req->user_ctx)->base_path,
-                                             req->uri + sizeof("/upload") - 1, sizeof(filepath));
+                                             req->uri + sizeof("/file-server") - 1, sizeof(filepath));
     if (!filename) {
         /* Respond with 500 Internal Server Error */
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
         return ESP_FAIL;
     }
 
-    /* Filename cannot have a trailing '/' */
-    if (filename[strlen(filename) - 1] == '/') {
+    size_t filename_len = strlen(filename);
+
+    /* Filename must exist and cannot have a trailing '/' */
+    if (filename_len == 0 || filename[filename_len - 1] == '/') {
         ESP_LOGE(TAG, "Invalid filename : %s", filename);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Invalid filename");
         return ESP_FAIL;
@@ -520,6 +536,18 @@ esp_err_t start_ws_server(const char *base_path)
         return ESP_FAIL;
     }
 
+    httpd_uri_t root_index = {
+        .uri       = "/",
+        .method    = HTTP_GET,
+        .handler   = http_resp_index_html,
+        .user_ctx  = NULL
+    };
+    httpd_uri_t navbar_js = {
+        .uri       = "/navbar.js",
+        .method    = HTTP_GET,
+        .handler   = http_resp_navbar_js,
+        .user_ctx  = NULL
+    };
     /* URI handler for getting uploaded files */
     httpd_uri_t file_download = {
         .uri       = "/file-server/*",  // Match all URIs of type /path/to/file
@@ -527,11 +555,13 @@ esp_err_t start_ws_server(const char *base_path)
         .handler   = download_get_handler,
         .user_ctx  = server_data    // Pass server data as context
     };
+    httpd_register_uri_handler(server, &root_index);
+    httpd_register_uri_handler(server, &navbar_js);
     httpd_register_uri_handler(server, &file_download);
 
-    /* URI handler for uploading files to server */
+    /* URI handler for uploading files to server (same path space as downloads) */
     httpd_uri_t file_upload = {
-        .uri       = "/upload/*",   // Match all URIs of type /upload/path/to/file
+        .uri       = "/file-server/*",   // Match all URIs of type /file-server/path/to/file
         .method    = HTTP_POST,
         .handler   = upload_post_handler,
         .user_ctx  = server_data    // Pass server data as context
@@ -554,6 +584,21 @@ esp_err_t start_ws_server(const char *base_path)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &ota_update);
+
+    httpd_uri_t mt_page = {
+        .uri = "/mt",
+        .method = HTTP_GET,
+        .handler = http_resp_mt_html,
+        .user_ctx = NULL
+    };
+    httpd_uri_t mt_page_slash = {
+        .uri = "/mt/",
+        .method = HTTP_GET,
+        .handler = http_resp_mt_html,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &mt_page);
+    httpd_register_uri_handler(server, &mt_page_slash);
 
     return ESP_OK;
 }
