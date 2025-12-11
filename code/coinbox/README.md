@@ -1,20 +1,20 @@
 # Coinbox
 
 ## IO Configuration
-| GPIO | Mode    | Function                           |
-|------|---------|------------------------------------|
-| IO21 | O ???   | Mute digital to analog converter   |
-| IO22 | O ???   | Mute amplifier                     |
-| IO23 | I ???   | Laser receiver                     |
-| IO17 | O       | I2S Data                           |
-| IO18 | O       | I2S LRCK                           |
-| IO19 | O       | I2S BCK                            |
-| IO2  | I       | Hall lid sensor                    |
+| GPIO | Mode    | Function                                |
+|------|---------|-----------------------------------------|
+| IO21 | O S_PD  | Mute digital to analog converter if low |
+| IO22 | O H_PU  | Mute amplifier if high                  |
+| IO23 | I ???   | Laser receiver                          |
+| IO17 | O       | I2S Data                                |
+| IO18 | O       | I2S LRCK                                |
+| IO19 | O       | I2S BCK                                 |
+| IO2  | I       | Hall lid sensor                         |
 
 Mode: `XX;X_XX`
 - I: Input
 - O: Output
-- ;
+- 
 - H: Hardware
 - S: Software
 - _
