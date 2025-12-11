@@ -13,13 +13,13 @@
 */
 
 #include "esp_event.h"
-#include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_err.h"
 #include "nvs_flash.h"
 #include "ws_server.h"
 #include "network.h"
 #include "mount.h"
+#include "logger.h"
 
 
 /* This example demonstrates how to create file server
@@ -31,7 +31,7 @@ static const char *TAG = "example";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Starting example");
+    logger_logi(TAG, "Starting example");
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -44,5 +44,5 @@ void app_main(void)
 
     /* Start the web server */
     ESP_ERROR_CHECK(start_ws_server(base_path));
-    ESP_LOGI(TAG, "Web server started");
+    logger_logi(TAG, "Web server started");
 }

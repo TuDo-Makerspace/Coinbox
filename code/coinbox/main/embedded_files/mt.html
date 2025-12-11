@@ -15,6 +15,22 @@
     .content {
       padding: 2em;
     }
+    .log-box {
+      margin-top: 1.5em;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 1em;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: monospace;
+      background: #f8f8f8;
+    }
+    .actions {
+      margin-top: 0.5em;
+      display: flex;
+      gap: 0.5em;
+    }
   </style>
 </head>
 <body>
@@ -24,6 +40,48 @@
   <div class="content">
     <h1>Maintenance</h1>
     <p>Maintenance content goes here.</p>
+
+    <div class="actions">
+      <button id="refresh-log">Refresh log</button>
+      <button id="download-log">Download log</button>
+    </div>
+    <div id="log-box" class="log-box">Loading log...</div>
   </div>
+
+  <script>
+    async function fetchLog() {
+      try {
+        const res = await fetch('/logs');
+        if (!res.ok) throw new Error('Failed to fetch log');
+        const text = await res.text();
+        document.getElementById('log-box').textContent = text || '(empty)';
+      } catch (e) {
+        document.getElementById('log-box').textContent = e.message;
+      }
+    }
+
+    async function downloadLog() {
+      try {
+        const res = await fetch('/logs');
+        if (!res.ok) throw new Error('Failed to download log');
+        const text = await res.text();
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'log.txt';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    document.getElementById('refresh-log').addEventListener('click', fetchLog);
+    document.getElementById('download-log').addEventListener('click', downloadLog);
+    fetchLog();
+  </script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 #include "mount.h"
 #include <stdio.h>
 #include <string.h>
-#include "esp_log.h"
+#include "logger.h"
 #include "esp_err.h"
 #include "esp_littlefs.h"
 #include "sdkconfig.h"
@@ -10,7 +10,7 @@ static const char *TAG = "mount";
 
 esp_err_t mount_storage(const char* base_path)
 {
-    ESP_LOGI(TAG, "Initializing LittleFS");
+    logger_logi(TAG, "Initializing LittleFS");
 
     esp_vfs_littlefs_conf_t conf = {
         .base_path             = base_path,
@@ -22,11 +22,11 @@ esp_err_t mount_storage(const char* base_path)
     esp_err_t ret = esp_vfs_littlefs_register(&conf);
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount or format LittleFS");
+            logger_loge(TAG, "Failed to mount or format LittleFS");
         } else if (ret == ESP_ERR_NOT_FOUND) {
-            ESP_LOGE(TAG, "LittleFS partition not found");
+            logger_loge(TAG, "LittleFS partition not found");
         } else {
-            ESP_LOGE(TAG, "Failed to initialize LittleFS (%s)", esp_err_to_name(ret));
+            logger_loge(TAG, "Failed to initialize LittleFS (%s)", esp_err_to_name(ret));
         }
         return ret;
     }
@@ -34,11 +34,11 @@ esp_err_t mount_storage(const char* base_path)
     size_t total = 0, used = 0;
     ret = esp_littlefs_info(conf.partition_label, &total, &used);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get LittleFS partition info (%s)", esp_err_to_name(ret));
+        logger_loge(TAG, "Failed to get LittleFS partition info (%s)", esp_err_to_name(ret));
         return ret;
     }
 
-    ESP_LOGI(TAG, "LittleFS partition mounted at '%s' (total: %d, used: %d)",
+    logger_logi(TAG, "LittleFS partition mounted at '%s' (total: %d, used: %d)",
              base_path, total, used);
     return ESP_OK;
 }
