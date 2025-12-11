@@ -234,7 +234,7 @@ void load_clip(int idx)
         sample_duration_ms[idx] = MAX_DURATION * 1000UL;
     }
 
-    log("Sample %d duration: %lu ms\n",
+    log("Sample %d duration: %lu ms\n",
         idx, (unsigned long)sample_duration_ms[idx]);
 }
 
@@ -300,7 +300,8 @@ void handle_upload(unsigned int nsample, AsyncWebServerRequest *request,
         size_t left = LittleFS.totalBytes() - LittleFS.usedBytes();
         if (request->contentLength() > SAMPLE_SIZE ||
                 request->contentLength() > left) {
-            request->send(507, "text/plain", "Sample exceeds 5s\n");
+            const std::string error_msg = "Sample exceeds " + std::to_string(MAX_DURATION) + "s";
+            request->send(507, "text/plain", error_msg.c_str());
             log("Sample %u: Rejected upload, too large (%u B)\n", nsample, request->contentLength());
             return;
         }
@@ -725,7 +726,6 @@ void setup() {
         while(true);
     }
 
-    init_samples();
     init_routes();
     init_prob();
     server.begin();
@@ -747,6 +747,7 @@ void loop() {
     case BOOT: {
         if (millis() >= boot_done_tstamp) {
             mode = NORMAL;
+            init_samples();
             log("Ready to detect coins!\n");
         }
         break;
