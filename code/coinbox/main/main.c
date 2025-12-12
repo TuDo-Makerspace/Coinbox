@@ -20,6 +20,8 @@
 #include "network.h"
 #include "mount.h"
 #include "logger.h"
+#include "gpio.h"
+#include "audio.h"
 
 
 /* This example demonstrates how to create file server
