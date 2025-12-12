@@ -78,3 +78,45 @@ void update_volume_level()
 
     ESP_LOGI(TAG, "Volume updated: Actual-Master=%d, Master=%d, Track=%d, Lid Open=%d", actual_master_volume_level, master_volume_level, track_volume_level, actual_lid_open_volume_level);
 }
+
+TaskHandle_t create_play_audio_task(void)
+{
+    TaskHandle_t handle = NULL;
+
+    BaseType_t res = xTaskCreate(
+        play_audio_task,   // task function
+        "isr_worker",      // name
+        2048,              // stack size
+        NULL,              // arg
+        5,                 // priority
+        &handle            // out handle
+    );
+
+    if (res != pdPASS) {
+        printf("Timer: failed to create worker task!\n");
+        return NULL;
+    }
+
+    printf("Timer: created new worker task (%p)\n", (void *)handle);
+    return handle;
+}
+
+static void play_audio_task(void *arg)
+{
+    // TODO Add actual audio playback logic here
+
+    
+    // Just print something; you can add more logic here
+    printf("Worker task started (handle=%p)\n", (void *)xTaskGetCurrentTaskHandle());
+
+    // Simulate a bit of work
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    printf("Worker task exiting (handle=%p)\n", (void *)xTaskGetCurrentTaskHandle());
+
+    // Clear global handle before self-delete (best-effort)
+    s_worker_task = NULL;
+
+    // Kill this task
+    vTaskDelete(NULL);
+}

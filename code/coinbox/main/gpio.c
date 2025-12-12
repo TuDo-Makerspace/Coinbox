@@ -6,6 +6,10 @@
 #include "esp_log.h"
 #include "gpio.h"
 #include "audio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/timers.h"
+#include "driver/gpio.h"
 
 #define TAG "gpio"
 
@@ -168,42 +172,13 @@ static void isr_timer_callback(TimerHandle_t xTimer)
 
     // If a worker task is still "considered alive", kill it
     if (s_worker_task != NULL) {
-        printf("Timer: previous worker (%p) still alive, deleting it\n", (void *)s_worker_task);
+        printf("Timer: previous worker (%p) still alive, deleting it\n",
+               (void *)s_worker_task);
         vTaskDelete(s_worker_task);
         s_worker_task = NULL;
     }
 
-    // Create a new worker task
-    BaseType_t res = xTaskCreate(
-        play_audio_task,
-        "isr_worker",
-        2048,          // stack size
-        NULL,          // arg
-        5,             // priority
-        &s_worker_task // out handle
-    );
-
-    if (res != pdPASS) {
-        printf("Timer: failed to create worker task!\n");
-        s_worker_task = NULL;
-    } else {
-        printf("Timer: created new worker task (%p)\n", (void *)s_worker_task);
-    }
+    // Create a new worker task and remember its handle
+    s_worker_task = create_play_audio_task();
 }
 
-static void play_audio_task(void *arg)
-{
-    // Just print something; you can add more logic here
-    printf("Worker task started (handle=%p)\n", (void *)xTaskGetCurrentTaskHandle());
-
-    // Simulate a bit of work
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    printf("Worker task exiting (handle=%p)\n", (void *)xTaskGetCurrentTaskHandle());
-
-    // Clear global handle before self-delete (best-effort)
-    s_worker_task = NULL;
-
-    // Kill this task
-    vTaskDelete(NULL);
-}
