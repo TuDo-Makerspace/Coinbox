@@ -44,6 +44,10 @@
 /* Scratch buffer size */
 #define SCRATCH_BUFSIZE  8192
 
+static const char *ALLOWED_AUDIO_EXTS[] = { "mp3", "wav", "ogg", "flac", "aac", "m4a" };
+static const size_t ALLOWED_AUDIO_EXTS_COUNT = sizeof(ALLOWED_AUDIO_EXTS) / sizeof(ALLOWED_AUDIO_EXTS[0]);
+#define ALLOWED_AUDIO_EXTS_LIST ".mp3, .wav, .ogg, .flac, .aac, .m4a"
+
 struct file_server_data {
     /* Base path of file storage */
     char base_path[ESP_VFS_PATH_MAX + 1];
@@ -265,6 +269,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, "</div>");
         httpd_resp_sendstr_chunk(req, "<div class=\"row-actions\">");
         httpd_resp_sendstr_chunk(req, "<label class=\"switch\"><input type=\"checkbox\" data-k=\"enabled-toggle\"><span class=\"slider\"></span></label>");
+        httpd_resp_sendstr_chunk(req, "<button class=\"icon-btn play-btn\" data-k=\"play\" aria-label=\"Play\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M8.5 5.5v13l9-6.5-9-6.5Z\"/></svg></button>");
         httpd_resp_sendstr_chunk(req, "<button class=\"chev\" data-row-id=\"");
         httpd_resp_sendstr_chunk(req, row_id);
         httpd_resp_sendstr_chunk(req, "\" data-open=\"0\">&#9881;</button>");
@@ -319,7 +324,19 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
 /* Set HTTP response content type according to file extension */
 static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filename)
 {
-    if (IS_FILE_EXT(filename, ".pdf")) {
+    if (IS_FILE_EXT(filename, ".mp3")) {
+        return httpd_resp_set_type(req, "audio/mpeg");
+    } else if (IS_FILE_EXT(filename, ".wav")) {
+        return httpd_resp_set_type(req, "audio/wav");
+    } else if (IS_FILE_EXT(filename, ".ogg")) {
+        return httpd_resp_set_type(req, "audio/ogg");
+    } else if (IS_FILE_EXT(filename, ".flac")) {
+        return httpd_resp_set_type(req, "audio/flac");
+    } else if (IS_FILE_EXT(filename, ".aac")) {
+        return httpd_resp_set_type(req, "audio/aac");
+    } else if (IS_FILE_EXT(filename, ".m4a")) {
+        return httpd_resp_set_type(req, "audio/mp4");
+    } else if (IS_FILE_EXT(filename, ".pdf")) {
         return httpd_resp_set_type(req, "application/pdf");
     } else if (IS_FILE_EXT(filename, ".html")) {
         return httpd_resp_set_type(req, "text/html");
@@ -331,6 +348,24 @@ static esp_err_t set_content_type_from_file(httpd_req_t *req, const char *filena
     /* This is a limited set only */
     /* For any other type always set as plain text */
     return httpd_resp_set_type(req, "text/plain");
+}
+
+static bool is_audio_filename(const char *name)
+{
+    if (!name || !*name) {
+        return false;
+    }
+    const char *dot = strrchr(name, '.');
+    if (!dot || *(dot + 1) == '\0') {
+        return false;
+    }
+    const char *ext = dot + 1;
+    for (size_t i = 0; i < ALLOWED_AUDIO_EXTS_COUNT; ++i) {
+        if (strcasecmp(ext, ALLOWED_AUDIO_EXTS[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Copies the full path into destination buffer and returns
@@ -603,6 +638,18 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
         return send_upload_error(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
     }
 
+    const char *base_name = filename;
+    const char *slash_pos = strrchr(filename, '/');
+    if (slash_pos && *(slash_pos + 1)) {
+        base_name = slash_pos + 1;
+    }
+
+    if (!is_audio_filename(base_name)) {
+        logger_loge(TAG, "Rejected non-audio upload : %s", base_name);
+        return send_upload_error(req, HTTPD_400_BAD_REQUEST,
+                                 "Only audio files are allowed (" ALLOWED_AUDIO_EXTS_LIST ")");
+    }
+
     if (stat(filepath, &file_stat) == 0) {
         logger_loge(TAG, "File already exists : %s", filepath);
         /* Respond with 400 Bad Request */
@@ -629,12 +676,6 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
         logger_loge(TAG, "Failed to create file : %s", filepath);
         /* Respond with 500 Internal Server Error */
         return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create file");
-    }
-
-    const char *base_name = filename;
-    const char *slash_pos = strrchr(filename, '/');
-    if (slash_pos && *(slash_pos + 1)) {
-        base_name = slash_pos + 1;
     }
 
     file_entry_t meta;

@@ -167,6 +167,22 @@
     }
     .icon-btn:hover { background: #eef2ff; }
     .icon-btn:active { background: #e5e7eb; transform: scale(0.98); }
+    .play-btn {
+      background: #e0f2fe;
+      color: #0ea5e9;
+      border-color: #bfdbfe;
+      transition: background 0.15s, color 0.15s, transform 0.1s;
+    }
+    .play-btn svg { width: 18px; height: 18px; }
+    .file-item.playing .play-btn {
+      background: #0ea5e9;
+      color: #fff;
+      border-color: #0284c7;
+    }
+    .file-item.playing .play-btn:hover {
+      background: #0284c7;
+      color: #e0f2fe;
+    }
 
     .chev {
       width: 38px;
@@ -393,9 +409,65 @@
       const fileInput = document.getElementById('newfile');
       const basePath = (window.CURRENT_PATH || '/file-server/').trim();
       const safeBase = basePath.endsWith('/') ? basePath : basePath + '/';
+      const allowedAudioExts = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'];
+      const allowedAudioText = allowedAudioExts.join(', ');
+      let audioPlayer = null;
+      let playingRowId = null;
+
+      function hasAllowedAudioExt(name) {
+        const lower = (name || '').toLowerCase();
+        return allowedAudioExts.some((ext) => lower.endsWith(ext));
+      }
+
+      function ensureAudio() {
+        if (!audioPlayer) {
+          audioPlayer = new Audio();
+          audioPlayer.addEventListener('ended', () => stopPlayback());
+          audioPlayer.addEventListener('error', () => stopPlayback());
+        }
+        return audioPlayer;
+      }
+
+      function markPlaying(row) {
+        if (playingRowId) {
+          const prev = document.getElementById(playingRowId);
+          if (prev) prev.classList.remove('playing');
+        }
+        playingRowId = row ? row.id : null;
+        if (row) row.classList.add('playing');
+      }
+
+      function stopPlayback() {
+        if (audioPlayer) {
+          audioPlayer.pause();
+          audioPlayer.currentTime = 0;
+        }
+        markPlaying(null);
+      }
+
+      function playRow(row) {
+        if (!row) return;
+        const uri = row.dataset.fileUri;
+        if (!uri) return;
+        const audio = ensureAudio();
+        if (playingRowId === row.id && !audio.paused) {
+          stopPlayback();
+          return;
+        }
+        markPlaying(row);
+        audio.src = uri;
+        audio.play().catch((err) => {
+          alert(err?.message || 'Playback failed');
+          stopPlayback();
+        });
+      }
 
       async function uploadFile(file) {
         if (!file) return;
+        if (!hasAllowedAudioExt(file.name || '')) {
+          alert(`Only audio files are allowed (${allowedAudioText})`);
+          return;
+        }
         const uploadPath = safeBase + file.name;
         try {
           const res = await fetch(uploadPath, { method: 'POST', body: file });
@@ -523,6 +595,13 @@
         });
       });
 
+      document.querySelectorAll('button[data-k="play"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const row = btn.closest('.file-item');
+          playRow(row);
+        });
+      });
+
       document.querySelectorAll('.details').forEach(details => {
         const rowId = details.dataset.forRow;
         const row = document.getElementById(rowId);
@@ -596,6 +675,9 @@
         if (deleteBtn) {
           deleteBtn.addEventListener('click', async () => {
             if (!confirm('Delete this file?')) return;
+            if (playingRowId === rowId) {
+              stopPlayback();
+            }
             try {
               const res = await fetch(fileUri + '?delete=1', { method: 'GET' });
               if (!res.ok) throw new Error('Delete failed: ' + res.status);
@@ -668,9 +750,9 @@
       </button>
     </div>
     <div id="dropzone" class="dropzone">
-      Drag & drop a file here or click to upload
+      Drag & drop an audio file here or click to upload
     </div>
-    <input id="newfile" type="file" hidden>
+    <input id="newfile" type="file" hidden accept="audio/*">
 
     <div id="file-list" class="file-list">
       <!-- rows injected by server (ws_server.c) -->
