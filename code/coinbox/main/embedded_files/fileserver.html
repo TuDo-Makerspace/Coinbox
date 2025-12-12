@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>File Server</title>
+  <style>
+    :root {
+      --card-bg: #fff;
+      --border: #e5e7eb;
+      --text: #0f172a;
+      --muted: #4b5563;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7fb;
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    .content {
+      padding: clamp(1rem, 2vw + 0.5rem, 2.5rem);
+      max-width: 1100px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25em;
+      width: 100%;
+    }
+
+    h1 { margin-bottom: 0.35em; font-size: clamp(1.6rem, 1vw + 1.4rem, 2.1rem); }
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75em;
+      justify-content: space-between;
+    }
+    .subtext { color: var(--muted); margin-bottom: 0.8em; font-size: 1rem; }
+
+    .dropzone {
+      border: 2px dashed #94a3b8;
+      border-radius: 12px;
+      padding: clamp(1.1em, 2vw + 0.5em, 1.8em);
+      background: var(--card-bg);
+      text-align: center;
+      color: #1f2937;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, transform 0.15s;
+      order: 2;
+      min-height: 120px;
+      font-size: clamp(1rem, 1vw + 0.35rem, 1.15rem);
+      display: grid;
+      place-items: center;
+      box-shadow: 0 10px 30px rgba(17, 24, 39, 0.05);
+    }
+    .dropzone:hover { transform: translateY(-1px); }
+    .dropzone.dragover {
+      border-color: #2563eb;
+      background: #eef2ff;
+    }
+
+    .file-list {
+      background: var(--card-bg);
+      border-radius: 12px;
+      overflow: hidden;
+      order: 1;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border);
+      box-shadow: 0 6px 20px rgba(0,0,0,0.05);
+    }
+
+    .file-item {
+      padding: 1em 1.1em;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .file-item:last-child { border-bottom: none; }
+
+    .mobile-upload {
+      display: none;
+      padding: 0.7em 0.85em;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 700;
+      font-size: 1rem;
+      cursor: pointer;
+      text-align: center;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+      min-width: 48px;
+      min-height: 48px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .mobile-upload svg { width: 20px; height: 20px; fill: currentColor; }
+
+    .file-row-main {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 0.85em;
+    }
+
+    .file-name {
+      flex: 1;
+      font-size: 1.05rem;
+      font-weight: 700;
+      font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
+      text-decoration: none;
+      color: #1f2937;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      align-self: center;
+      display: inline-flex;
+      align-items: center;
+    }
+    .file-name:hover { color: #111827; }
+
+    .row-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75em;
+      flex-shrink: 0;
+      justify-self: end;
+    }
+
+    .icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      border-radius: 10px;
+      cursor: pointer;
+      color: #374151;
+      user-select: none;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .icon-btn:hover { background: #eef2ff; }
+    .icon-btn:active { background: #e5e7eb; transform: scale(0.98); }
+
+    .chev {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #f8fafc;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .chev:hover { background: #eef2ff; }
+    .chev[data-open="1"] { background: #e5e7eb; }
+    .chev:active { transform: scale(0.98); }
+
+    .details {
+      display: none;
+      margin-top: 0.75em;
+      padding: 0.9em 0.75em 0.6em 0.75em;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+    }
+    .details.open { display: block; }
+
+    .details-inner {
+      border: 1px solid #e6e6e6;
+      border-radius: 12px;
+      padding: 1em;
+      background: #fff;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.9em 1em;
+      align-items: start;
+    }
+
+    .prop {
+      display: grid;
+      grid-template-columns: 140px 1fr 90px auto;
+      gap: 0.7em;
+      align-items: center;
+      margin: 1em 0;
+    }
+    .prop.prob-row { grid-column: 1; }
+    .prop.vol-row { grid-column: 1 / -1; }
+
+    .slider-wrap {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 0.45em;
+      align-items: center;
+    }
+
+    .nudge {
+      border: none;
+      background: #f1f5f9;
+      border-radius: 6px;
+      width: 36px;
+      height: 36px;
+      cursor: pointer;
+      font-weight: 700;
+      line-height: 1;
+      transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+      color: #1f2937;
+      touch-action: manipulation;
+    }
+    .nudge:hover { background: #e2e8f0; }
+    .nudge:active { background: #cbd5e1; box-shadow: inset 0 1px 2px rgba(0,0,0,0.08); transform: scale(0.98); }
+
+    .prop input[type="number"] {
+      width: 90px;
+      padding: 0.45em;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font-size: 0.95rem;
+    }
+
+    .prop label {
+      color: #111827;
+      font-weight: 700;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: #2563eb;
+    }
+
+    .percent {
+      font-size: 1rem;
+      color: #475569;
+      text-align: center;
+      min-width: 24px;
+    }
+
+    /* responsive tweaks */
+    @media (max-width: 960px) {
+      .content { padding: 1.25rem; gap: 1rem; }
+      .file-row-main { grid-template-columns: 1fr auto; align-items: flex-start; }
+      .file-name { width: 100%; white-space: normal; }
+      .row-actions { justify-self: end; }
+    }
+
+    @media (max-width: 720px) {
+      .file-item { padding: 0.9em; }
+      .file-item.open .file-row-main {
+        padding-bottom: 0.4em;
+        border-bottom: 1px dashed #cbd5e1;
+      }
+      .details {
+        margin-top: 0;
+        padding: 0.35em 0.6em 0.45em 0.6em;
+        border: none;
+        background: transparent;
+        border-radius: 10px;
+      }
+      .details-inner {
+        border: none;
+        background: transparent;
+        padding: 0.35em 0 0 0;
+      }
+      .prop {
+        grid-template-columns: 1fr auto;
+        gap: 0.35em 0.5em;
+        margin: 0.75em 0;
+      }
+      .prop label { grid-column: 1 / -1; }
+      .slider-wrap {
+        grid-template-columns: auto 1fr auto;
+        grid-column: 1 / -1;
+      }
+      .prop input[type="number"] {
+        width: 100%;
+        max-width: none;
+        grid-column: 1;
+      }
+      .percent {
+        grid-column: 2;
+        justify-self: end;
+        align-self: center;
+      }
+      .dropzone { display: none; }
+      .mobile-upload { display: inline-flex; }
+      .title-row { align-items: center; }
+    }
+
+    @media (max-width: 540px) {
+      h1 { font-size: 1.45rem; }
+      .dropzone { min-height: 110px; }
+      .icon-btn,
+      .chev { width: 42px; height: 42px; }
+      .row-actions { gap: 0.6em; }
+    }
+
+    /* simple switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 46px;
+      height: 26px;
+    }
+    .switch input { display: none; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #e57373;
+      transition: 0.15s;
+      border-radius: 999px;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      top: 3px;
+      background: white;
+      transition: 0.15s;
+      border-radius: 50%;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+    .switch input:checked + .slider { background: #81c784; }
+    .switch input:checked + .slider:before { transform: translateX(20px); }
+  </style>
+
+  <script defer>
+    document.addEventListener('DOMContentLoaded', () => {
+      const dropzone = document.getElementById('dropzone');
+      const fileInput = document.getElementById('newfile');
+      const basePath = (window.CURRENT_PATH || '/file-server/').trim();
+      const safeBase = basePath.endsWith('/') ? basePath : basePath + '/';
+
+      async function uploadFile(file) {
+        if (!file) return;
+        const uploadPath = safeBase + file.name;
+        try {
+          const res = await fetch(uploadPath, { method: 'POST', body: file });
+          if (!res.ok) throw new Error('Upload failed: ' + res.status);
+          window.location.reload();
+        } catch (err) {
+          alert(err.message);
+        }
+      }
+
+      dropzone.addEventListener('click', () => fileInput.click());
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+      });
+      dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        uploadFile(file);
+      });
+
+      // decode percent-encoded names for display only
+      document.querySelectorAll('.file-name').forEach((link) => {
+        const raw = link.textContent || '';
+        try {
+          const decoded = decodeURIComponent(raw);
+          link.textContent = decoded;
+        } catch (_) {
+          // ignore bad encodings
+        }
+      });
+
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files && fileInput.files[0];
+        uploadFile(file);
+      });
+      const mobileUpload = document.getElementById('mobile-upload');
+      if (mobileUpload) {
+        mobileUpload.addEventListener('click', () => fileInput.click());
+      }
+
+      // -------- dropdown logic --------
+      function closeAll(exceptId) {
+        document.querySelectorAll('.details').forEach(d => {
+          if (d.dataset.forRow !== exceptId) d.classList.remove('open');
+        });
+        document.querySelectorAll('.chev').forEach(b => {
+          if (b.dataset.rowId !== exceptId) b.dataset.open = "0";
+        });
+        document.querySelectorAll('.file-item').forEach(row => {
+          if (row.id !== exceptId) row.classList.remove('open');
+        });
+      }
+
+      async function persistMeta(fileUri, meta) {
+        // fileUri is like "/file-server/dir/file.bin"
+        // meta endpoint mirrors it: "/file-meta/dir/file.bin"
+        const metaUri = fileUri.replace(/^\/file-server\//, '/file-meta/');
+        const res = await fetch(metaUri, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(meta),
+        });
+        if (!res.ok) throw new Error('Meta update failed: ' + res.status);
+      }
+
+      // small debounce per row
+      const debounceTimers = new Map();
+      function schedulePersist(rowId, fileUri, getMetaFn) {
+        const key = rowId;
+        if (debounceTimers.has(key)) clearTimeout(debounceTimers.get(key));
+        debounceTimers.set(key, setTimeout(async () => {
+          try {
+            await persistMeta(fileUri, getMetaFn());
+          } catch (e) {
+            alert(e.message || String(e));
+          }
+        }, 200));
+      }
+
+      document.querySelectorAll('.chev').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const rowId = btn.dataset.rowId;
+          const details = document.querySelector(`.details[data-for-row="${rowId}"]`);
+          const row = document.getElementById(rowId);
+          const isOpen = btn.dataset.open === "1";
+          closeAll(rowId);
+          if (!isOpen) {
+            btn.dataset.open = "1";
+            details.classList.add('open');
+            if (row) row.classList.add('open');
+          } else {
+            btn.dataset.open = "0";
+            details.classList.remove('open');
+            if (row) row.classList.remove('open');
+          }
+        });
+      });
+
+      document.querySelectorAll('.details').forEach(details => {
+        const rowId = details.dataset.forRow;
+        const row = document.getElementById(rowId);
+        if (!row) return;
+
+        const fileUri = row.dataset.fileUri; // full /file-server/... uri
+        const toggle = row.querySelector('input[data-k="enabled-toggle"]');
+        const prob = details.querySelector('input[data-k="probability"]');
+        const probNum = details.querySelector('input[data-k="probability-num"]');
+        const probMinus = details.querySelector('button[data-k="probability-minus"]');
+        const probPlus = details.querySelector('button[data-k="probability-plus"]');
+        const vol  = details.querySelector('input[data-k="volume"]');
+        const volNum = details.querySelector('input[data-k="volume-num"]');
+        const volMinus = details.querySelector('button[data-k="volume-minus"]');
+        const volPlus = details.querySelector('button[data-k="volume-plus"]');
+
+        const clamp = (v) => Math.min(100, Math.max(0, parseInt(v || 0, 10)));
+
+        function setProb(val) {
+          const v = clamp(val);
+          prob.value = v;
+          probNum.value = v;
+        }
+        function setVol(val) {
+          const v = clamp(val);
+          vol.value = v;
+          volNum.value = v;
+        }
+
+        // init from server-rendered dataset
+        setProb(row.dataset.probability || "50");
+        setVol(row.dataset.volume || "50");
+        if (toggle) toggle.checked = (row.dataset.enabled === "1");
+
+        function currentMeta() {
+          return {
+            probability: clamp(prob.value),
+            volume: clamp(vol.value),
+            enabled: !!(toggle && toggle.checked)
+          };
+        }
+
+        function handleChange(kind, setter, delta) {
+          return () => {
+            const cur = kind === 'prob' ? clamp(prob.value) : clamp(vol.value);
+            const next = delta ? cur + delta : cur;
+            setter(next);
+            schedulePersist(rowId, fileUri, currentMeta);
+          };
+        }
+
+        prob.addEventListener('input', handleChange('prob', setProb));
+        probNum.addEventListener('input', handleChange('prob', setProb));
+        probMinus.addEventListener('click', handleChange('prob', setProb, -1));
+        probPlus.addEventListener('click', handleChange('prob', setProb, 1));
+
+        vol.addEventListener('input', handleChange('vol', setVol));
+        volNum.addEventListener('input', handleChange('vol', setVol));
+        volMinus.addEventListener('click', handleChange('vol', setVol, -1));
+        volPlus.addEventListener('click', handleChange('vol', setVol, 1));
+
+        if (toggle) {
+          toggle.addEventListener('change', () => {
+            schedulePersist(rowId, fileUri, currentMeta);
+          });
+        }
+      });
+    });
+  </script>
+</head>
+
+<body>
+  <div id="navbar"></div>
+  <script src="/navbar.js"></script>
+
+  <div class="content">
+    <div class="title-row">
+      <h1>File Server</h1>
+      <button id="mobile-upload" class="mobile-upload" aria-label="Upload a file">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4a1 1 0 0 1 .7.3l3.5 3.6a.7.7 0 0 1-.5 1.2H13v6.9a1 1 0 0 1-2 0V9.1H8.3a.7.7 0 0 1-.5-1.2l3.5-3.6A1 1 0 0 1 12 4Zm-7 12.5a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v1.5c0 .83-.67 1.5-1.5 1.5h-13c-.83 0-1.5-.67-1.5-1.5v-1.5a1 1 0 0 1 1-1Z"/>
+        </svg>
+      </button>
+    </div>
+    <div id="dropzone" class="dropzone">
+      Drag & drop a file here or click to upload
+    </div>
+    <input id="newfile" type="file" hidden>
+
+    <div id="file-list" class="file-list">
+      <!-- rows injected by server (ws_server.c) -->

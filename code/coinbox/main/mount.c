@@ -42,3 +42,21 @@ esp_err_t mount_storage(const char* base_path)
              base_path, total, used);
     return ESP_OK;
 }
+
+esp_err_t format_storage(const char* base_path)
+{
+    logger_logw(TAG, "Formatting LittleFS partition");
+    esp_err_t err = esp_vfs_littlefs_unregister("storage");
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+        logger_loge(TAG, "Failed to unmount before format: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_littlefs_format("storage");
+    if (err != ESP_OK) {
+        logger_loge(TAG, "Format failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    return mount_storage(base_path);
+}

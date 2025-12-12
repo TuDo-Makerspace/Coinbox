@@ -1,0 +1,10 @@
+{
+  "name": "fileserver-mock",
+  "version": "1.0.0",
+  "description": "Mock server for testing fileserver UI without flashing ESP",
+  "main": "mock_server.js",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
