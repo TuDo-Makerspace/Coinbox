@@ -9,14 +9,13 @@
 #include "freertos/task.h"
 #include "gpio.h"
 
-uint8_t master_volume_level = 100;
+extern uint8_t master_volume_level;
 
-uint8_t lid_open_volume_level = 30;
+extern uint8_t lid_open_volume_level;
 
-
-uint8_t actual_lid_open_volume_level = 0;
-uint8_t actual_master_volume_level = 0;
-uint8_t track_volume_level = 100;
+extern uint8_t actual_lid_open_volume_level;
+extern uint8_t actual_master_volume_level;
+extern uint8_t track_volume_level;
 
 void audio_init();
 void set_master_volume_level(uint8_t level);
@@ -29,5 +28,3 @@ void update_volume_level();
 
 TaskHandle_t create_play_audio_task(void);
 static void play_audio_task(void *arg);
-
-extern TaskHandle_t s_worker_task;

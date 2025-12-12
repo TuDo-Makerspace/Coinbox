@@ -13,6 +13,13 @@
 
 #define TAG "gpio"
 
+volatile uint32_t laser_isr_count = 0;
+volatile uint32_t hall_isr_count = 0;
+
+bool laser_detection_enabled = true;
+TimerHandle_t s_isr_timer = NULL;
+TaskHandle_t  s_worker_task = NULL;
+
 // GPIO definitions
 // GPIO outputs
 #define GPIO_MUTE_DAC 21

@@ -10,6 +10,14 @@
 
 #define TAG "audio"
 
+uint8_t master_volume_level = 100;
+
+uint8_t lid_open_volume_level = 30;
+
+uint8_t actual_lid_open_volume_level = 0;
+uint8_t actual_master_volume_level = 0;
+uint8_t track_volume_level = 100;
+
 static pthread_mutex_t volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void audio_init()
@@ -105,7 +113,7 @@ static void play_audio_task(void *arg)
 {
     // TODO Add actual audio playback logic here
 
-    
+
     // Just print something; you can add more logic here
     printf("Worker task started (handle=%p)\n", (void *)xTaskGetCurrentTaskHandle());
 
