@@ -5,11 +5,11 @@
 |------|---------|-----------------------------------------|
 | IO21 | O S_PD  | Mute digital to analog converter if low |
 | IO22 | O H_PU  | Mute amplifier if high                  |
-| IO23 | I ???   | Laser receiver                          |
+| IO23 | I       | Laser receiver (high if coin detectd)   |
 | IO17 | O       | I2S Data                                |
 | IO18 | O       | I2S LRCK                                |
 | IO19 | O       | I2S BCK                                 |
-| IO2  | I       | Hall lid sensor                         |
+| IO2  | I S_PU  | Hall lid sensor (low if lid detected)   |
 
 Mode: `XX;X_XX`
 - I: Input
