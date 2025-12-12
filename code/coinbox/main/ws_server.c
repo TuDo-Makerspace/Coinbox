@@ -23,7 +23,7 @@
 
 #include "esp_err.h"
 #include "logger.h"
-#include "file_entry.h"
+#include "files.h"
 #include "mount.h"
 
 #include "esp_vfs.h"
@@ -31,6 +31,7 @@
 #include "esp_http_server.h"
 
 #include "ota.h"
+#include <ctype.h>
 
 /* Max length a file path can have on storage */
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + CONFIG_LITTLEFS_OBJ_NAME_LEN)
@@ -52,6 +53,27 @@ struct file_server_data {
 };
 
 static const char *TAG = "file_server";
+
+static void url_decode_inplace(char *str)
+{
+    char *src = str;
+    char *dst = str;
+    while (*src) {
+        if (*src == '%' && isxdigit((unsigned char)src[1]) && isxdigit((unsigned char)src[2])) {
+            char hex[3] = { src[1], src[2], 0 };
+            *dst = (char) strtol(hex, NULL, 16);
+            src += 3;
+        } else if (*src == '+') {
+            *dst = ' ';
+            src++;
+        } else {
+            *dst = *src;
+            src++;
+        }
+        dst++;
+    }
+    *dst = '\0';
+}
 
 /* Handler to redirect incoming GET request for /index.html to /
  * This can be overridden by uploading file with same name */
@@ -204,7 +226,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         }
 
         file_entry_t meta;
-        if (file_entry_load(entrypath, &meta) != ESP_OK) {
+        if (files_read_header(entry->d_name, &meta) != ESP_OK) {
             logger_logw(TAG, "Skipping non-entry file: %s", entrypath);
             continue;
         }
@@ -219,17 +241,17 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, entry->d_name);
         httpd_resp_sendstr_chunk(req, "\" data-probability=\"");
         char numbuf[16];
-        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.probability);
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.props.probability);
         httpd_resp_sendstr_chunk(req, numbuf);
         httpd_resp_sendstr_chunk(req, "\" data-volume=\"");
-        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.volume);
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.props.volume);
         httpd_resp_sendstr_chunk(req, numbuf);
         httpd_resp_sendstr_chunk(req, "\" data-enabled=\"");
-        httpd_resp_sendstr_chunk(req, meta.enabled ? "1" : "0");
+        httpd_resp_sendstr_chunk(req, meta.props.enabled ? "1" : "0");
         httpd_resp_sendstr_chunk(req, "\">");
 
         httpd_resp_sendstr_chunk(req, "<div class=\"file-row-main\">");
-        httpd_resp_sendstr_chunk(req, "<a class=\"file-name\" href=\"");
+        httpd_resp_sendstr_chunk(req, "<div class=\"file-name-wrap\"><a class=\"file-name\" href=\"");
         httpd_resp_sendstr_chunk(req, req->uri);
         httpd_resp_sendstr_chunk(req, entry->d_name);
         logger_logi(TAG, "Request URI: %s, Entry Name: %s", req->uri, entry->d_name);
@@ -239,6 +261,8 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, "\">");
         httpd_resp_sendstr_chunk(req, entry->d_name);
         httpd_resp_sendstr_chunk(req, "</a>");
+        httpd_resp_sendstr_chunk(req, "<input class=\"file-name-edit\" data-k=\"name-edit\" type=\"text\" autocomplete=\"off\" spellcheck=\"false\">");
+        httpd_resp_sendstr_chunk(req, "</div>");
         httpd_resp_sendstr_chunk(req, "<div class=\"row-actions\">");
         httpd_resp_sendstr_chunk(req, "<label class=\"switch\"><input type=\"checkbox\" data-k=\"enabled-toggle\"><span class=\"slider\"></span></label>");
         httpd_resp_sendstr_chunk(req, "<button class=\"chev\" data-row-id=\"");
@@ -269,6 +293,12 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, "</div>");
         httpd_resp_sendstr_chunk(req, "<input type=\"number\" min=\"0\" max=\"100\" data-k=\"volume-num\">");
         httpd_resp_sendstr_chunk(req, "<span class=\"percent\">%</span>");
+        httpd_resp_sendstr_chunk(req, "</div>");
+
+        httpd_resp_sendstr_chunk(req, "<div class=\"prop action-row\">");
+        httpd_resp_sendstr_chunk(req, "<button class=\"delete-btn\" data-row-id=\"");
+        httpd_resp_sendstr_chunk(req, row_id);
+        httpd_resp_sendstr_chunk(req, "\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 3a1 1 0 0 0-1 1v1H5.5a1 1 0 1 0 0 2H6v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7h0.5a1 1 0 1 0 0-2H16V4a1 1 0 0 0-1-1H9Zm1 2h4V5h-4V5Zm-1 4a1 1 0 1 1 2 0v8a1 1 0 1 1-2 0V9Zm6-1a1 1 0 0 1 1 1v8a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Z\"/></svg>Delete file</button>");
         httpd_resp_sendstr_chunk(req, "</div>");
 
         httpd_resp_sendstr_chunk(req, "</div></div>");
@@ -329,7 +359,7 @@ static const char* get_path_from_uri(char *dest, const char *base_path, const ch
     strlcpy(dest + base_pathlen, uri, pathlen + 1);
 
     const char *result = dest + base_pathlen;
-    logger_loge(TAG, "Destination: %s, Base Path: %s, Return: %s", dest, base_path, result);
+    logger_logi(TAG, "Destination: %s, Base Path: %s, Return: %s", dest, base_path, result);
     return result;
 
     /* Return pointer to path, skipping the base */
@@ -343,6 +373,8 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     FILE *fd = NULL;
     struct stat file_stat;
     bool delete_requested = false;
+    bool rename_requested = false;
+    char rename_val[128] = {0};
 
     const char *filename = get_path_from_uri(filepath, ((struct file_server_data *)req->user_ctx)->base_path,
                                              req->uri + sizeof("/file-server") - 1, sizeof(filepath));
@@ -354,12 +386,18 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     }
     size_t filename_len = strlen(filename);
     char filename_last_char = filename_len ? filename[filename_len - 1] : '\0';
-    logger_loge(TAG, "Fileserver found : %s, filename: %s, filenamestrlen: %c", filepath, filename,
+    logger_logi(TAG, "Fileserver found : %s, filename: %s, filenamestrlen: %c", filepath, filename,
              filename_last_char ? filename_last_char : ' ');
 
     if (filename_len == 0) {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Trailing slash required");
         return ESP_FAIL;
+    }
+
+    const char *base_name = filename;
+    const char *slash_in_filename = strrchr(filename, '/');
+    if (slash_in_filename && *(slash_in_filename + 1)) {
+        base_name = slash_in_filename + 1;
     }
 
     size_t query_len = httpd_req_get_url_query_len(req);
@@ -374,12 +412,24 @@ static esp_err_t download_get_handler(httpd_req_t *req)
             if (httpd_query_key_value(query_str, "delete", delete_val, sizeof(delete_val)) == ESP_OK) {
                 delete_requested = true;
             }
+            if (httpd_query_key_value(query_str, "rename", rename_val, sizeof(rename_val)) == ESP_OK) {
+                url_decode_inplace(rename_val);
+                rename_requested = true;
+            }
         }
         free(query_str);
     }
 
     if (filename_last_char == '/') {
         return http_resp_dir_html(req, filepath);
+    }
+    if (rename_requested && rename_val[0] == '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Rename target missing");
+        return ESP_FAIL;
+    }
+    if (rename_requested && (strchr(rename_val, '/') || strchr(rename_val, '\\'))) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid rename");
+        return ESP_FAIL;
     }
     
     if (delete_requested) {
@@ -397,6 +447,37 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         httpd_resp_set_hdr(req, "Connection", "close");
 #endif
         httpd_resp_sendstr(req, "File deleted successfully");
+        return ESP_OK;
+    }
+
+    if (rename_requested) {
+        if (stat(filepath, &file_stat) == -1) {
+            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
+            return ESP_FAIL;
+        }
+        char *last_slash = strrchr(filepath, '/');
+        if (!last_slash) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Bad path");
+            return ESP_FAIL;
+        }
+        size_t dir_len = (size_t)(last_slash - filepath + 1);
+        char new_filepath[FILE_PATH_MAX];
+        if (dir_len + strlen(rename_val) >= sizeof(new_filepath)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "New name too long");
+            return ESP_FAIL;
+        }
+        memcpy(new_filepath, filepath, dir_len);
+        strlcpy(new_filepath + dir_len, rename_val, sizeof(new_filepath) - dir_len);
+        if (stat(new_filepath, &file_stat) == 0) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_sendstr(req, "Target exists");
+            return ESP_OK;
+        }
+        if (rename(filepath, new_filepath) != 0) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Rename failed");
+            return ESP_FAIL;
+        }
+        httpd_resp_sendstr(req, "Renamed");
         return ESP_OK;
     }
 
@@ -427,12 +508,13 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     }
 
     file_entry_t meta;
-    if (file_entry_read_header(fd, filepath, &meta, (size_t)file_stat.st_size) != ESP_OK) {
+    if (files_read_header(base_name, &meta) != ESP_OK) {
         fclose(fd);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Invalid file entry");
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File entry missing");
         return ESP_FAIL;
     }
-    if (fseek(fd, (long)meta.data_offset, SEEK_SET) != 0) {
+
+    if (fseek(fd, (long)FILE_HEADER_SIZE, SEEK_SET) != 0) {
         fclose(fd);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to seek");
         return ESP_FAIL;
@@ -473,6 +555,31 @@ static esp_err_t download_get_handler(httpd_req_t *req)
 }
 
 /* Handler to upload a file onto the server */
+static esp_err_t send_upload_error(httpd_req_t *req, httpd_err_code_t status, const char *msg)
+{
+    const char *status_str = NULL;
+    switch (status) {
+        case HTTPD_400_BAD_REQUEST:
+            status_str = "400 Bad Request";
+            break;
+        case HTTPD_500_INTERNAL_SERVER_ERROR:
+            status_str = "500 Internal Server Error";
+            break;
+        case HTTPD_413_CONTENT_TOO_LARGE:
+            status_str = "413 Content Too Large";
+            break;
+        default:
+            break;
+    }
+    if (status_str) {
+        httpd_resp_set_status(req, status_str);
+    }
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, msg ? msg : "Upload failed");
+    return ESP_FAIL;
+}
+
+/* Handler to upload a file onto the server */
 static esp_err_t upload_post_handler(httpd_req_t *req)
 {
     char filepath[FILE_PATH_MAX];
@@ -485,8 +592,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
                                              req->uri + sizeof("/file-server") - 1, sizeof(filepath));
     if (!filename) {
         /* Respond with 500 Internal Server Error */
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
-        return ESP_FAIL;
+        return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
     }
 
     size_t filename_len = strlen(filename);
@@ -494,49 +600,53 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     /* Filename must exist and cannot have a trailing '/' */
     if (filename_len == 0 || filename[filename_len - 1] == '/') {
         logger_loge(TAG, "Invalid filename : %s", filename);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Invalid filename");
-        return ESP_FAIL;
+        return send_upload_error(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
     }
 
     if (stat(filepath, &file_stat) == 0) {
         logger_loge(TAG, "File already exists : %s", filepath);
         /* Respond with 400 Bad Request */
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "File already exists");
-        return ESP_FAIL;
+        return send_upload_error(req, HTTPD_400_BAD_REQUEST, "File already exists");
+    }
+
+    if (files_count() >= FILES_MAX_ENTRIES) {
+        logger_loge(TAG, "Max file entries reached");
+        return send_upload_error(req, HTTPD_400_BAD_REQUEST, "File entry limit reached");
     }
 
     /* File cannot be larger than a limit */
     if (req->content_len > MAX_FILE_SIZE) {
         logger_loge(TAG, "File too large : %d bytes", req->content_len);
         /* Respond with 400 Bad Request */
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                            "File size must be less than "
-                            MAX_FILE_SIZE_STR "!");
+        return send_upload_error(req, HTTPD_413_CONTENT_TOO_LARGE,
+                                 "File size must be less than " MAX_FILE_SIZE_STR "!");
         /* Return failure to close underlying connection else the
          * incoming file content will keep the socket busy */
-        return ESP_FAIL;
     }
 
     fd = fopen(filepath, "wb");
     if (!fd) {
         logger_loge(TAG, "Failed to create file : %s", filepath);
         /* Respond with 500 Internal Server Error */
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create file");
-        return ESP_FAIL;
+        return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create file");
     }
 
-    file_entry_t meta;
     const char *base_name = filename;
     const char *slash_pos = strrchr(filename, '/');
     if (slash_pos && *(slash_pos + 1)) {
         base_name = slash_pos + 1;
     }
-    file_entry_set(&meta, base_name, 100, 100, true);
-    if (file_entry_write_header(fd, &meta) != ESP_OK) {
+
+    file_entry_t meta;
+    file_entry_init(&meta, base_name);
+    file_entry_set_props(&meta, base_name, 100, 100, true);
+    meta.data_size = (size_t)req->content_len;
+    meta.modified = false; // freshly written
+
+    if (files_write_header(fd, &meta) != ESP_OK) {
         fclose(fd);
         unlink(filepath);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write header");
-        return ESP_FAIL;
+        return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write header");
     }
 
     logger_logi(TAG, "Receiving file : %s...", filename);
@@ -566,8 +676,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
 
             logger_loge(TAG, "File reception failed!");
             /* Respond with 500 Internal Server Error */
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive file");
-            return ESP_FAIL;
+            return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive file");
         }
 
         /* Write buffer content to file on storage */
@@ -579,8 +688,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
 
             logger_loge(TAG, "File write failed!");
             /* Respond with 500 Internal Server Error */
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write file to storage");
-            return ESP_FAIL;
+            return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write file to storage");
         }
 
         /* Keep track of remaining size of
@@ -633,7 +741,6 @@ static bool json_get_bool(const char *json, const char *key, bool *out)
 static esp_err_t file_meta_handler(httpd_req_t *req)
 {
     char filepath[FILE_PATH_MAX];
-    FILE *fd = NULL;
     struct stat st;
 
     const char *filename = get_path_from_uri(
@@ -658,28 +765,25 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    fd = fopen(filepath, "r+b");
-    if (!fd) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to open file");
-        return ESP_FAIL;
+    const char *base_name = filename;
+    const char *slash_in_filename = strrchr(filename, '/');
+    if (slash_in_filename && *(slash_in_filename + 1)) {
+        base_name = slash_in_filename + 1;
     }
 
     file_entry_t meta;
-    if (file_entry_read_header(fd, filepath, &meta, (size_t)st.st_size) != ESP_OK) {
-        fclose(fd);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Not a valid entry file");
+    if (files_read_header(base_name, &meta) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File entry missing");
         return ESP_FAIL;
     }
 
     if (req->method == HTTP_GET) {
         char buf[128];
-        // adjust field names if your file_entry_t uses different names
         int n = snprintf(buf, sizeof(buf),
                          "{\"probability\":%u,\"volume\":%u,\"enabled\":%s}\n",
-                         (unsigned)meta.probability,
-                         (unsigned)meta.volume,
-                         meta.enabled ? "true" : "false");
-        fclose(fd);
+                         (unsigned)meta.props.probability,
+                         (unsigned)meta.props.volume,
+                         meta.props.enabled ? "true" : "false");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, buf, n);
         return ESP_OK;
@@ -689,7 +793,6 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         // small JSON body expected
         int len = req->content_len;
         if (len <= 0 || len > 256) {
-            fclose(fd);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad JSON size");
             return ESP_FAIL;
         }
@@ -699,7 +802,6 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         while (received < len) {
             int r = httpd_req_recv(req, body + received, len - received);
             if (r <= 0) {
-                fclose(fd);
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read body");
                 return ESP_FAIL;
             }
@@ -707,9 +809,9 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         }
         body[len] = '\0';
 
-        int p = (int)meta.probability;
-        int v = (int)meta.volume;
-        bool e = meta.enabled;
+        int p = (int)meta.props.probability;
+        int v = (int)meta.props.volume;
+        bool e = meta.props.enabled;
 
         // keys must match what the browser sends
         json_get_int(body, "probability", &p);
@@ -729,28 +831,23 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
             v = 100;
         }
 
-        meta.probability = (uint8_t)p;
-        meta.volume = (uint8_t)v;
-        meta.enabled = e;
-
-        if (fseek(fd, 0, SEEK_SET) != 0) {
-            fclose(fd);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Seek failed");
+        file_entry_set_props(&meta, NULL, (uint8_t)p, (uint8_t)v, e);
+        FILE *fd = fopen(filepath, "r+b");
+        if (!fd) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to open file");
             return ESP_FAIL;
         }
-        if (file_entry_write_header(fd, &meta) != ESP_OK) {
+        if (fseek(fd, 0, SEEK_SET) != 0 || files_write_header(fd, &meta) != ESP_OK) {
             fclose(fd);
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Header write failed");
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save properties");
             return ESP_FAIL;
         }
-
         fclose(fd);
         httpd_resp_set_type(req, "text/plain");
         httpd_resp_sendstr(req, "OK");
         return ESP_OK;
     }
 
-    fclose(fd);
     httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method not allowed");
     return ESP_FAIL;
 }

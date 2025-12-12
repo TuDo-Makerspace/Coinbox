@@ -22,6 +22,7 @@
 #include "logger.h"
 #include "gpio.h"
 #include "audio.h"
+#include "files.h"
 
 
 /* This example demonstrates how to create file server
@@ -41,6 +42,7 @@ void app_main(void)
     /* Initialize file storage */
     const char* base_path = "/data";
     ESP_ERROR_CHECK(mount_storage(base_path));
+    ESP_ERROR_CHECK(files_set_base_path(base_path));
 
     init_wifi();
 
@@ -48,6 +50,6 @@ void app_main(void)
     ESP_ERROR_CHECK(start_ws_server(base_path));
     logger_logi(TAG, "Web server started");
 
-    configure_gpio();
-    audio_init();
+    // configure_gpio();
+    // audio_init();
 }
