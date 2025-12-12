@@ -45,4 +45,7 @@ void app_main(void)
     /* Start the web server */
     ESP_ERROR_CHECK(start_ws_server(base_path));
     logger_logi(TAG, "Web server started");
+
+    configure_gpio();
+    audio_init();
 }
