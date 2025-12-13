@@ -16,7 +16,7 @@ SPIFFS_BIN="build/storage.bin"
 show_usage() {
   cat <<EOF
 Usage: $0 [ -d <IP> ] [ -f ] [ -s ]
-  -d <IP>   : ESP32 IP address (will prompt if not given)
+  -d <IP>   : ESP32 IP address (defaults to coinbox.local if not given)
   -f        : flash firmware (.bin at $FW_BIN)
   -s        : flash spiffs  (.bin at $SPIFFS_BIN)
 If neither -f nor -s is given, you’ll be asked interactively.
@@ -26,6 +26,7 @@ EOF
 
 # parse flags
 IP=""
+DEFAULT_IP="coinbox.local"
 DO_FW=0
 DO_SPIFFS=0
 while getopts "d:fs" opt; do
@@ -39,7 +40,8 @@ done
 
 # prompt for IP if missing
 if [[ -z "$IP" ]]; then
-  read -rp "Enter ESP32 IP address: " IP
+  read -rp "Enter ESP32 IP address [${DEFAULT_IP}]: " IP
+  IP="${IP:-$DEFAULT_IP}"
 fi
 
 # validate we have curl

@@ -24,6 +24,7 @@
 #include "audio.h"
 #include "files.h"
 #include "bootstrap.h"
+#include "mdns_service.h"
 
 
 static const char *TAG = "main";
@@ -41,6 +42,7 @@ void app_main(void)
     ESP_ERROR_CHECK(files_set_base_path(base_path));
 
     init_wifi();
+    ESP_ERROR_CHECK(mdns_start_service());
 
     ESP_ERROR_CHECK(bootstrap(base_path));
 

@@ -35,14 +35,14 @@ static const char BOOTSTRAP_HTML_TEMPLATE[] =
     "<style>"
     ":root { --text:#0f172a; --muted:#475569; --card:#fff; --border:#e5e7eb; --accent:#2563eb; --accent-2:#1d4ed8; }"
     "* { margin:0; padding:0; box-sizing:border-box; }"
-    "body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f5f7fb; color:var(--text); line-height:1.5; min-height:100vh; display:flex; align-items:center; justify-content:center; }"
+    "body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f5f7fb; color:var(--text); line-height:1.5; min-height:100vh; display:flex; align-items:center; justify-content:center; text-align:center; }"
     ".content { padding:clamp(1.4rem,3vw+0.5rem,2.6rem); max-width:960px; margin:0 auto; display:flex; align-items:center; justify-content:center; width:100%%; }"
-    ".card { width:100%%; background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 6px 18px rgba(0,0,0,0.05); padding:50px; display:flex; flex-direction:column; gap:1.1rem; }"
+    ".card { width:100%%; background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 6px 18px rgba(0,0,0,0.05); padding:50px; display:flex; flex-direction:column; gap:1.1rem; align-items:center; text-align:center; }"
     "h1 { font-size:clamp(1.7rem,1vw+1.35rem,2.2rem); }"
-    ".status-row { display:flex; gap:0.9rem; align-items:center; flex-wrap:wrap; }"
+    ".status-row { display:flex; gap:0.9rem; align-items:center; justify-content:center; flex-wrap:wrap; text-align:center; }"
     ".badge { display:inline-flex; align-items:center; justify-content:center; padding:0.6rem 0.9rem; border-radius:12px; background:#e0e7ff; color:var(--accent); font-weight:700; min-width:74px; font-size:1rem; }"
     ".status-text { color:var(--muted); font-size:0.98rem; }"
-    ".actions { display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:0.15rem; }"
+    ".actions { display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:0.15rem; justify-content:center; }"
     ".btn { text-decoration:none; padding:0.75em 1.2em; border-radius:10px; border:1px solid var(--border); font-weight:700; color:var(--text); background:#eef2ff; min-width:150px; text-align:center; transition:background 0.15s, transform 0.1s, box-shadow 0.15s; }"
     ".btn:hover { background:#e0e7ff; }"
     ".btn:active { transform:scale(0.98); }"
@@ -59,7 +59,7 @@ static const char BOOTSTRAP_HTML_TEMPLATE[] =
     "<div class=\"status-row\" id=\"status-row\"><span class=\"badge\" id=\"countdown\">%lu</span><div class=\"status-text\" id=\"status-text\">seconds remaining</div></div>"
     "<div class=\"actions\" id=\"actions\">"
     "<a class=\"btn primary\" id=\"start-now\" href=\"/skip\">Start now</a>"
-    "<a class=\"btn\" id=\"stay\" href=\"#\">Stay in recovery</a>"
+    "<a class=\"btn\" id=\"stay\" href=\"#\">Enter recovery mode</a>"
     "</div>"
     "</div>"
     "</div>"
@@ -104,8 +104,23 @@ static const char BOOTSTRAP_SKIP_HTML[] =
 
 static const size_t BOOTSTRAP_PAGE_MAX = 8192;
 
+static void cancel_recovery_timer(void)
+{
+    if (!s_recovery_timer) {
+        return;
+    }
+    xTimerStop(s_recovery_timer, 0);
+    xTimerDelete(s_recovery_timer, 0);
+    s_recovery_timer = NULL;
+}
+
 static void start_main(void)
 {
+    if (s_recovery_requested) {
+        logger_logi(TAG, "Recovery requested; not starting main application");
+        return;
+    }
+
     if (s_main_started) {
         logger_logi(TAG, "Main application already started");
         return;
@@ -129,16 +144,6 @@ static void start_main(void)
     }
 }
 
-static void cancel_recovery_timer(void)
-{
-    if (!s_recovery_timer) {
-        return;
-    }
-    xTimerStop(s_recovery_timer, 0);
-    xTimerDelete(s_recovery_timer, 0);
-    s_recovery_timer = NULL;
-}
-
 static void start_main_task(void *arg)
 {
     (void)arg;
@@ -149,6 +154,11 @@ static void start_main_task(void *arg)
 
 static void schedule_main_start(void)
 {
+    if (s_recovery_requested) {
+        logger_logw(TAG, "Recovery requested; skipping main start schedule");
+        return;
+    }
+
     if (s_main_started || s_start_task) {
         return;
     }

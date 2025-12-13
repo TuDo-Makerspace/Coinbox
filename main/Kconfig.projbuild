@@ -66,6 +66,20 @@ menu "Coinbox Configuration"
 
     endmenu
 
+    menu "mDNS Settings"
+        config MDNS_HOSTNAME
+            string "mDNS hostname"
+            default "coinbox"
+            help
+                Hostname advertised over mDNS (resolves as <hostname>.local).
+
+        config MDNS_INSTANCE
+            string "mDNS instance name"
+            default "Coinbox"
+            help
+                Friendly service name shown by mDNS browsers.
+    endmenu
+
     config RECOVERY_ENTRY_TIME
         int "Recovery entry timeout (seconds)"
         default 5
