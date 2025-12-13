@@ -130,6 +130,8 @@ For our project, we soldered the components onto a perfboard:
 
 ## Software
 
+> Firmware v3 now lives in the ESP-IDF project at the repo root (see `main/` and `README_IDF.md`). The notes below capture the earlier Arduino-based build for reference.
+
 ### Overview
 
 The project's software can be found in the [`src/`](src/) directory. It performs the following actions:

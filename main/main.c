@@ -25,12 +25,7 @@
 #include "files.h"
 
 
-/* This example demonstrates how to create file server
- * using esp_http_server. This file has only startup code.
- * Look in file_server.c for the implementation.
- */
-
-static const char *TAG = "example";
+static const char *TAG = "main";
 
 void app_main(void)
 {

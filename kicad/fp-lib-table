@@ -1,4 +1,0 @@
-(fp_lib_table
-  (version 7)
-  (lib (name "Coinbox")(type "KiCad")(uri "${KIPRJMOD}/Coinbox.pretty")(options "")(descr ""))
-)
