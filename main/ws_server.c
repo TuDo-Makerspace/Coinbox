@@ -25,6 +25,7 @@
 #include "logger.h"
 #include "files.h"
 #include "mount.h"
+#include "esp_system.h"
 
 #include "esp_vfs.h"
 #include "esp_littlefs.h"
@@ -32,6 +33,8 @@
 
 #include "ota.h"
 #include <ctype.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/timers.h"
 
 /* Max length a file path can have on storage */
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + CONFIG_LITTLEFS_OBJ_NAME_LEN)
@@ -138,6 +141,31 @@ static esp_err_t http_resp_navbar_js(httpd_req_t *req)
     const size_t navbar_js_size = (navbar_js_end - navbar_js_start);
     httpd_resp_set_type(req, "application/javascript");
     httpd_resp_send(req, (const char *)navbar_js_start, navbar_js_size);
+    return ESP_OK;
+}
+
+static void restart_timer_cb(TimerHandle_t timer)
+{
+    (void)timer;
+    logger_logw(TAG, "Restarting...");
+    esp_restart();
+}
+
+static esp_err_t restart_handler(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "Restarting");
+
+    TimerHandle_t timer = xTimerCreate("restart", pdMS_TO_TICKS(500), pdFALSE, NULL, restart_timer_cb);
+    if (!timer) {
+        logger_loge(TAG, "Failed to create restart timer; restarting immediately");
+        esp_restart();
+        return ESP_OK;
+    }
+    if (xTimerStart(timer, 0) != pdPASS) {
+        logger_loge(TAG, "Failed to start restart timer; restarting immediately");
+        esp_restart();
+    }
     return ESP_OK;
 }
 
@@ -997,6 +1025,14 @@ esp_err_t start_ws_server(const char *base_path)
         .user_ctx = server_data
     };
     httpd_register_uri_handler(server, &format_storage_uri);
+
+    httpd_uri_t restart_uri = {
+        .uri = "/restart",
+        .method = HTTP_POST,
+        .handler = restart_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &restart_uri);
 
     httpd_uri_t file_meta = {
         .uri = "/file-meta/*",

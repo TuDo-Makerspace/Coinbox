@@ -66,6 +66,15 @@ menu "Coinbox Configuration"
 
     endmenu
 
+    config RECOVERY_ENTRY_TIME
+        int "Recovery entry timeout (seconds)"
+        default 5
+        range 1 300
+        help
+            The number of seconds to stay on the bootstrap page before
+            launching the main web server. Hitting /recovery during this
+            window keeps the device in recovery mode.
+
     config EXAMPLE_HTTPD_CONN_CLOSE_HEADER
         bool "Send connection close header from request handlers"
         default y

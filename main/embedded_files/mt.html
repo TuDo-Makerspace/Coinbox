@@ -94,6 +94,7 @@
     <div class="actions">
       <button id="refresh-log">Refresh log</button>
       <button id="download-log">Download log</button>
+      <button id="restart-device">Restart device</button>
       <button id="format-storage">Format storage</button>
     </div>
     <div id="log-box" class="log-box">Loading log...</div>
@@ -166,6 +167,17 @@
 
     document.getElementById('refresh-log').addEventListener('click', fetchLog);
     document.getElementById('download-log').addEventListener('click', downloadLog);
+    document.getElementById('restart-device').addEventListener('click', async () => {
+      if (!confirm('Restart the device?')) return;
+      try {
+        const res = await fetch('/restart', { method: 'POST' });
+        if (!res.ok) throw new Error('Restart failed');
+        alert('Device restarting...');
+        setTimeout(() => location.replace('/'), 800);
+      } catch (e) {
+        alert(e.message || 'Restart failed');
+      }
+    });
     document.getElementById('format-storage').addEventListener('click', async () => {
       if (!confirm('Format storage? This will delete all files.')) return;
       try {

@@ -23,13 +23,14 @@
 #include "gpio.h"
 #include "audio.h"
 #include "files.h"
+#include "bootstrap.h"
 
 
 static const char *TAG = "main";
 
 void app_main(void)
 {
-    logger_logi(TAG, "Starting example");
+    logger_logi(TAG, "Starting Coinbox");
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -41,9 +42,11 @@ void app_main(void)
 
     init_wifi();
 
-    /* Start the web server */
-    ESP_ERROR_CHECK(start_ws_server(base_path));
-    logger_logi(TAG, "Web server started");
+    ESP_ERROR_CHECK(bootstrap(base_path));
+
+    // /* Start the web server */
+    // ESP_ERROR_CHECK(start_ws_server(base_path));
+    // logger_logi(TAG, "Web server started");
 
     // configure_gpio();
     // audio_init();
