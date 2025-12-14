@@ -78,6 +78,21 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
   #endif
+
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+  #if CONFIG_NETWORK_WIFI_STA
+        wifi_event_sta_disconnected_t *event = event_data;
+
+        if (s_retry_num < ESP_MAXIMUM_RETRY) {
+            logger_logw(TAG_STA, "Disconnected (reason %d). Retrying %d/%d",
+                     event->reason, s_retry_num + 1, ESP_MAXIMUM_RETRY);
+            s_retry_num++;
+            esp_wifi_connect();
+        } else {
+            logger_loge(TAG_STA, "Failed to connect after %d retries", s_retry_num);
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+        }
+  #endif
     }
 }
 
