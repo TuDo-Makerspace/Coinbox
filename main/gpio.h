@@ -22,3 +22,8 @@ extern volatile uint32_t hall_isr_count;
 extern bool laser_detection_enabled;
 extern TimerHandle_t s_isr_timer;
 extern TaskHandle_t  s_worker_task;
+
+int gpio_get_laser_level(void);
+int gpio_get_hall_level(void);
+bool gpio_is_laser_beam_blocked(void);
+bool gpio_is_lid_open(void);

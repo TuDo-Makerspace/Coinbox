@@ -80,6 +80,16 @@ menu "Coinbox Configuration"
                 Friendly service name shown by mDNS browsers.
     endmenu
 
+    menu "Audio Test"
+        config AUDIO_MAX_AMPLITUDE
+            hex "Audio test amplitude"
+            default 0x30
+            range 0x01 0x7FFF
+            help
+                Peak amplitude for the maintenance audio test tone.
+                Lower values reduce volume; keep small to protect ears/speakers.
+    endmenu
+
     config RECOVERY_ENTRY_TIME
         int "Recovery entry timeout (seconds)"
         default 5

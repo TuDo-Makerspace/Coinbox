@@ -27,6 +27,7 @@
 #include "mount.h"
 #include "esp_system.h"
 #include "audio_test.h"
+#include "gpio.h"
 
 #include "esp_vfs.h"
 #include "esp_littlefs.h"
@@ -170,17 +171,53 @@ static esp_err_t restart_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t gpio_state_handler(httpd_req_t *req)
+{
+    int laser_level = gpio_get_laser_level();
+    int hall_level = gpio_get_hall_level();
+    bool beam_blocked = gpio_is_laser_beam_blocked();
+    bool lid_open = gpio_is_lid_open();
+
+    char resp[192];
+    int len = snprintf(resp, sizeof(resp),
+                       "{\"laser\":{\"level\":%d,\"beam_blocked\":%s,\"count\":%u},"
+                       "\"hall\":{\"level\":%d,\"lid_open\":%s,\"count\":%u},"
+                       "\"laser_detection_enabled\":%s}",
+                       laser_level,
+                       beam_blocked ? "true" : "false",
+                       (unsigned)laser_isr_count,
+                       hall_level,
+                       lid_open ? "true" : "false",
+                       (unsigned)hall_isr_count,
+                       laser_detection_enabled ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
 static esp_err_t audio_test_handler(httpd_req_t *req)
 {
-    char resp[128];
+    char resp[160];
     float freq = audio_test_current_freq();
+    uint16_t amp = audio_test_current_amplitude();
+    uint16_t amp_max = audio_test_max_amplitude();
     bool running = audio_test_is_running();
     int len = snprintf(resp, sizeof(resp),
-                       "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f}",
+                       "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f,"
+                       "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f}",
                        running ? "true" : "false",
                        (double)freq,
                        (double)AUDIO_TEST_MIN_HZ,
-                       (double)AUDIO_TEST_MAX_HZ);
+                       (double)AUDIO_TEST_MAX_HZ,
+                       (unsigned)amp,
+                       (unsigned)amp_max,
+                       amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0);
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -193,7 +230,7 @@ static esp_err_t audio_test_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    char query[64] = {0};
+    char query[96] = {0};
     if (httpd_req_get_url_query_len(req) > 0) {
         if (httpd_req_get_url_query_len(req) >= (int)sizeof(query)) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Query too long");
@@ -211,13 +248,25 @@ static esp_err_t audio_test_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    char freq_str[16] = {0};
+    char vol_str[16] = {0};
+    float new_freq = AUDIO_TEST_DEFAULT_HZ;
+    if (httpd_query_key_value(query, "freq", freq_str, sizeof(freq_str)) == ESP_OK) {
+        new_freq = strtof(freq_str, NULL);
+    }
+    float volume_pct = -1.0f;
+    if (httpd_query_key_value(query, "volume", vol_str, sizeof(vol_str)) == ESP_OK) {
+        volume_pct = strtof(vol_str, NULL);
+        if (volume_pct < 0.0f) volume_pct = 0.0f;
+        if (volume_pct > 100.0f) volume_pct = 100.0f;
+    }
+    if (volume_pct < 0.0f) {
+        volume_pct = amp_max ? (100.0f * ((float)amp / (float)amp_max)) : 0.0f;
+    }
+    uint16_t new_amp = amp_max ? (uint16_t)((volume_pct / 100.0f) * (float)amp_max) : 0;
+
     if (strcmp(action, "start") == 0) {
-        char freq_str[16] = {0};
-        float new_freq = AUDIO_TEST_DEFAULT_HZ;
-        if (httpd_query_key_value(query, "freq", freq_str, sizeof(freq_str)) == ESP_OK) {
-            new_freq = strtof(freq_str, NULL);
-        }
-        esp_err_t err = audio_test_start(new_freq);
+        esp_err_t err = audio_test_start(new_freq, new_amp);
         if (err != ESP_OK) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to start tone");
             return ESP_FAIL;
@@ -230,13 +279,19 @@ static esp_err_t audio_test_handler(httpd_req_t *req)
     }
 
     freq = audio_test_current_freq();
+    amp = audio_test_current_amplitude();
+    amp_max = audio_test_max_amplitude();
     running = audio_test_is_running();
     len = snprintf(resp, sizeof(resp),
-                   "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f}",
+                   "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f,"
+                   "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f}",
                    running ? "true" : "false",
                    (double)freq,
                    (double)AUDIO_TEST_MIN_HZ,
-                   (double)AUDIO_TEST_MAX_HZ);
+                   (double)AUDIO_TEST_MAX_HZ,
+                   (unsigned)amp,
+                   (unsigned)amp_max,
+                   amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0);
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -1081,6 +1136,14 @@ esp_err_t start_ws_server(const char *base_path)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &logs_get);
+
+    httpd_uri_t gpio_state_uri = {
+        .uri = "/gpio/state",
+        .method = HTTP_GET,
+        .handler = gpio_state_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &gpio_state_uri);
 
     httpd_uri_t audio_test_uri = {
         .uri = "/audio/test",

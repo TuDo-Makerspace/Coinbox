@@ -94,7 +94,7 @@ static const char BOOTSTRAP_SKIP_HTML[] =
     "h1{font-size:1.8rem;margin:0 0 0.35em 0;}"
     "p{margin:0;color:#475569;font-size:1rem;}"
     "</style></head><body>"
-    "<div class=\"card\"><h1>Starting main application...</h1><p>Loading interface automatically.</p></div>"
+    "<div class=\"card\"><h1>Starting main application...</h1><p>Loading interface...</p></div>"
     "<script>"
     "const target='/';"
     "function probe(){fetch(target,{cache:'no-store'}).then(r=>{if(r.ok){location.replace(target);}}).catch(()=>{});} "

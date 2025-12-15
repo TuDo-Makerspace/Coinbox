@@ -79,6 +79,26 @@ void configure_gpio()
     printf("ISR + timer setup complete\n");
 }
 
+int gpio_get_laser_level(void)
+{
+    return gpio_get_level(GPIO_LASER_RECEIVER);
+}
+
+int gpio_get_hall_level(void)
+{
+    return gpio_get_level(GPIO_HALL_LID_SENSOR);
+}
+
+bool gpio_is_laser_beam_blocked(void)
+{
+    return gpio_get_laser_level() == 1;
+}
+
+bool gpio_is_lid_open(void)
+{
+    return gpio_get_hall_level() != 0;
+}
+
 void mute_output(bool mute)
 {
     if (mute)
@@ -188,4 +208,3 @@ static void isr_timer_callback(TimerHandle_t xTimer)
     // Create a new worker task and remember its handle
     s_worker_task = create_play_audio_task();
 }
-
