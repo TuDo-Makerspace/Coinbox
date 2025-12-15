@@ -6,6 +6,7 @@
 #include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_log.h"
 #include "esp_netif_net_stack.h"
 #include "esp_netif.h"
 #include "nvs_flash.h"
@@ -18,7 +19,6 @@
 #include "lwip/err.h"
 #include "lwip/sys.h"
 #include "sdkconfig.h"
-#include "logger.h"
 
 /*─── Configuration macro aliases ─────────────────────────────────────────────*/
 
@@ -54,27 +54,27 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
   #if CONFIG_NETWORK_WIFI_AP
         wifi_event_ap_staconnected_t *event = event_data;
-        logger_logi(TAG_AP, "Station "MACSTR" joined, AID=%d",
+        ESP_LOGI(TAG_AP, "Station "MACSTR" joined, AID=%d",
                  MAC2STR(event->mac), event->aid);
   #endif
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
   #if CONFIG_NETWORK_WIFI_AP
         wifi_event_ap_stadisconnected_t *event = event_data;
-        logger_logi(TAG_AP, "Station "MACSTR" left, AID=%d, reason:%d",
+        ESP_LOGI(TAG_AP, "Station "MACSTR" left, AID=%d, reason:%d",
                  MAC2STR(event->mac), event->aid, event->reason);
   #endif
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
   #if CONFIG_NETWORK_WIFI_STA
         esp_wifi_connect();
-        logger_logi(TAG_STA, "Station started");
+        ESP_LOGI(TAG_STA, "Station started");
   #endif
 
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
   #if CONFIG_NETWORK_WIFI_STA
         ip_event_got_ip_t *event = event_data;
-        logger_logi(TAG_STA, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG_STA, "Got IP:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
   #endif
@@ -84,12 +84,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         wifi_event_sta_disconnected_t *event = event_data;
 
         if (s_retry_num < ESP_MAXIMUM_RETRY) {
-            logger_logw(TAG_STA, "Disconnected (reason %d). Retrying %d/%d",
+            ESP_LOGW(TAG_STA, "Disconnected (reason %d). Retrying %d/%d",
                      event->reason, s_retry_num + 1, ESP_MAXIMUM_RETRY);
             s_retry_num++;
             esp_wifi_connect();
         } else {
-            logger_loge(TAG_STA, "Failed to connect after %d retries", s_retry_num);
+            ESP_LOGE(TAG_STA, "Failed to connect after %d retries", s_retry_num);
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
   #endif
@@ -120,7 +120,7 @@ esp_netif_t *wifi_init_softap(void)
     }
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_ap_config));
-    logger_logi(TAG_AP, "SoftAP ready. SSID:%s PW:%s CH:%d",
+    ESP_LOGI(TAG_AP, "SoftAP ready. SSID:%s PW:%s CH:%d",
              ESP_WIFI_AP_SSID, ESP_WIFI_AP_PASSWD, ESP_WIFI_CHANNEL);
 
     return esp_netif_ap;
@@ -145,7 +145,7 @@ esp_netif_t *wifi_init_sta(void)
     };
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_sta_config));
-    logger_logi(TAG_STA, "Station config done. SSID:%s", ESP_WIFI_STA_SSID);
+    ESP_LOGI(TAG_STA, "Station config done. SSID:%s", ESP_WIFI_STA_SSID);
 
     return esp_netif_sta;
 }
@@ -189,13 +189,13 @@ void init_wifi(void)
 
     /* Select mode based on Kconfig */
   #if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
-    logger_logi(TAG_STA, "Starting AP+STA mode");
+    ESP_LOGI(TAG_STA, "Starting AP+STA mode");
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
   #elif CONFIG_NETWORK_WIFI_AP
-    logger_logi(TAG_AP, "Starting AP mode");
+    ESP_LOGI(TAG_AP, "Starting AP mode");
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
   #elif CONFIG_NETWORK_WIFI_STA
-    logger_logi(TAG_STA, "Starting STA mode");
+    ESP_LOGI(TAG_STA, "Starting STA mode");
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   #else
     #error "CONFIG_NETWORK_WIFI_AP and CONFIG_NETWORK_WIFI_STA are both off!"
@@ -220,13 +220,13 @@ void init_wifi(void)
         pdFALSE, pdFALSE, portMAX_DELAY);
 
     if (bits & WIFI_CONNECTED_BIT) {
-        logger_logi(TAG_STA,
+        ESP_LOGI(TAG_STA,
                  "Connected: SSID=%s", ESP_WIFI_STA_SSID);
       #if CONFIG_NETWORK_WIFI_AP
         softap_set_dns_addr(esp_netif_ap, esp_netif_sta);
       #endif
     } else if (bits & WIFI_FAIL_BIT) {
-        logger_loge(TAG_STA,
+        ESP_LOGE(TAG_STA,
                  "Failed to connect: SSID=%s", ESP_WIFI_STA_SSID);
     }
     esp_netif_set_default_netif(esp_netif_sta);
@@ -235,7 +235,7 @@ void init_wifi(void)
     /* Enable NAPT only if AP is up */
   #if CONFIG_NETWORK_WIFI_AP
     if (esp_netif_napt_enable(esp_netif_ap) != ESP_OK) {
-        logger_loge(TAG_AP, "Failed to enable NAPT");
+        ESP_LOGE(TAG_AP, "Failed to enable NAPT");
     }
   #endif
 }

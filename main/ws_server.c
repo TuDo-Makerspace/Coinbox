@@ -22,11 +22,13 @@
 #include <dirent.h>
 
 #include "esp_err.h"
+#include "esp_log.h"
 #include "logger.h"
 #include "files.h"
 #include "mount.h"
 #include "esp_system.h"
 #include "audio_test.h"
+#include "audio.h"
 #include "gpio.h"
 
 #include "esp_vfs.h"
@@ -37,6 +39,7 @@
 #include <ctype.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "freertos/task.h"
 
 /* Max length a file path can have on storage */
 #define FILE_PATH_MAX (ESP_VFS_PATH_MAX + CONFIG_LITTLEFS_OBJ_NAME_LEN)
@@ -63,6 +66,24 @@ struct file_server_data {
 
 static const char *TAG = "file_server";
 
+static bool is_mp3_only(const char *name)
+{
+    if (!name) {
+        return false;
+    }
+    const char *dot = strrchr(name, '.');
+    return dot && strcasecmp(dot, ".mp3") == 0;
+}
+
+static bool is_meta_file(const char *name)
+{
+    if (!name) {
+        return false;
+    }
+    const char *dot = strrchr(name, '.');
+    return dot && strcmp(dot, ".meta") == 0;
+}
+
 static void url_decode_inplace(char *str)
 {
     char *src = str;
@@ -82,6 +103,28 @@ static void url_decode_inplace(char *str)
         dst++;
     }
     *dst = '\0';
+}
+
+static bool parse_bool_param(const char *str, bool *out)
+{
+    if (!str || !out) {
+        return false;
+    }
+    if (strcasecmp(str, "1") == 0 ||
+        strcasecmp(str, "true") == 0 ||
+        strcasecmp(str, "on") == 0 ||
+        strcasecmp(str, "yes") == 0) {
+        *out = true;
+        return true;
+    }
+    if (strcasecmp(str, "0") == 0 ||
+        strcasecmp(str, "false") == 0 ||
+        strcasecmp(str, "off") == 0 ||
+        strcasecmp(str, "no") == 0) {
+        *out = false;
+        return true;
+    }
+    return false;
 }
 
 /* Handler to redirect incoming GET request for /index.html to /
@@ -149,7 +192,7 @@ static esp_err_t http_resp_navbar_js(httpd_req_t *req)
 static void restart_timer_cb(TimerHandle_t timer)
 {
     (void)timer;
-    logger_logw(TAG, "Restarting...");
+    ESP_LOGW(TAG, "Restarting...");
     esp_restart();
 }
 
@@ -160,12 +203,12 @@ static esp_err_t restart_handler(httpd_req_t *req)
 
     TimerHandle_t timer = xTimerCreate("restart", pdMS_TO_TICKS(500), pdFALSE, NULL, restart_timer_cb);
     if (!timer) {
-        logger_loge(TAG, "Failed to create restart timer; restarting immediately");
+        ESP_LOGE(TAG, "Failed to create restart timer; restarting immediately");
         esp_restart();
         return ESP_OK;
     }
     if (xTimerStart(timer, 0) != pdPASS) {
-        logger_loge(TAG, "Failed to start restart timer; restarting immediately");
+        ESP_LOGE(TAG, "Failed to start restart timer; restarting immediately");
         esp_restart();
     }
     return ESP_OK;
@@ -201,23 +244,93 @@ static esp_err_t gpio_state_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t amp_mute_handler(httpd_req_t *req)
+{
+    bool muted = is_amp_muted();
+    char resp[64];
+    int len = snprintf(resp, sizeof(resp), "{\"muted\":%s}", muted ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_GET) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        httpd_resp_send(req, resp, len);
+        return ESP_OK;
+    }
+
+    if (req->method != HTTP_POST) {
+        httpd_resp_set_status(req, "405 Method Not Allowed");
+        httpd_resp_sendstr(req, "Method not allowed");
+        return ESP_FAIL;
+    }
+
+    char query[32] = {0};
+    char mute_str[16] = {0};
+    bool new_state = muted;
+    bool have_param = false;
+    int query_len = httpd_req_get_url_query_len(req);
+    if (query_len > 0) {
+        if (query_len >= (int)sizeof(query)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Query too long");
+            return ESP_FAIL;
+        }
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad query");
+            return ESP_FAIL;
+        }
+        if (httpd_query_key_value(query, "mute", mute_str, sizeof(mute_str)) == ESP_OK) {
+            have_param = parse_bool_param(mute_str, &new_state);
+        }
+    }
+
+    if (!have_param) {
+        esp_err_t err = toggle_amp_muted(&muted);
+        if (err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to toggle amp mute");
+            return ESP_FAIL;
+        }
+    } else {
+        esp_err_t err = set_amp_muted(new_state);
+        if (err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to set amp mute");
+            return ESP_FAIL;
+        }
+        muted = is_amp_muted();
+    }
+
+    len = snprintf(resp, sizeof(resp), "{\"muted\":%s}", muted ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
 static esp_err_t audio_test_handler(httpd_req_t *req)
 {
-    char resp[160];
+    char resp[192];
     float freq = audio_test_current_freq();
     uint16_t amp = audio_test_current_amplitude();
     uint16_t amp_max = audio_test_max_amplitude();
     bool running = audio_test_is_running();
+    bool playback_active = audio_is_playing();
     int len = snprintf(resp, sizeof(resp),
                        "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f,"
-                       "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f}",
+                       "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f,\"playback_active\":%s}",
                        running ? "true" : "false",
                        (double)freq,
                        (double)AUDIO_TEST_MIN_HZ,
                        (double)AUDIO_TEST_MAX_HZ,
                        (unsigned)amp,
                        (unsigned)amp_max,
-                       amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0);
+                       amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0,
+                       playback_active ? "true" : "false");
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -266,6 +379,13 @@ static esp_err_t audio_test_handler(httpd_req_t *req)
     uint16_t new_amp = amp_max ? (uint16_t)((volume_pct / 100.0f) * (float)amp_max) : 0;
 
     if (strcmp(action, "start") == 0) {
+        if (audio_is_playing()) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_set_type(req, "text/plain");
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            httpd_resp_sendstr(req, "Audio playback in progress");
+            return ESP_FAIL;
+        }
         esp_err_t err = audio_test_start(new_freq, new_amp);
         if (err != ESP_OK) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to start tone");
@@ -282,16 +402,82 @@ static esp_err_t audio_test_handler(httpd_req_t *req)
     amp = audio_test_current_amplitude();
     amp_max = audio_test_max_amplitude();
     running = audio_test_is_running();
+    playback_active = audio_is_playing();
     len = snprintf(resp, sizeof(resp),
                    "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f,"
-                   "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f}",
+                   "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f,\"playback_active\":%s}",
                    running ? "true" : "false",
                    (double)freq,
                    (double)AUDIO_TEST_MIN_HZ,
                    (double)AUDIO_TEST_MAX_HZ,
                    (unsigned)amp,
                    (unsigned)amp_max,
-                   amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0);
+                   amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0,
+                   playback_active ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
+static esp_err_t audio_playback_handler(httpd_req_t *req)
+{
+    char query[128] = {0};
+    if (httpd_req_get_url_query_len(req) > 0) {
+        if (httpd_req_get_url_query_len(req) >= (int)sizeof(query)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Query too long");
+            return ESP_FAIL;
+        }
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad query");
+            return ESP_FAIL;
+        }
+    }
+
+    char action[8] = "start";
+    httpd_query_key_value(query, "action", action, sizeof(action));
+
+    if (strcmp(action, "stop") == 0) {
+        audio_stop();
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        httpd_resp_sendstr(req, "{\"status\":\"stopped\"}");
+        return ESP_OK;
+    }
+
+    // Stop the maintenance tone before starting MP3 playback to avoid conflicts
+    audio_test_stop();
+
+    char name[FILE_ENTRY_NAME_MAX] = {0};
+    if (httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK || name[0] == '\0') {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing name");
+        return ESP_FAIL;
+    }
+
+    if (!is_mp3_only(name)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Only MP3 playback is supported right now");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = audio_start_file(name);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_NOT_FOUND) {
+            httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
+        } else if (err == ESP_ERR_INVALID_ARG) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
+        } else {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to start playback");
+        }
+        return ESP_FAIL;
+    }
+
+    char resp[128];
+    int len = snprintf(resp, sizeof(resp), "{\"status\":\"started\",\"name\":\"%s\"}", name);
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -339,7 +525,7 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
     strlcpy(entrypath, dirpath, sizeof(entrypath));
 
     if (!dir) {
-        logger_loge(TAG, "Failed to stat dir : %s", dirpath);
+        ESP_LOGE(TAG, "Failed to stat dir : %s", dirpath);
         /* Respond with 404 Not Found */
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Directory does not exist");
         return ESP_FAIL;
@@ -362,22 +548,26 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
 
     int row_idx = 0;
     /* Iterate over all files / folders and fetch their names and sizes */
+    int yield_counter = 0;
     while ((entry = readdir(dir)) != NULL) {
         entrytype = (entry->d_type == DT_DIR ? "directory" : "file");
 
         int len = snprintf(entrypath, sizeof(entrypath), "%s/%s",
                        dirpath, entry->d_name);
         if (len < 0 || len >= sizeof(entrypath)) {
-            logger_loge(TAG, "Path too long: %s + %s", dirpath, entry->d_name);
+            ESP_LOGE(TAG, "Path too long: %s + %s", dirpath, entry->d_name);
             continue;
         }
         if (stat(entrypath, &entry_stat) == -1) {
-            logger_loge(TAG, "Failed to stat %s : %s", entrytype, entry->d_name);
+            ESP_LOGE(TAG, "Failed to stat %s : %s", entrytype, entry->d_name);
             continue;
         }
-        logger_logi(TAG, "Found %s : %s", entrytype, entry->d_name);
+        ESP_LOGI(TAG, "Found %s : %s", entrytype, entry->d_name);
 
         bool is_dir = (entry->d_type == DT_DIR);
+        if (!is_dir && is_meta_file(entry->d_name)) {
+            continue;
+        }
         if (is_dir) {
             httpd_resp_sendstr_chunk(req, "<div class=\"file-item\"><div class=\"file-row-main\">");
             httpd_resp_sendstr_chunk(req, "<a class=\"file-name\" href=\"");
@@ -391,9 +581,9 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
             continue;
         }
 
-        file_entry_t meta;
-        if (files_read_header(entry->d_name, &meta) != ESP_OK) {
-            logger_logw(TAG, "Skipping non-entry file: %s", entrypath);
+        file_properties_t meta;
+        if (files_read_meta(entry->d_name, &meta) != ESP_OK) {
+            ESP_LOGW(TAG, "Skipping non-entry file: %s", entrypath);
             continue;
         }
 
@@ -405,23 +595,25 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
         httpd_resp_sendstr_chunk(req, "\" data-file-uri=\"");
         httpd_resp_sendstr_chunk(req, req->uri);
         httpd_resp_sendstr_chunk(req, entry->d_name);
+        httpd_resp_sendstr_chunk(req, "\" data-file-name=\"");
+        httpd_resp_sendstr_chunk(req, entry->d_name);
         httpd_resp_sendstr_chunk(req, "\" data-probability=\"");
         char numbuf[16];
-        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.props.probability);
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.probability);
         httpd_resp_sendstr_chunk(req, numbuf);
         httpd_resp_sendstr_chunk(req, "\" data-volume=\"");
-        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.props.volume);
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)meta.volume);
         httpd_resp_sendstr_chunk(req, numbuf);
         httpd_resp_sendstr_chunk(req, "\" data-enabled=\"");
-        httpd_resp_sendstr_chunk(req, meta.props.enabled ? "1" : "0");
+        httpd_resp_sendstr_chunk(req, meta.enabled ? "1" : "0");
         httpd_resp_sendstr_chunk(req, "\">");
 
         httpd_resp_sendstr_chunk(req, "<div class=\"file-row-main\">");
         httpd_resp_sendstr_chunk(req, "<div class=\"file-name-wrap\"><a class=\"file-name\" href=\"");
         httpd_resp_sendstr_chunk(req, req->uri);
         httpd_resp_sendstr_chunk(req, entry->d_name);
-        logger_logi(TAG, "Request URI: %s, Entry Name: %s", req->uri, entry->d_name);
-        logger_logi(TAG, "Incoming dirpath: %s", dirpath);
+        ESP_LOGI(TAG, "Request URI: %s, Entry Name: %s", req->uri, entry->d_name);
+        ESP_LOGI(TAG, "Incoming dirpath: %s", dirpath);
         httpd_resp_sendstr_chunk(req, "\" title=\"");
         httpd_resp_sendstr_chunk(req, entry->d_name);
         httpd_resp_sendstr_chunk(req, "\">");
@@ -470,6 +662,11 @@ static esp_err_t http_resp_dir_html(httpd_req_t *req, const char *dirpath)
 
         httpd_resp_sendstr_chunk(req, "</div></div>");
         httpd_resp_sendstr_chunk(req, "</div>\n");
+
+        if (++yield_counter >= 4) { // periodically yield to feed WDT
+            vTaskDelay(1);
+            yield_counter = 0;
+        }
     }
     closedir(dir);
 
@@ -556,7 +753,7 @@ static const char* get_path_from_uri(char *dest, const char *base_path, const ch
     strlcpy(dest + base_pathlen, uri, pathlen + 1);
 
     const char *result = dest + base_pathlen;
-    logger_logi(TAG, "Destination: %s, Base Path: %s, Return: %s", dest, base_path, result);
+    ESP_LOGI(TAG, "Destination: %s, Base Path: %s, Return: %s", dest, base_path, result);
     return result;
 
     /* Return pointer to path, skipping the base */
@@ -576,14 +773,14 @@ static esp_err_t download_get_handler(httpd_req_t *req)
     const char *filename = get_path_from_uri(filepath, ((struct file_server_data *)req->user_ctx)->base_path,
                                              req->uri + sizeof("/file-server") - 1, sizeof(filepath));
     if (!filename) {
-        logger_loge(TAG, "Filename is too long");
+        ESP_LOGE(TAG, "Filename is too long");
         /* Respond with 500 Internal Server Error */
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
         return ESP_FAIL;
     }
     size_t filename_len = strlen(filename);
     char filename_last_char = filename_len ? filename[filename_len - 1] : '\0';
-    logger_logi(TAG, "Fileserver found : %s, filename: %s, filenamestrlen: %c", filepath, filename,
+    ESP_LOGI(TAG, "Fileserver found : %s, filename: %s, filenamestrlen: %c", filepath, filename,
              filename_last_char ? filename_last_char : ' ');
 
     if (filename_len == 0) {
@@ -628,13 +825,21 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid rename");
         return ESP_FAIL;
     }
+    if (rename_requested && is_meta_file(rename_val)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid rename");
+        return ESP_FAIL;
+    }
+    if (is_meta_file(base_name)) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
+        return ESP_FAIL;
+    }
     
     if (delete_requested) {
         if (stat(filepath, &file_stat) == -1) {
             httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
             return ESP_FAIL;
         }
-        if (unlink(filepath) != 0) {
+        if (files_delete_with_meta(base_name) != ESP_OK) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to delete file");
             return ESP_FAIL;
         }
@@ -670,7 +875,21 @@ static esp_err_t download_get_handler(httpd_req_t *req)
             httpd_resp_sendstr(req, "Target exists");
             return ESP_OK;
         }
-        if (rename(filepath, new_filepath) != 0) {
+        char new_meta_filepath[FILE_PATH_MAX];
+        if (dir_len + strlen(rename_val) + strlen(".meta") >= sizeof(new_meta_filepath)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "New name too long");
+            return ESP_FAIL;
+        }
+        memcpy(new_meta_filepath, filepath, dir_len);
+        new_meta_filepath[dir_len] = '\0';
+        strlcpy(new_meta_filepath + dir_len, rename_val, sizeof(new_meta_filepath) - dir_len);
+        strlcat(new_meta_filepath, ".meta", sizeof(new_meta_filepath));
+        if (stat(new_meta_filepath, &file_stat) == 0) {
+            httpd_resp_set_status(req, "409 Conflict");
+            httpd_resp_sendstr(req, "Target exists");
+            return ESP_OK;
+        }
+        if (files_rename_with_meta(base_name, rename_val) != ESP_OK) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Rename failed");
             return ESP_FAIL;
         }
@@ -690,39 +909,34 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         } else if (strcmp(filename, "/mt") == 0) {
             return http_resp_mt_html(req);
         }
-        logger_loge(TAG, "Failed to stat file : l%sl", filepath);
+        ESP_LOGE(TAG, "Failed to stat file : l%sl", filepath);
         /* Respond with 404 Not Found */
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
         return ESP_FAIL;
     }
 
-    fd = fopen(filepath, "r");
+    fd = fopen(filepath, "rb");
     if (!fd) {
-        logger_loge(TAG, "Failed to read existing file : %s", filepath);
+        ESP_LOGE(TAG, "Failed to read existing file : %s", filepath);
         /* Respond with 500 Internal Server Error */
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read existing file");
         return ESP_FAIL;
     }
 
-    file_entry_t meta;
-    if (files_read_header(base_name, &meta) != ESP_OK) {
+    file_properties_t meta;
+    if (files_read_meta(base_name, &meta) != ESP_OK) {
         fclose(fd);
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File entry missing");
         return ESP_FAIL;
     }
 
-    if (fseek(fd, (long)FILE_HEADER_SIZE, SEEK_SET) != 0) {
-        fclose(fd);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to seek");
-        return ESP_FAIL;
-    }
-
-    logger_logi(TAG, "Sending file : %s (%zu bytes)...", filename, meta.data_size);
+    size_t payload_size = (size_t)file_stat.st_size;
+    ESP_LOGI(TAG, "Sending file : %s (%zu bytes)...", filename, payload_size);
     set_content_type_from_file(req, filename);
 
     /* Retrieve the pointer to scratch buffer for temporary storage */
     char *chunk = ((struct file_server_data *)req->user_ctx)->scratch;
-    size_t remaining = meta.data_size;
+    size_t remaining = payload_size;
     while (remaining > 0) {
         size_t to_read = remaining > SCRATCH_BUFSIZE ? SCRATCH_BUFSIZE : remaining;
         size_t chunksize = fread(chunk, 1, to_read, fd);
@@ -731,7 +945,7 @@ static esp_err_t download_get_handler(httpd_req_t *req)
         }
         if (httpd_resp_send_chunk(req, chunk, chunksize) != ESP_OK) {
             fclose(fd);
-            logger_loge(TAG, "File sending failed!");
+            ESP_LOGE(TAG, "File sending failed!");
             httpd_resp_sendstr_chunk(req, NULL);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to send file");
             return ESP_FAIL;
@@ -741,7 +955,7 @@ static esp_err_t download_get_handler(httpd_req_t *req)
 
     /* Close file after sending complete */
     fclose(fd);
-    logger_logi(TAG, "File sending complete");
+    ESP_LOGI(TAG, "File sending complete");
 
     /* Respond with an empty chunk to signal HTTP response completion */
 #ifdef CONFIG_EXAMPLE_HTTPD_CONN_CLOSE_HEADER
@@ -796,7 +1010,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
 
     /* Filename must exist and cannot have a trailing '/' */
     if (filename_len == 0 || filename[filename_len - 1] == '/') {
-        logger_loge(TAG, "Invalid filename : %s", filename);
+        ESP_LOGE(TAG, "Invalid filename : %s", filename);
         return send_upload_error(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
     }
 
@@ -807,25 +1021,25 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     }
 
     if (!is_audio_filename(base_name)) {
-        logger_loge(TAG, "Rejected non-audio upload : %s", base_name);
+        ESP_LOGE(TAG, "Rejected non-audio upload : %s", base_name);
         return send_upload_error(req, HTTPD_400_BAD_REQUEST,
                                  "Only audio files are allowed (" ALLOWED_AUDIO_EXTS_LIST ")");
     }
 
     if (stat(filepath, &file_stat) == 0) {
-        logger_loge(TAG, "File already exists : %s", filepath);
+        ESP_LOGE(TAG, "File already exists : %s", filepath);
         /* Respond with 400 Bad Request */
         return send_upload_error(req, HTTPD_400_BAD_REQUEST, "File already exists");
     }
 
     if (files_count() >= FILES_MAX_ENTRIES) {
-        logger_loge(TAG, "Max file entries reached");
+        ESP_LOGE(TAG, "Max file entries reached");
         return send_upload_error(req, HTTPD_400_BAD_REQUEST, "File entry limit reached");
     }
 
     /* File cannot be larger than a limit */
     if (req->content_len > MAX_FILE_SIZE) {
-        logger_loge(TAG, "File too large : %d bytes", req->content_len);
+        ESP_LOGE(TAG, "File too large : %d bytes", req->content_len);
         /* Respond with 400 Bad Request */
         return send_upload_error(req, HTTPD_413_CONTENT_TOO_LARGE,
                                  "File size must be less than " MAX_FILE_SIZE_STR "!");
@@ -835,24 +1049,14 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
 
     fd = fopen(filepath, "wb");
     if (!fd) {
-        logger_loge(TAG, "Failed to create file : %s", filepath);
+        ESP_LOGE(TAG, "Failed to create file : %s", filepath);
         /* Respond with 500 Internal Server Error */
         return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create file");
     }
 
-    file_entry_t meta;
-    file_entry_init(&meta, base_name);
-    file_entry_set_props(&meta, base_name, 100, 100, true);
-    meta.data_size = (size_t)req->content_len;
-    meta.modified = false; // freshly written
+    size_t bytes_written = 0;
 
-    if (files_write_header(fd, &meta) != ESP_OK) {
-        fclose(fd);
-        unlink(filepath);
-        return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write header");
-    }
-
-    logger_logi(TAG, "Receiving file : %s...", filename);
+    ESP_LOGI(TAG, "Receiving file : %s...", filename);
 
     /* Retrieve the pointer to scratch buffer for temporary storage */
     char *buf = ((struct file_server_data *)req->user_ctx)->scratch;
@@ -864,7 +1068,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
 
     while (remaining > 0) {
 
-        logger_logi(TAG, "Remaining size : %d", remaining);
+        ESP_LOGI(TAG, "Remaining size : %d", remaining);
         /* Receive the file part by part into a buffer */
         if ((received = httpd_req_recv(req, buf, MIN(remaining, SCRATCH_BUFSIZE))) <= 0) {
             if (received == HTTPD_SOCK_ERR_TIMEOUT) {
@@ -877,7 +1081,7 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
             fclose(fd);
             unlink(filepath);
 
-            logger_loge(TAG, "File reception failed!");
+            ESP_LOGE(TAG, "File reception failed!");
             /* Respond with 500 Internal Server Error */
             return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to receive file");
         }
@@ -889,10 +1093,11 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
             fclose(fd);
             unlink(filepath);
 
-            logger_loge(TAG, "File write failed!");
+            ESP_LOGE(TAG, "File write failed!");
             /* Respond with 500 Internal Server Error */
             return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write file to storage");
         }
+        bytes_written += (size_t)received;
 
         /* Keep track of remaining size of
          * the file left to be uploaded */
@@ -901,7 +1106,16 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
 
     /* Close file upon upload completion */
     fclose(fd);
-    logger_logi(TAG, "File reception complete");
+    ESP_LOGI(TAG, "File reception complete (%zu bytes)", bytes_written);
+
+    file_properties_t meta;
+    file_props_init(&meta, base_name);
+    file_props_set(&meta, base_name, 100, 100, true);
+    if (files_write_meta(base_name, &meta) != ESP_OK) {
+        unlink(filepath);
+        ESP_LOGE(TAG, "Failed to write meta for %s", base_name);
+        return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to write metadata");
+    }
 
     /* Redirect onto root to see the updated file list */
     httpd_resp_set_status(req, "303 See Other");
@@ -963,19 +1177,23 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    if (stat(filepath, &st) == -1) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
-        return ESP_FAIL;
-    }
-
     const char *base_name = filename;
     const char *slash_in_filename = strrchr(filename, '/');
     if (slash_in_filename && *(slash_in_filename + 1)) {
         base_name = slash_in_filename + 1;
     }
+    if (is_meta_file(base_name)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
+        return ESP_FAIL;
+    }
 
-    file_entry_t meta;
-    if (files_read_header(base_name, &meta) != ESP_OK) {
+    if (stat(filepath, &st) == -1) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
+        return ESP_FAIL;
+    }
+
+    file_properties_t meta;
+    if (files_read_meta(base_name, &meta) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File entry missing");
         return ESP_FAIL;
     }
@@ -984,9 +1202,9 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         char buf[128];
         int n = snprintf(buf, sizeof(buf),
                          "{\"probability\":%u,\"volume\":%u,\"enabled\":%s}\n",
-                         (unsigned)meta.props.probability,
-                         (unsigned)meta.props.volume,
-                         meta.props.enabled ? "true" : "false");
+                         (unsigned)meta.probability,
+                         (unsigned)meta.volume,
+                         meta.enabled ? "true" : "false");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, buf, n);
         return ESP_OK;
@@ -1012,9 +1230,9 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         }
         body[len] = '\0';
 
-        int p = (int)meta.props.probability;
-        int v = (int)meta.props.volume;
-        bool e = meta.props.enabled;
+        int p = (int)meta.probability;
+        int v = (int)meta.volume;
+        bool e = meta.enabled;
 
         // keys must match what the browser sends
         json_get_int(body, "probability", &p);
@@ -1034,18 +1252,11 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
             v = 100;
         }
 
-        file_entry_set_props(&meta, NULL, (uint8_t)p, (uint8_t)v, e);
-        FILE *fd = fopen(filepath, "r+b");
-        if (!fd) {
-            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to open file");
-            return ESP_FAIL;
-        }
-        if (fseek(fd, 0, SEEK_SET) != 0 || files_write_header(fd, &meta) != ESP_OK) {
-            fclose(fd);
+        file_props_set(&meta, NULL, (uint8_t)p, (uint8_t)v, e);
+        if (files_write_meta(base_name, &meta) != ESP_OK) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save properties");
             return ESP_FAIL;
         }
-        fclose(fd);
         httpd_resp_set_type(req, "text/plain");
         httpd_resp_sendstr(req, "OK");
         return ESP_OK;
@@ -1061,14 +1272,14 @@ esp_err_t start_ws_server(const char *base_path)
     static struct file_server_data *server_data = NULL;
 
     if (server_data) {
-        logger_loge(TAG, "File server already started");
+        ESP_LOGE(TAG, "File server already started");
         return ESP_ERR_INVALID_STATE;
     }
 
     /* Allocate memory for server data */
     server_data = calloc(1, sizeof(struct file_server_data));
     if (!server_data) {
-        logger_loge(TAG, "Failed to allocate memory for server data");
+        ESP_LOGE(TAG, "Failed to allocate memory for server data");
         return ESP_ERR_NO_MEM;
     }
     strlcpy(server_data->base_path, base_path,
@@ -1076,16 +1287,19 @@ esp_err_t start_ws_server(const char *base_path)
 
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 14;
+    /* Directory listings plus metadata lookups use a bit more stack now that
+     * payloads and metadata are separate; give the HTTPD task extra room. */
+    config.stack_size = 8192;
+    config.max_uri_handlers = 16;
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
      * target URIs which match the wildcard scheme */
     config.uri_match_fn = httpd_uri_match_wildcard;
 
-    logger_logi(TAG, "Starting HTTP Server on port: '%d'", config.server_port);
+    ESP_LOGI(TAG, "Starting HTTP Server on port: '%d'", config.server_port);
     if (httpd_start(&server, &config) != ESP_OK) {
-        logger_loge(TAG, "Failed to start file server!");
+        ESP_LOGE(TAG, "Failed to start file server!");
         return ESP_FAIL;
     }
 
@@ -1145,6 +1359,14 @@ esp_err_t start_ws_server(const char *base_path)
     };
     httpd_register_uri_handler(server, &gpio_state_uri);
 
+    httpd_uri_t amp_mute_uri = {
+        .uri = "/amp/mute",
+        .method = HTTP_ANY,
+        .handler = amp_mute_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &amp_mute_uri);
+
     httpd_uri_t audio_test_uri = {
         .uri = "/audio/test",
         .method = HTTP_ANY,
@@ -1152,6 +1374,14 @@ esp_err_t start_ws_server(const char *base_path)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &audio_test_uri);
+
+    httpd_uri_t audio_playback_uri = {
+        .uri = "/audio/playback",
+        .method = HTTP_POST,
+        .handler = audio_playback_handler,
+        .user_ctx = server_data
+    };
+    httpd_register_uri_handler(server, &audio_playback_uri);
 
     httpd_uri_t mt_page = {
         .uri = "/mt",

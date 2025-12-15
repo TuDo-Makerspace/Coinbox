@@ -15,6 +15,7 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_err.h"
+#include "esp_log.h"
 #include "nvs_flash.h"
 #include "ws_server.h"
 #include "network.h"
@@ -30,7 +31,8 @@ static const char *TAG = "main";
 
 void app_main(void)
 {
-    logger_logi(TAG, "Starting Coinbox");
+    logger_init();
+    ESP_LOGI(TAG, "Starting Coinbox");
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -39,6 +41,7 @@ void app_main(void)
     const char* base_path = "/data";
     ESP_ERROR_CHECK(mount_storage(base_path));
     ESP_ERROR_CHECK(files_set_base_path(base_path));
+    ESP_ERROR_CHECK(audio_init(base_path));
 
     init_wifi();
     ESP_ERROR_CHECK(mdns_start_service());
@@ -47,8 +50,7 @@ void app_main(void)
 
     // /* Start the web server */
     // ESP_ERROR_CHECK(start_ws_server(base_path));
-    // logger_logi(TAG, "Web server started");
+    // ESP_LOGI(TAG, "Web server started");
 
     // configure_gpio();
-    // audio_init();
 }

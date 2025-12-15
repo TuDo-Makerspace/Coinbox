@@ -4,6 +4,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "esp_log.h"
+#include "esp_err.h"
 #include "gpio.h"
 #include "audio.h"
 #include "freertos/FreeRTOS.h"
@@ -12,6 +13,10 @@
 #include "driver/gpio.h"
 
 #define TAG "gpio"
+
+static void gpio_laser_isr_handler(void *arg);
+static void gpio_hall_isr_handler(void *arg);
+static void isr_timer_callback(TimerHandle_t xTimer);
 
 volatile uint32_t laser_isr_count = 0;
 volatile uint32_t hall_isr_count = 0;
@@ -22,14 +27,38 @@ TaskHandle_t  s_worker_task = NULL;
 
 // GPIO definitions
 // GPIO outputs
-#define GPIO_MUTE_DAC 21
 #define GPIO_MUTE_AMP 22
-#define GPIO_OUTPUT_PIN_SEL ((1ULL << GPIO_MUTE_DAC) | (1ULL << GPIO_MUTE_AMP))
+#define GPIO_OUTPUT_PIN_SEL (1ULL << GPIO_MUTE_AMP)
 
 // GPIO inputs
 #define GPIO_LASER_RECEIVER 23
 #define GPIO_HALL_LID_SENSOR 2
 #define GPIO_INPUT_PIN_SEL ((1ULL << GPIO_LASER_RECEIVER) | (1ULL << GPIO_HALL_LID_SENSOR))
+
+static bool s_amp_pin_configured;
+static bool s_amp_muted = true;
+
+static esp_err_t ensure_amp_pin_configured(void)
+{
+    if (s_amp_pin_configured) {
+        return ESP_OK;
+    }
+    gpio_config_t cfg = {
+        .pin_bit_mask = (1ULL << GPIO_MUTE_AMP),
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_down_en = 0,
+        .pull_up_en = 0,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    esp_err_t err = gpio_config(&cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure amp mute pin: %s", esp_err_to_name(err));
+        return err;
+    }
+    s_amp_pin_configured = true;
+    s_amp_muted = gpio_get_level(GPIO_MUTE_AMP) != 0;
+    return ESP_OK;
+}
 
 void configure_gpio()
 {
@@ -61,6 +90,10 @@ void configure_gpio()
     io_conf.pull_up_en = 0;
     // configure GPIO with the given settings
     gpio_config(&io_conf);
+
+    gpio_set_level(GPIO_MUTE_AMP, 1);
+    s_amp_pin_configured = true;
+    s_amp_muted = true;
 
     // Configure input pins with interrupts
     gpio_config_t io_conf_in = {};
@@ -101,19 +134,56 @@ bool gpio_is_lid_open(void)
 
 void mute_output(bool mute)
 {
-    if (mute)
-    {
+    if (mute) {
         ESP_LOGI(TAG, "Muting output");
         gpio_set_level(GPIO_MUTE_AMP, 1);
-        gpio_set_level(GPIO_MUTE_DAC, 0);
-    }
-    else
-    {
+    } else {
         ESP_LOGI(TAG, "Unmuting output");
         gpio_set_level(GPIO_MUTE_AMP, 0);
-        vTaskDelay(configTICK_RATE_HZ / 20); // delay dac 50ms to give amp some time to turn on before soft unmute
-        gpio_set_level(GPIO_MUTE_DAC, 1);
+        vTaskDelay(configTICK_RATE_HZ / 20); // give amp some time to turn on before soft unmute
     }
+    s_amp_muted = mute;
+}
+
+esp_err_t set_amp_muted(bool mute)
+{
+    esp_err_t err = ensure_amp_pin_configured();
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = gpio_set_level(GPIO_MUTE_AMP, mute ? 1 : 0);
+    if (err != ESP_OK) {
+        return err;
+    }
+    s_amp_muted = gpio_get_level(GPIO_MUTE_AMP) != 0;
+    return ESP_OK;
+}
+
+esp_err_t toggle_amp_muted(bool *muted_out)
+{
+    esp_err_t err = ensure_amp_pin_configured();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    bool target = !is_amp_muted();
+    err = set_amp_muted(target);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (muted_out) {
+        *muted_out = is_amp_muted();
+    }
+    return ESP_OK;
+}
+
+bool is_amp_muted(void)
+{
+    if (ensure_amp_pin_configured() != ESP_OK) {
+        return true;
+    }
+    s_amp_muted = gpio_get_level(GPIO_MUTE_AMP) != 0;
+    return s_amp_muted;
 }
 
 // lid open, dont detect coins

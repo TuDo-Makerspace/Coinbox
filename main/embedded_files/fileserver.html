@@ -174,15 +174,6 @@
       transition: background 0.15s, color 0.15s, transform 0.1s;
     }
     .play-btn svg { width: 18px; height: 18px; }
-    .file-item.playing .play-btn {
-      background: #0ea5e9;
-      color: #fff;
-      border-color: #0284c7;
-    }
-    .file-item.playing .play-btn:hover {
-      background: #0284c7;
-      color: #e0f2fe;
-    }
 
     .chev {
       width: 38px;
@@ -411,7 +402,6 @@
       const safeBase = basePath.endsWith('/') ? basePath : basePath + '/';
       const allowedAudioExts = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'];
       const allowedAudioText = allowedAudioExts.join(', ');
-      let audioPlayer = null;
       let playingRowId = null;
 
       function hasAllowedAudioExt(name) {
@@ -419,47 +409,45 @@
         return allowedAudioExts.some((ext) => lower.endsWith(ext));
       }
 
-      function ensureAudio() {
-        if (!audioPlayer) {
-          audioPlayer = new Audio();
-          audioPlayer.addEventListener('ended', () => stopPlayback());
-          audioPlayer.addEventListener('error', () => stopPlayback());
-        }
-        return audioPlayer;
-      }
-
       function markPlaying(row) {
-        if (playingRowId) {
-          const prev = document.getElementById(playingRowId);
-          if (prev) prev.classList.remove('playing');
-        }
         playingRowId = row ? row.id : null;
-        if (row) row.classList.add('playing');
       }
 
-      function stopPlayback() {
-        if (audioPlayer) {
-          audioPlayer.pause();
-          audioPlayer.currentTime = 0;
+      async function stopRemotePlayback() {
+        if (!playingRowId) return;
+        try {
+          await fetch('/audio/playback?action=stop', { method: 'POST' });
+        } catch (_) {
+          // ignore
         }
         markPlaying(null);
       }
 
-      function playRow(row) {
+      async function startPlayback(row) {
         if (!row) return;
-        const uri = row.dataset.fileUri;
-        if (!uri) return;
-        const audio = ensureAudio();
-        if (playingRowId === row.id && !audio.paused) {
-          stopPlayback();
+        const name = row.dataset.fileName;
+        if (!name) return;
+        if (!name.toLowerCase().endsWith('.mp3')) {
+          alert('Device playback currently supports .mp3 files only.');
           return;
         }
-        markPlaying(row);
-        audio.src = uri;
-        audio.play().catch((err) => {
+
+        const params = new URLSearchParams();
+        params.set('action', 'start');
+        params.set('name', name);
+
+        try {
+          const res = await fetch(`/audio/playback?${params.toString()}`, { method: 'POST' });
+          if (!res.ok) {
+            let reason = '';
+            try { reason = (await res.text()).trim(); } catch (_) {}
+            throw new Error(reason || 'Playback failed');
+          }
+          markPlaying(row);
+        } catch (err) {
           alert(err?.message || 'Playback failed');
-          stopPlayback();
-        });
+          markPlaying(null);
+        }
       }
 
       async function uploadFile(file) {
@@ -598,7 +586,7 @@
       document.querySelectorAll('button[data-k="play"]').forEach(btn => {
         btn.addEventListener('click', () => {
           const row = btn.closest('.file-item');
-          playRow(row);
+          startPlayback(row);
         });
       });
 
@@ -676,7 +664,7 @@
           deleteBtn.addEventListener('click', async () => {
             if (!confirm('Delete this file?')) return;
             if (playingRowId === rowId) {
-              stopPlayback();
+              await stopRemotePlayback();
             }
             try {
               const res = await fetch(fileUri + '?delete=1', { method: 'GET' });
@@ -694,6 +682,7 @@
           const encoded = encodeURIComponent(newName);
           fileUri = base + encoded;
           row.dataset.fileUri = fileUri;
+          row.dataset.fileName = newName;
           if (nameLink) {
             nameLink.href = fileUri;
             nameLink.textContent = newName;

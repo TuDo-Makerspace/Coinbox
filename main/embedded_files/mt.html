@@ -147,6 +147,21 @@
     }
     .tone-actions button:hover { background: #d7e4ff; }
     .tone-actions button:active { transform: scale(0.98); }
+    .amp-control {
+      border-top: 1px solid var(--border);
+      padding-top: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .amp-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .amp-row .tone-actions { margin-left: auto; }
     .note { color: var(--muted); font-size: 0.95rem; }
     .dual-slider {
       display: grid;
@@ -255,6 +270,18 @@
       </div>
       <div class="tone-actions">
         <button id="tone-toggle">Play</button>
+      </div>
+      <div class="amp-control">
+        <div class="amp-row">
+          <div class="tone-status">
+            <span class="status-dot" id="amp-status-dot" data-state="off"></span>
+            <span id="amp-status-text">Amp muted</span>
+          </div>
+          <div class="tone-actions">
+            <button id="amp-toggle">Unmute amp</button>
+          </div>
+        </div>
+        <p class="note">This only toggles the amplifier mute line; DAC stays active.</p>
       </div>
     </div>
 
@@ -517,7 +544,14 @@
     const toneToggle = document.getElementById('tone-toggle');
     const toneStatusDot = document.getElementById('tone-status-dot');
     const toneStatusText = document.getElementById('tone-status-text');
+    const ampStatusDot = document.getElementById('amp-status-dot');
+    const ampStatusText = document.getElementById('amp-status-text');
+    const ampToggle = document.getElementById('amp-toggle');
+    const TONE_POLL_MS = 2000;
+    let toneDisabled = false;
     let toneBusy = false;
+    let toneIntervalId = null;
+    let ampBusy = false;
 
     function updateToneUI(data) {
       if (!data) return;
@@ -533,10 +567,54 @@
       toneVolume.value = Math.round(volumePct);
       toneVolumeValue.textContent = `${Math.round(volumePct)}%`;
       toneVolumeLabel.textContent = `0-${Math.round(100)}%`;
+      toneDisabled = !!data.playback_active;
+      toneSlider.disabled = toneDisabled;
+      toneVolume.disabled = toneDisabled;
       const running = !!data.running;
-      toneToggle.textContent = running ? 'Stop' : 'Play';
-      toneStatusDot.dataset.state = running ? 'on' : 'off';
-      toneStatusText.textContent = running ? 'Playing' : 'Stopped';
+      toneToggle.textContent = toneDisabled ? 'Disabled' : (running ? 'Stop' : 'Play');
+      toneToggle.disabled = toneDisabled || toneBusy;
+      if (toneDisabled) {
+        toneStatusDot.dataset.state = 'off';
+        toneStatusText.textContent = 'Disabled while device playback is active';
+      } else {
+        toneStatusDot.dataset.state = running ? 'on' : 'off';
+        toneStatusText.textContent = running ? 'Playing' : 'Stopped';
+      }
+    }
+
+    function updateAmpUI(data) {
+      if (!data) return;
+      const muted = !!data.muted;
+      ampStatusDot.dataset.state = muted ? 'off' : 'on';
+      ampStatusText.textContent = muted ? 'Amp muted' : 'Amp active';
+      ampToggle.textContent = muted ? 'Unmute amp' : 'Mute amp';
+      ampToggle.disabled = ampBusy;
+    }
+
+    async function fetchAmpStatus() {
+      try {
+        const res = await fetch('/amp/mute', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load amp status');
+        const data = await res.json();
+        updateAmpUI(data);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    async function setAmpMuted(mute) {
+      const url = (typeof mute === 'boolean')
+        ? `/amp/mute?mute=${mute ? '1' : '0'}`
+        : '/amp/mute';
+      const res = await fetch(url, { method: 'POST', cache: 'no-store' });
+      if (!res.ok) {
+        let reason = '';
+        try { reason = (await res.text()).trim(); } catch (_) {}
+        throw new Error(reason || 'Failed to set amp mute');
+      }
+      const data = await res.json();
+      updateAmpUI(data);
+      return data;
     }
 
     async function fetchToneStatus() {
@@ -559,7 +637,11 @@
         params.set('volume', Math.round(volume));
       }
       const res = await fetch(`/audio/test?${params.toString()}`, { method: 'POST' });
-      if (!res.ok) throw new Error('Audio test command failed');
+      if (!res.ok) {
+        let reason = '';
+        try { reason = (await res.text()).trim(); } catch (_) {}
+        throw new Error(reason || 'Audio test command failed');
+      }
       const data = await res.json();
       updateToneUI(data);
       return data;
@@ -570,7 +652,7 @@
     });
 
     toneSlider.addEventListener('change', async () => {
-      if (toneStatusDot.dataset.state !== 'on' || toneBusy) return;
+      if (toneDisabled || toneStatusDot.dataset.state !== 'on' || toneBusy) return;
       toneBusy = true;
       toneToggle.disabled = true;
       try {
@@ -587,7 +669,7 @@
     });
 
     toneVolume.addEventListener('change', async () => {
-      if (toneStatusDot.dataset.state !== 'on' || toneBusy) return;
+      if (toneDisabled || toneStatusDot.dataset.state !== 'on' || toneBusy) return;
       toneBusy = true;
       toneToggle.disabled = true;
       try {
@@ -600,7 +682,12 @@
     });
 
     toneToggle.addEventListener('click', async () => {
-      if (toneBusy) return;
+      if (toneDisabled || toneBusy) {
+        if (toneDisabled) {
+          alert('Audio test is disabled while playback is active.');
+        }
+        return;
+      }
       toneBusy = true;
       toneToggle.disabled = true;
       try {
@@ -611,6 +698,19 @@
       }
       toneToggle.disabled = false;
       toneBusy = false;
+    });
+
+    ampToggle.addEventListener('click', async () => {
+      if (ampBusy) return;
+      ampBusy = true;
+      ampToggle.disabled = true;
+      try {
+        await setAmpMuted(); // toggles on the device so UI desyncs do not matter
+      } catch (e) {
+        alert(e.message || 'Failed to toggle amp mute');
+      }
+      ampBusy = false;
+      ampToggle.disabled = false;
     });
 
     document.getElementById('download-log').addEventListener('click', downloadLog);
@@ -647,13 +747,22 @@
         fetchLog();
         fetchGpioState();
         fetchToneStatus();
+        fetchAmpStatus();
       }
     });
+    function startToneAutoRefresh() {
+      if (toneIntervalId) clearInterval(toneIntervalId);
+      toneIntervalId = setInterval(() => {
+        if (!document.hidden) fetchToneStatus();
+      }, TONE_POLL_MS);
+    }
     fetchLog();
     fetchGpioState();
     startLogAutoRefresh();
     startGpioAutoRefresh();
     fetchToneStatus();
+    fetchAmpStatus();
+    startToneAutoRefresh();
   </script>
 </body>
 </html>

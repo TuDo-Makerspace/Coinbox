@@ -6,9 +6,11 @@
 #include <sys/stat.h>
 #include <string.h>
 
-#include "logger.h"
+#include "esp_log.h"
 
 #define FILES_PATH_MAX 512
+#define FILE_ENTRY_MAGIC 0x46454E54u /* 'FENT' */
+#define FILE_ENTRY_VERSION 2
 
 static const char *TAG = "files";
 static char g_base_path[FILES_PATH_MAX] = {0};
@@ -18,10 +20,8 @@ typedef struct __attribute__((packed)) {
     uint8_t probability;
     uint8_t volume;
     uint8_t enabled;
-    uint8_t reserved[3];
-} file_entry_header_t;
-
-const size_t FILE_HEADER_SIZE = sizeof(file_entry_header_t);
+    uint8_t reserved;
+} file_entry_meta_t;
 
 static uint8_t clamp_percent(uint8_t value)
 {
@@ -51,31 +51,36 @@ static void set_name(file_properties_t *props, const char *name)
     }
 }
 
-void file_entry_init(file_entry_t *entry, const char *path)
+void file_props_init(file_properties_t *props, const char *path)
 {
-    if (!entry) {
+    if (!props) {
         return;
     }
-    memset(entry, 0, sizeof(*entry));
-    set_name(&entry->props, path ? basename_from_path(path) : NULL);
-    entry->props.probability = 0;
-    entry->props.volume = 0;
-    entry->props.enabled = false;
-    entry->data_size = 0;
+    memset(props, 0, sizeof(*props));
+    set_name(props, path ? basename_from_path(path) : NULL);
+    props->probability = 0;
+    props->volume = 0;
+    props->enabled = false;
 }
 
-void file_entry_set_props(file_entry_t *entry, const char *name, uint8_t probability, uint8_t volume, bool enabled)
+void file_props_set(file_properties_t *props, const char *name, uint8_t probability, uint8_t volume, bool enabled)
 {
-    if (!entry) {
+    if (!props) {
         return;
     }
     if (name) {
-        set_name(&entry->props, basename_from_path(name));
+        set_name(props, basename_from_path(name));
     }
-    entry->props.probability = clamp_percent(probability);
-    entry->props.volume = clamp_percent(volume);
-    entry->props.enabled = enabled;
-    entry->modified = true;
+    props->probability = clamp_percent(probability);
+    props->volume = clamp_percent(volume);
+    props->enabled = enabled;
+}
+
+static bool has_meta_extension(const char *name)
+{
+    if (!name) return false;
+    const char *dot = strrchr(name, '.');
+    return dot && strcmp(dot, ".meta") == 0;
 }
 
 static esp_err_t full_path_for_name(const char *name, char *out, size_t out_size)
@@ -93,83 +98,97 @@ static esp_err_t full_path_for_name(const char *name, char *out, size_t out_size
     return ESP_OK;
 }
 
-static void build_header(file_entry_header_t *hdr, const file_entry_t *entry)
+static esp_err_t meta_path_for_name(const char *name, char *out, size_t out_size)
 {
-    hdr->magic = FILE_ENTRY_MAGIC;
-    hdr->version = FILE_ENTRY_VERSION;
-    hdr->probability = clamp_percent(entry->props.probability);
-    hdr->volume = clamp_percent(entry->props.volume);
-    hdr->enabled = entry->props.enabled ? 1 : 0;
-    memset(hdr->reserved, 0, sizeof(hdr->reserved));
-}
-
-esp_err_t files_write_header(FILE *f, const file_entry_t *entry)
-{
-    if (!f || !entry) {
+    if (!name || !out || out_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    file_entry_header_t hdr;
-    build_header(&hdr, entry);
-    size_t written = fwrite(&hdr, 1, sizeof(hdr), f);
-    return (written == sizeof(hdr)) ? ESP_OK : ESP_FAIL;
-}
-
-static esp_err_t file_entry_read_header(FILE *f, const char *path, file_entry_t *out, size_t file_size)
-{
-    if (!f || !path || !out) {
+    if (g_base_path[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (strchr(name, '/')) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    file_entry_header_t hdr;
-    size_t read_bytes = fread(&hdr, 1, sizeof(hdr), f);
-    if (read_bytes != sizeof(hdr) || hdr.magic != FILE_ENTRY_MAGIC || hdr.version != FILE_ENTRY_VERSION) {
-        return ESP_ERR_INVALID_RESPONSE;
+    char base[FILE_ENTRY_NAME_MAX];
+    strlcpy(base, name, sizeof(base));
+    int len = snprintf(out, out_size, "%s/%s.meta", g_base_path, base);
+    if (len < 0 || (size_t)len >= out_size) {
+        return ESP_ERR_INVALID_SIZE;
     }
-
-    file_entry_init(out, basename_from_path(path));
-    out->props.probability = clamp_percent(hdr.probability);
-    out->props.volume = clamp_percent(hdr.volume);
-    out->props.enabled = hdr.enabled ? true : false;
-    out->data_size = (file_size > FILE_HEADER_SIZE) ? (file_size - FILE_HEADER_SIZE) : 0;
-    out->modified = false;
-
     return ESP_OK;
 }
 
-static esp_err_t file_entry_load(const char *path, file_entry_t *out)
+static void build_meta(file_entry_meta_t *hdr, const file_properties_t *props)
 {
-    if (!path || !out) {
+    hdr->magic = FILE_ENTRY_MAGIC;
+    hdr->version = FILE_ENTRY_VERSION;
+    hdr->probability = clamp_percent(props->probability);
+    hdr->volume = clamp_percent(props->volume);
+    hdr->enabled = props->enabled ? 1 : 0;
+    hdr->reserved = 0;
+}
+
+esp_err_t files_write_meta(const char *name, const file_properties_t *props)
+{
+    if (!name || !props) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path[FILES_PATH_MAX];
+    esp_err_t err = meta_path_for_name(name, path, sizeof(path));
+    if (err != ESP_OK) {
+        return err;
+    }
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return ESP_FAIL;
+    }
+    file_entry_meta_t hdr;
+    build_meta(&hdr, props);
+    size_t written = fwrite(&hdr, 1, sizeof(hdr), f);
+    fclose(f);
+    return (written == sizeof(hdr)) ? ESP_OK : ESP_FAIL;
+}
+
+static esp_err_t file_props_load(const char *name, file_properties_t *out)
+{
+    if (!name || !out) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // -- Get file size --
+    char audio_path[FILES_PATH_MAX];
+    char meta_path[FILES_PATH_MAX];
+    esp_err_t path_res = full_path_for_name(name, audio_path, sizeof(audio_path));
+    if (path_res != ESP_OK) {
+        return path_res;
+    }
+    if (has_meta_extension(name)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    struct stat audio_stat = {0};
+    if (stat(audio_path, &audio_stat) != 0 || S_ISDIR(audio_stat.st_mode)) {
+        return ESP_ERR_NOT_FOUND;
+    }
 
-    FILE *f = fopen(path, "rb");
+    esp_err_t meta_res = meta_path_for_name(name, meta_path, sizeof(meta_path));
+    if (meta_res != ESP_OK) {
+        return meta_res;
+    }
+    FILE *f = fopen(meta_path, "rb");
     if (!f) {
         return ESP_ERR_NOT_FOUND;
     }
 
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        return ESP_FAIL;
-    }
-    long file_size_long = ftell(f);
-    if (file_size_long < 0) {
-        fclose(f);
-        return ESP_FAIL;
-    }
-    size_t file_size = (size_t)file_size_long;
-    rewind(f);
-
-    // -- Read header --
-
-    esp_err_t err = file_entry_read_header(f, path, out, file_size);
-    if (err != ESP_OK) {
-        fclose(f);
-        return err;
-    }
-
+    file_entry_meta_t hdr;
+    size_t read_bytes = fread(&hdr, 1, sizeof(hdr), f);
     fclose(f);
+    if (read_bytes != sizeof(hdr) || hdr.magic != FILE_ENTRY_MAGIC || hdr.version != FILE_ENTRY_VERSION) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    file_props_init(out, basename_from_path(audio_path));
+    out->probability = clamp_percent(hdr.probability);
+    out->volume = clamp_percent(hdr.volume);
+    out->enabled = hdr.enabled ? true : false;
     return ESP_OK;
 }
 
@@ -179,13 +198,13 @@ esp_err_t files_set_base_path(const char *base_path)
         return ESP_ERR_INVALID_ARG;
     }
     if (strlcpy(g_base_path, base_path, sizeof(g_base_path)) >= sizeof(g_base_path)) {
-        logger_loge(TAG, "Base path too long");
+        ESP_LOGE(TAG, "Base path too long");
         g_base_path[0] = '\0';
         return ESP_ERR_INVALID_ARG;
     }
     DIR *dir = opendir(g_base_path);
     if (!dir) {
-        logger_loge(TAG, "Failed to open base path: %s", g_base_path);
+        ESP_LOGE(TAG, "Failed to open base path: %s", g_base_path);
         g_base_path[0] = '\0';
         return ESP_FAIL;
     }
@@ -208,6 +227,9 @@ size_t files_count(void)
     char entrypath[FILES_PATH_MAX];
 
     while ((entry = readdir(dir)) != NULL) {
+        if (has_meta_extension(entry->d_name)) {
+            continue;
+        }
         int len = snprintf(entrypath, sizeof(entrypath), "%s/%s", g_base_path, entry->d_name);
         if (len < 0 || len >= (int)sizeof(entrypath)) {
             continue;
@@ -218,8 +240,8 @@ size_t files_count(void)
         if (S_ISDIR(st.st_mode)) {
             continue;
         }
-        file_entry_t tmp;
-        if (file_entry_load(entrypath, &tmp) == ESP_OK) {
+        file_properties_t tmp;
+        if (file_props_load(entry->d_name, &tmp) == ESP_OK) {
             count++;
         }
     }
@@ -249,6 +271,9 @@ esp_err_t files_filename(size_t index, char *out_name, size_t out_size)
     esp_err_t result = ESP_ERR_NOT_FOUND;
 
     while ((entry = readdir(dir)) != NULL) {
+        if (has_meta_extension(entry->d_name)) {
+            continue;
+        }
         int len = snprintf(entrypath, sizeof(entrypath), "%s/%s", g_base_path, entry->d_name);
         if (len < 0 || len >= (int)sizeof(entrypath)) {
             continue;
@@ -259,8 +284,8 @@ esp_err_t files_filename(size_t index, char *out_name, size_t out_size)
         if (S_ISDIR(st.st_mode)) {
             continue;
         }
-        file_entry_t tmp;
-        if (file_entry_load(entrypath, &tmp) != ESP_OK) {
+        file_properties_t tmp;
+        if (file_props_load(entry->d_name, &tmp) != ESP_OK) {
             continue;
         }
         if (current == index) {
@@ -275,7 +300,7 @@ esp_err_t files_filename(size_t index, char *out_name, size_t out_size)
     return result;
 }
 
-esp_err_t files_read_header(const char *name, file_entry_t *out)
+esp_err_t files_read_meta(const char *name, file_properties_t *out)
 {
     if (!name || !out) {
         return ESP_ERR_INVALID_ARG;
@@ -283,10 +308,49 @@ esp_err_t files_read_header(const char *name, file_entry_t *out)
     if (g_base_path[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
     }
-    char path[FILES_PATH_MAX];
-    esp_err_t path_res = full_path_for_name(name, path, sizeof(path));
-    if (path_res != ESP_OK) {
-        return path_res;
+    return file_props_load(name, out);
+}
+
+esp_err_t files_delete_with_meta(const char *name)
+{
+    if (!name) return ESP_ERR_INVALID_ARG;
+    char audio_path[FILES_PATH_MAX];
+    char meta_path[FILES_PATH_MAX];
+    esp_err_t err = full_path_for_name(name, audio_path, sizeof(audio_path));
+    if (err != ESP_OK) return err;
+    err = meta_path_for_name(name, meta_path, sizeof(meta_path));
+    if (err != ESP_OK) return err;
+    unlink(audio_path);
+    unlink(meta_path);
+    return ESP_OK;
+}
+
+esp_err_t files_rename_with_meta(const char *old_name, const char *new_name)
+{
+    if (!old_name || !new_name) return ESP_ERR_INVALID_ARG;
+    if (strchr(new_name, '/') || strchr(old_name, '/')) {
+        return ESP_ERR_INVALID_ARG;
     }
-    return file_entry_load(path, out);
+    char old_path[FILES_PATH_MAX];
+    char new_path[FILES_PATH_MAX];
+    char old_meta[FILES_PATH_MAX];
+    char new_meta[FILES_PATH_MAX];
+    esp_err_t err = full_path_for_name(old_name, old_path, sizeof(old_path));
+    if (err != ESP_OK) return err;
+    err = full_path_for_name(new_name, new_path, sizeof(new_path));
+    if (err != ESP_OK) return err;
+    err = meta_path_for_name(old_name, old_meta, sizeof(old_meta));
+    if (err != ESP_OK) return err;
+    err = meta_path_for_name(new_name, new_meta, sizeof(new_meta));
+    if (err != ESP_OK) return err;
+
+    if (rename(old_path, new_path) != 0) {
+        return ESP_FAIL;
+    }
+    if (rename(old_meta, new_meta) != 0) {
+        /* best-effort rollback */
+        rename(new_path, old_path);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }

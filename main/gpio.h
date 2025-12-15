@@ -4,17 +4,17 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdbool.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_err.h"
 
 void configure_gpio();
 
 void mute_output(bool mute);
-
-static void IRAM_ATTR gpio_laser_isr_handler(void *arg);
-static void IRAM_ATTR gpio_hall_isr_handler(void *arg);
-
-static void isr_timer_callback(TimerHandle_t xTimer);
+esp_err_t set_amp_muted(bool mute);
+esp_err_t toggle_amp_muted(bool *muted_out);
+bool is_amp_muted(void);
 
 extern volatile uint32_t laser_isr_count;
 extern volatile uint32_t hall_isr_count;

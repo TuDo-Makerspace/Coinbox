@@ -21,7 +21,7 @@
 #define GPIO_I2S_DATA GPIO_NUM_17
 #define GPIO_I2S_WS   GPIO_NUM_18
 #define GPIO_I2S_BCK  GPIO_NUM_19
-#define GPIO_MUTE_DAC GPIO_NUM_21  // active low
+#define GPIO_MUTE_DAC GPIO_NUM_21  // active low (keep high to unmute)
 #define GPIO_MUTE_AMP GPIO_NUM_22  // active high
 
 #define TONE_TABLE_LEN 256
@@ -60,29 +60,30 @@ static void configure_mute_pins_once(void)
         return;
     }
     gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << GPIO_MUTE_DAC) | (1ULL << GPIO_MUTE_AMP),
+        .pin_bit_mask = (1ULL << GPIO_MUTE_AMP) | (1ULL << GPIO_MUTE_DAC),
         .mode = GPIO_MODE_OUTPUT,
         .pull_down_en = 0,
         .pull_up_en = 0,
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&cfg);
-    gpio_set_level(GPIO_MUTE_AMP, 1);
-    gpio_set_level(GPIO_MUTE_DAC, 0);
+    gpio_set_level(GPIO_MUTE_AMP, 1);  // mute amp (active high)
+    gpio_set_level(GPIO_MUTE_DAC, 0);  // mute DAC (active low)
     s_pins_configured = true;
 }
 
 static void unmute_outputs(void)
 {
     gpio_set_level(GPIO_MUTE_AMP, 0);
-    vTaskDelay(pdMS_TO_TICKS(50));
-    gpio_set_level(GPIO_MUTE_DAC, 1);
+    vTaskDelay(pdMS_TO_TICKS(20));  // let amp wake first
+    gpio_set_level(GPIO_MUTE_DAC, 1);  // unmute DAC so its ramp is audible
+    vTaskDelay(pdMS_TO_TICKS(30));
 }
 
 static void mute_outputs(void)
 {
-    gpio_set_level(GPIO_MUTE_AMP, 1);
     gpio_set_level(GPIO_MUTE_DAC, 0);
+    gpio_set_level(GPIO_MUTE_AMP, 1);
 }
 
 static void fill_tone_block(int16_t *buffer, float *phase, float freq_hz)
