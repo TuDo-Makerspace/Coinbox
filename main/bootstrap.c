@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <inttypes.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_err.h"
@@ -25,84 +26,68 @@ static bool s_main_started;
 static TaskHandle_t s_start_task;
 static char s_base_path[ESP_VFS_PATH_MAX + 1];
 
-static const char BOOTSTRAP_HTML_TEMPLATE[] =
-    "<!DOCTYPE html>"
-    "<html lang=\"en\">"
-    "<head>"
-    "<meta charset=\"UTF-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-    "<title>Coinbox - Starting</title>"
-    "<style>"
-    ":root { --text:#0f172a; --muted:#475569; --card:#fff; --border:#e5e7eb; --accent:#2563eb; --accent-2:#1d4ed8; }"
-    "* { margin:0; padding:0; box-sizing:border-box; }"
-    "body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f5f7fb; color:var(--text); line-height:1.5; min-height:100vh; display:flex; align-items:center; justify-content:center; text-align:center; }"
-    ".content { padding:clamp(1.4rem,3vw+0.5rem,2.6rem); max-width:960px; margin:0 auto; display:flex; align-items:center; justify-content:center; width:100%%; }"
-    ".card { width:100%%; background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 6px 18px rgba(0,0,0,0.05); padding:50px; display:flex; flex-direction:column; gap:1.1rem; align-items:center; text-align:center; }"
-    "h1 { font-size:clamp(1.7rem,1vw+1.35rem,2.2rem); }"
-    ".status-row { display:flex; gap:0.9rem; align-items:center; justify-content:center; flex-wrap:wrap; text-align:center; }"
-    ".badge { display:inline-flex; align-items:center; justify-content:center; padding:0.6rem 0.9rem; border-radius:12px; background:#e0e7ff; color:var(--accent); font-weight:700; min-width:74px; font-size:1rem; }"
-    ".status-text { color:var(--muted); font-size:0.98rem; }"
-    ".actions { display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:0.15rem; justify-content:center; }"
-    ".btn { text-decoration:none; padding:0.75em 1.2em; border-radius:10px; border:1px solid var(--border); font-weight:700; color:var(--text); background:#eef2ff; min-width:150px; text-align:center; transition:background 0.15s, transform 0.1s, box-shadow 0.15s; }"
-    ".btn:hover { background:#e0e7ff; }"
-    ".btn:active { transform:scale(0.98); }"
-    ".btn.primary { background:var(--accent); color:#fff; border-color:var(--accent-2); box-shadow:0 8px 20px rgba(37,99,235,0.18); }"
-    ".btn.primary:hover { background:var(--accent-2); }"
-    ".note { color:var(--muted); font-size:0.95rem; }"
-    "@media (max-width:640px) { .card { padding:50px; } .status-row { align-items:flex-start; } .actions { flex-direction:column; align-items:stretch; } .btn { width:100%%; } }"
-    "</style>"
-    "</head>"
-    "<body>"
-    "<div class=\"content\">"
-    "<div class=\"card\" id=\"card\">"
-    "<h1 id=\"title\">Coinbox is starting</h1>"
-    "<div class=\"status-row\" id=\"status-row\"><span class=\"badge\" id=\"countdown\">%lu</span><div class=\"status-text\" id=\"status-text\">seconds remaining</div></div>"
-    "<div class=\"actions\" id=\"actions\">"
-    "<a class=\"btn primary\" id=\"start-now\" href=\"/skip\">Start now</a>"
-    "<a class=\"btn\" id=\"stay\" href=\"#\">Enter recovery mode</a>"
-    "</div>"
-    "</div>"
-    "</div>"
-    "<script>"
-    "let remaining=%lu;"
-    "let autoRefresh=%d;"
-    "let isRecovery=%d;"
-    "let refreshed=false;"
-    "const el=document.getElementById('countdown');"
-    "const statusRow=document.getElementById('status-row');"
-    "const actions=document.getElementById('actions');"
-    "const titleEl=document.getElementById('title');"
-    "const statusText=document.getElementById('status-text');"
-    "const stayBtn=document.getElementById('stay');"
-    "const startBtn=document.getElementById('start-now');"
-    "function renderRecovery(){titleEl.textContent='Recovery Mode';statusRow.style.display='flex';el.style.display='none';actions.style.display='flex';stayBtn.style.display='none';startBtn.textContent='Enter main mode';statusText.textContent='Awaiting OTA update...';autoRefresh=0;isRecovery=true;}"
-    "async function enterRecovery(){if(isRecovery)return;try{await fetch('/recovery');}catch(_){ }renderRecovery();}"
-    "function tick(){if(isRecovery){return;}if(remaining<=0){el.textContent='0';if(autoRefresh&&!refreshed){refreshed=true;setTimeout(()=>location.replace('/'),300);}return;}el.textContent=remaining;remaining-=1;}"
-    "stayBtn.addEventListener('click',(e)=>{e.preventDefault();enterRecovery();});"
-    "if(isRecovery){renderRecovery();}"
-    "tick(); setInterval(tick,1000);"
-    "</script>"
-    "</body></html>";
-
-static const char BOOTSTRAP_SKIP_HTML[] =
-    "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\">"
-    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
-    "<title>Starting main application...</title>"
-    "<style>"
-    "body{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f7fb;color:#0f172a;min-height:100vh;display:flex;align-items:center;justify-content:center;}"
-    ".card{width:100%%;max-width:640px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.05);padding:50px;text-align:center;line-height:1.5;}"
-    "h1{font-size:1.8rem;margin:0 0 0.35em 0;}"
-    "p{margin:0;color:#475569;font-size:1rem;}"
-    "</style></head><body>"
-    "<div class=\"card\"><h1>Starting main application...</h1><p>Loading interface...</p></div>"
-    "<script>"
-    "const target='/';"
-    "function probe(){fetch(target,{cache:'no-store'}).then(r=>{if(r.ok){location.replace(target);}}).catch(()=>{});} "
-    "probe();setInterval(probe,800);"
-    "</script>"
-    "</body></html>";
-
 static const size_t BOOTSTRAP_PAGE_MAX = 8192;
+
+static bool replace_placeholder(char *buffer, size_t buffer_size, const char *placeholder, const char *replacement)
+{
+    const size_t placeholder_len = strlen(placeholder);
+    const size_t replacement_len = strlen(replacement);
+    if (placeholder_len == 0) {
+        return false;
+    }
+
+    bool replaced = false;
+    size_t current_len = strlen(buffer);
+    char *cursor = buffer;
+
+    while ((cursor = strstr(cursor, placeholder)) != NULL) {
+        size_t new_len = current_len - placeholder_len + replacement_len;
+        if (new_len >= buffer_size) {
+            return false;
+        }
+
+        size_t tail_len = current_len - (size_t)(cursor - buffer) - placeholder_len + 1;
+        memmove(cursor + replacement_len, cursor + placeholder_len, tail_len);
+        memcpy(cursor, replacement, replacement_len);
+
+        replaced = true;
+        current_len = new_len;
+        cursor += replacement_len;
+    }
+
+    return replaced;
+}
+
+static esp_err_t render_bootstrap_page(char *out, size_t out_size, uint32_t seconds, bool auto_refresh, bool is_recovery)
+{
+    extern const unsigned char bootstrap_html_start[] asm("_binary_bootstrap_html_start");
+    extern const unsigned char bootstrap_html_end[] asm("_binary_bootstrap_html_end");
+    const size_t template_len = (size_t)(bootstrap_html_end - bootstrap_html_start);
+
+    if (template_len + 1 > out_size) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(out, bootstrap_html_start, template_len);
+    out[template_len] = '\0';
+
+    char seconds_buf[16];
+    char refresh_buf[2];
+    char recovery_buf[2];
+    snprintf(seconds_buf, sizeof(seconds_buf), "%lu", (unsigned long)seconds);
+    refresh_buf[0] = auto_refresh ? '1' : '0';
+    refresh_buf[1] = '\0';
+    recovery_buf[0] = is_recovery ? '1' : '0';
+    recovery_buf[1] = '\0';
+
+    if (!replace_placeholder(out, out_size, "{{SECONDS}}", seconds_buf) ||
+        !replace_placeholder(out, out_size, "{{AUTO_REFRESH}}", refresh_buf) ||
+        !replace_placeholder(out, out_size, "{{IS_RECOVERY}}", recovery_buf)) {
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
 
 static void start_main_application() {
     esp_err_t err = start_ws_server(s_base_path);
@@ -212,17 +197,17 @@ static esp_err_t bootstrap_root_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_ERR_NO_MEM;
     }
-    int auto_refresh = s_recovery_requested ? 0 : 1;
-    int is_recovery = s_recovery_requested ? 1 : 0;
-    int n = snprintf(page, BOOTSTRAP_PAGE_MAX, BOOTSTRAP_HTML_TEMPLATE,
-                     (unsigned long)seconds, (unsigned long)seconds, auto_refresh, is_recovery);
-    if (n < 0 || n >= (int)BOOTSTRAP_PAGE_MAX) {
+    bool auto_refresh = !s_recovery_requested;
+    bool is_recovery = s_recovery_requested;
+    esp_err_t err = render_bootstrap_page(page, BOOTSTRAP_PAGE_MAX, seconds, auto_refresh, is_recovery);
+    if (err != ESP_OK) {
+        logger_loge(TAG, "Failed to render bootstrap page");
         free(page);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
-        return ESP_ERR_NO_MEM;
+        return err;
     }
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, page, n);
+    httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
     free(page);
     return ESP_OK;
 }
@@ -249,9 +234,13 @@ static esp_err_t bootstrap_skip_handler(httpd_req_t *req)
     logger_logi(TAG, "Skip requested; starting main application immediately");
     schedule_main_start();
 
+    extern const unsigned char bootstrap_skip_html_start[] asm("_binary_bootstrap_skip_html_start");
+    extern const unsigned char bootstrap_skip_html_end[] asm("_binary_bootstrap_skip_html_end");
+    const size_t skip_html_size = (size_t)(bootstrap_skip_html_end - bootstrap_skip_html_start);
+
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, BOOTSTRAP_SKIP_HTML, HTTPD_RESP_USE_STRLEN);
+    httpd_resp_send(req, (const char *)bootstrap_skip_html_start, skip_html_size);
     return ESP_OK;
 }
 
