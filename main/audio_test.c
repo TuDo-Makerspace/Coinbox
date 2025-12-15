@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <stdint.h>
 
 #include "driver/gpio.h"
 #include "driver/i2s.h"
@@ -28,6 +29,7 @@
 static TaskHandle_t s_tone_task;
 static volatile bool s_stop_requested;
 static volatile float s_target_freq_hz = AUDIO_TEST_DEFAULT_HZ;
+static volatile uint16_t s_target_amp = AUDIO_TEST_SINE_AMPLITUDE;
 static bool s_pins_configured;
 
 static float clamp_freq(float hz)
@@ -42,6 +44,14 @@ static float clamp_freq(float hz)
         return AUDIO_TEST_MAX_HZ;
     }
     return hz;
+}
+
+static uint16_t clamp_amp(uint16_t amp)
+{
+    if (amp > AUDIO_TEST_SINE_AMPLITUDE) {
+        return AUDIO_TEST_SINE_AMPLITUDE;
+    }
+    return amp;
 }
 
 static void configure_mute_pins_once(void)
@@ -77,6 +87,7 @@ static void mute_outputs(void)
 
 static void fill_tone_block(int16_t *buffer, float *phase, float freq_hz)
 {
+    const float amplitude = (float)s_target_amp;
     const float phase_step = (2.0f * (float)M_PI * freq_hz) / (float)AUDIO_TEST_SAMPLE_RATE;
 
     for (int i = 0; i < TONE_TABLE_LEN; i++) {
@@ -85,7 +96,7 @@ static void fill_tone_block(int16_t *buffer, float *phase, float freq_hz)
             *phase -= (2.0f * (float)M_PI);
         }
 
-        int16_t sample = (int16_t)(AUDIO_TEST_SINE_AMPLITUDE * sinf(*phase));
+        int16_t sample = (int16_t)(amplitude * sinf(*phase));
         buffer[2 * i] = sample;
         buffer[2 * i + 1] = sample;
     }
@@ -118,10 +129,11 @@ static void tone_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t audio_test_start(float freq_hz)
+esp_err_t audio_test_start(float freq_hz, uint16_t amplitude)
 {
     freq_hz = clamp_freq(freq_hz);
     s_target_freq_hz = freq_hz;
+    s_target_amp = clamp_amp(amplitude);
 
     if (s_stop_requested && s_tone_task) {
         for (int i = 0; i < 50 && s_tone_task; i++) {
@@ -184,7 +196,7 @@ esp_err_t audio_test_start(float freq_hz)
     }
 
     unmute_outputs();
-    ESP_LOGI(TAG, "Started audio test tone at %.1f Hz", (double)s_target_freq_hz);
+    ESP_LOGI(TAG, "Started audio test tone at %.1f Hz (amp=%u)", (double)s_target_freq_hz, (unsigned)s_target_amp);
     return ESP_OK;
 }
 
@@ -213,4 +225,14 @@ bool audio_test_is_running(void)
 float audio_test_current_freq(void)
 {
     return s_target_freq_hz;
+}
+
+uint16_t audio_test_current_amplitude(void)
+{
+    return s_target_amp;
+}
+
+uint16_t audio_test_max_amplitude(void)
+{
+    return AUDIO_TEST_SINE_AMPLITUDE;
 }
