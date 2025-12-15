@@ -73,6 +73,76 @@
     }
     .actions button:hover { background: #d7e4ff; }
     .actions button:active { transform: scale(0.98); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .card h2 { margin: 0; font-size: 1.2rem; }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .tone-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ef4444;
+      box-shadow: 0 0 0 4px rgba(239,68,68,0.2);
+    }
+    .status-dot[data-state="on"] {
+      background: #16a34a;
+      box-shadow: 0 0 0 4px rgba(22,163,74,0.2);
+    }
+    .slider-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .slider-meta {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #2563eb;
+    }
+    .tone-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .tone-actions button {
+      padding: 0.85em 1.3em;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #e5edff;
+      cursor: pointer;
+      font-weight: 700;
+      min-width: 140px;
+      transition: transform 0.1s, background 0.15s, box-shadow 0.15s;
+    }
+    .tone-actions button:hover { background: #d7e4ff; }
+    .tone-actions button:active { transform: scale(0.98); }
+    .note { color: var(--muted); font-size: 0.95rem; }
     @media (max-width: 640px) {
       .actions { flex-direction: column; }
       .actions button {
@@ -80,6 +150,7 @@
         flex: none;
       }
       .log-box { max-height: 55vh; }
+      .card { padding: 1rem; }
     }
   </style>
 </head>
@@ -97,6 +168,30 @@
       <button id="restart-device">Restart device</button>
       <button id="format-storage">Format storage</button>
     </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2>Audio test tone</h2>
+        </div>
+        <div class="tone-status">
+          <span class="status-dot" id="tone-status-dot" data-state="off"></span>
+          <span id="tone-status-text">Stopped</span>
+        </div>
+      </div>
+      <div class="slider-row">
+        <label for="tone-frequency">Frequency</label>
+        <input type="range" id="tone-frequency" min="50" max="8000" value="440" step="5">
+        <div class="slider-meta">
+          <span id="tone-frequency-value">440 Hz</span>
+          <span id="tone-range-label">50-8000 Hz</span>
+        </div>
+      </div>
+      <div class="tone-actions">
+        <button id="tone-toggle">Play</button>
+      </div>
+    </div>
+
     <div id="log-box" class="log-box">Loading log...</div>
   </div>
 
@@ -165,6 +260,84 @@
       }
     }
 
+    const toneSlider = document.getElementById('tone-frequency');
+    const toneValue = document.getElementById('tone-frequency-value');
+    const toneRangeLabel = document.getElementById('tone-range-label');
+    const toneToggle = document.getElementById('tone-toggle');
+    const toneStatusDot = document.getElementById('tone-status-dot');
+    const toneStatusText = document.getElementById('tone-status-text');
+    let toneBusy = false;
+
+    function updateToneUI(data) {
+      if (!data) return;
+      const min = data.min_hz || Number(toneSlider.min);
+      const max = data.max_hz || Number(toneSlider.max);
+      toneSlider.min = min;
+      toneSlider.max = max;
+      const freq = data.freq_hz ? Math.round(data.freq_hz) : Math.round(Number(toneSlider.value) || 440);
+      toneSlider.value = freq;
+      toneValue.textContent = `${freq} Hz`;
+      toneRangeLabel.textContent = `${Math.round(min)}-${Math.round(max)} Hz`;
+      const running = !!data.running;
+      toneToggle.textContent = running ? 'Stop' : 'Play';
+      toneStatusDot.dataset.state = running ? 'on' : 'off';
+      toneStatusText.textContent = running ? 'Playing' : 'Stopped';
+    }
+
+    async function fetchToneStatus() {
+      try {
+        const res = await fetch('/audio/test', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load tone status');
+        const data = await res.json();
+        updateToneUI(data);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    async function sendTone(action, freq) {
+      const params = new URLSearchParams({ action });
+      if (typeof freq === 'number' && !Number.isNaN(freq)) {
+        params.set('freq', Math.round(freq));
+      }
+      const res = await fetch(`/audio/test?${params.toString()}`, { method: 'POST' });
+      if (!res.ok) throw new Error('Audio test command failed');
+      const data = await res.json();
+      updateToneUI(data);
+      return data;
+    }
+
+    toneSlider.addEventListener('input', () => {
+      toneValue.textContent = `${Math.round(toneSlider.value)} Hz`;
+    });
+
+    toneSlider.addEventListener('change', async () => {
+      if (toneStatusDot.dataset.state !== 'on' || toneBusy) return;
+      toneBusy = true;
+      toneToggle.disabled = true;
+      try {
+        await sendTone('start', Number(toneSlider.value));
+      } catch (e) {
+        alert(e.message || 'Failed to update tone');
+      }
+      toneToggle.disabled = false;
+      toneBusy = false;
+    });
+
+    toneToggle.addEventListener('click', async () => {
+      if (toneBusy) return;
+      toneBusy = true;
+      toneToggle.disabled = true;
+      try {
+        const action = toneStatusDot.dataset.state === 'on' ? 'stop' : 'start';
+        await sendTone(action, Number(toneSlider.value));
+      } catch (e) {
+        alert(e.message || 'Audio test failed');
+      }
+      toneToggle.disabled = false;
+      toneBusy = false;
+    });
+
     document.getElementById('refresh-log').addEventListener('click', fetchLog);
     document.getElementById('download-log').addEventListener('click', downloadLog);
     document.getElementById('restart-device').addEventListener('click', async () => {
@@ -190,6 +363,7 @@
       }
     });
     fetchLog();
+    fetchToneStatus();
   </script>
 </body>
 </html>

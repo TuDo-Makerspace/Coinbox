@@ -26,7 +26,6 @@
 #include "bootstrap.h"
 #include "mdns_service.h"
 
-
 static const char *TAG = "main";
 
 void app_main(void)

@@ -104,6 +104,16 @@ static const char BOOTSTRAP_SKIP_HTML[] =
 
 static const size_t BOOTSTRAP_PAGE_MAX = 8192;
 
+static void start_main_application() {
+    esp_err_t err = start_ws_server(s_base_path);
+    if (err != ESP_OK) {
+        logger_loge(TAG, "Failed to start main application: %s", esp_err_to_name(err));
+    } else {
+        logger_logi(TAG, "Main application started");
+        s_main_started = true;
+    }
+}
+
 static void cancel_recovery_timer(void)
 {
     if (!s_recovery_timer) {
@@ -114,7 +124,7 @@ static void cancel_recovery_timer(void)
     s_recovery_timer = NULL;
 }
 
-static void start_main(void)
+static void enter_main(void)
 {
     if (s_recovery_requested) {
         logger_logi(TAG, "Recovery requested; not starting main application");
@@ -133,21 +143,13 @@ static void start_main(void)
         s_bootstrap_server = NULL;
     }
 
-    // ------- MAIN APPLICATION -------
-
-    esp_err_t err = start_ws_server(s_base_path);
-    if (err != ESP_OK) {
-        logger_loge(TAG, "Failed to start main application: %s", esp_err_to_name(err));
-    } else {
-        logger_logi(TAG, "Main application started");
-        s_main_started = true;
-    }
+    start_main_application();
 }
 
-static void start_main_task(void *arg)
+static void enter_main_task(void *arg)
 {
     (void)arg;
-    start_main();
+    enter_main();
     s_start_task = NULL;
     vTaskDelete(NULL);
 }
@@ -163,7 +165,7 @@ static void schedule_main_start(void)
         return;
     }
 
-    if (xTaskCreate(start_main_task, "start-main", 4096, NULL, tskIDLE_PRIORITY + 4, &s_start_task) != pdPASS) {
+    if (xTaskCreate(enter_main_task, "start-main", 4096, NULL, tskIDLE_PRIORITY + 4, &s_start_task) != pdPASS) {
         logger_loge(TAG, "Failed to schedule main start");
     }
 }

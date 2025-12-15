@@ -26,6 +26,7 @@
 #include "files.h"
 #include "mount.h"
 #include "esp_system.h"
+#include "audio_test.h"
 
 #include "esp_vfs.h"
 #include "esp_littlefs.h"
@@ -166,6 +167,84 @@ static esp_err_t restart_handler(httpd_req_t *req)
         logger_loge(TAG, "Failed to start restart timer; restarting immediately");
         esp_restart();
     }
+    return ESP_OK;
+}
+
+static esp_err_t audio_test_handler(httpd_req_t *req)
+{
+    char resp[128];
+    float freq = audio_test_current_freq();
+    bool running = audio_test_is_running();
+    int len = snprintf(resp, sizeof(resp),
+                       "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f}",
+                       running ? "true" : "false",
+                       (double)freq,
+                       (double)AUDIO_TEST_MIN_HZ,
+                       (double)AUDIO_TEST_MAX_HZ);
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    if (req->method == HTTP_GET) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        httpd_resp_send(req, resp, len);
+        return ESP_OK;
+    }
+
+    char query[64] = {0};
+    if (httpd_req_get_url_query_len(req) > 0) {
+        if (httpd_req_get_url_query_len(req) >= (int)sizeof(query)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Query too long");
+            return ESP_FAIL;
+        }
+        if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad query");
+            return ESP_FAIL;
+        }
+    }
+
+    char action[8] = {0};
+    if (httpd_query_key_value(query, "action", action, sizeof(action)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing action");
+        return ESP_FAIL;
+    }
+
+    if (strcmp(action, "start") == 0) {
+        char freq_str[16] = {0};
+        float new_freq = AUDIO_TEST_DEFAULT_HZ;
+        if (httpd_query_key_value(query, "freq", freq_str, sizeof(freq_str)) == ESP_OK) {
+            new_freq = strtof(freq_str, NULL);
+        }
+        esp_err_t err = audio_test_start(new_freq);
+        if (err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to start tone");
+            return ESP_FAIL;
+        }
+    } else if (strcmp(action, "stop") == 0) {
+        audio_test_stop();
+    } else {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid action");
+        return ESP_FAIL;
+    }
+
+    freq = audio_test_current_freq();
+    running = audio_test_is_running();
+    len = snprintf(resp, sizeof(resp),
+                   "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f}",
+                   running ? "true" : "false",
+                   (double)freq,
+                   (double)AUDIO_TEST_MIN_HZ,
+                   (double)AUDIO_TEST_MAX_HZ);
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
     return ESP_OK;
 }
 
@@ -942,7 +1021,7 @@ esp_err_t start_ws_server(const char *base_path)
 
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 14;
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
@@ -1002,6 +1081,14 @@ esp_err_t start_ws_server(const char *base_path)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &logs_get);
+
+    httpd_uri_t audio_test_uri = {
+        .uri = "/audio/test",
+        .method = HTTP_ANY,
+        .handler = audio_test_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &audio_test_uri);
 
     httpd_uri_t mt_page = {
         .uri = "/mt",
