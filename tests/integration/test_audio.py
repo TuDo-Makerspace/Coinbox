@@ -10,6 +10,7 @@ try:
     from tests.integration.integration_helpers import (
         _http_get,
         _http_request,
+        _log_contains_any_since,
         _skip_to_main_app,
         _tail_log,
         _test_mp3_bytes,
@@ -21,6 +22,7 @@ except ModuleNotFoundError:
     from integration_helpers import (
         _http_get,
         _http_request,
+        _log_contains_any_since,
         _skip_to_main_app,
         _tail_log,
         _test_mp3_bytes,
@@ -34,6 +36,12 @@ AMP_MUTED_LEVEL = 1
 AMP_UNMUTED_LEVEL = 0
 DAC_MUTED_LEVEL = 0
 DAC_UNMUTED_LEVEL = 1
+PANIC_LOG_MARKERS = [
+    "Guru Meditation Error",
+    "panic_abort",
+    "assert failed",
+    "Backtrace:",
+]
 
 
 @pytest.fixture
@@ -127,6 +135,11 @@ def _audio_playback_stop(base_url: str, timeout_s: float = 3.0):
 
 def _volume_pct(state: dict) -> float:
     return float(state.get("volume_pct", -1.0))
+
+
+def _assert_no_panic_since(log_path, start_pos: int):
+    has_panic = _log_contains_any_since(log_path, start_pos, PANIC_LOG_MARKERS)
+    assert not has_panic, f"Detected panic markers after playback restart spam.\nLog tail:\n{_tail_log(log_path)}"
 
 
 # Test: Device boots into main app with DAC + AMP muted.
@@ -382,3 +395,39 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
 
     muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=3.0, poll_s=0.1)
     assert muted, f"DAC/AMP did not return to muted after playback.\nLog tail:\n{_tail_log(log_path)}"
+
+
+# Test: Rapid repeated playback-start requests keep the control plane responsive.
+# 1. Upload real MP3 fixture.
+# 2. Send a burst of playback-start requests for the same file.
+# 3. Stop playback and assert the device still responds without panic markers.
+def test_repeated_playback_restarts_keep_system_healthy(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+    proc = qemu_mainapp_instance["process"]
+
+    filename = f"{_unique_name('restart-spam-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+
+    for _ in range(10):
+        status, _, body = _audio_playback_start(base_url, filename, timeout_s=4.0)
+        assert status == 200, f"Playback restart request failed. body={body}"
+        time.sleep(0.02)
+
+    status, _, body = _audio_playback_stop(base_url, timeout_s=4.0)
+    assert status == 200, f"Playback stop failed after restart spam. body={body}"
+
+    playback_done = _wait_until(
+        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert playback_done, f"Playback did not clear after restart spam.\nLog tail:\n{_tail_log(log_path)}"
+
+    status, _, body = _http_get(base_url, "/sounds/")
+    assert status == 200, f"/sounds/ is not healthy after playback restart spam. status={status}, body={body}"
+
+    _assert_no_panic_since(log_path, log_start_pos)
+    assert proc.poll() is None, "QEMU process exited during playback restart spam"

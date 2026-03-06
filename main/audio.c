@@ -873,6 +873,7 @@ static void destroy_active_playback_pipeline(bool keep_i2s)
         audio_pipeline_stop(s_pipeline);
         audio_pipeline_wait_for_stop(s_pipeline);
         audio_pipeline_terminate(s_pipeline);
+        audio_pipeline_unlink(s_pipeline);
     }
 
     if (s_pipeline && s_stream_reader) {
@@ -885,9 +886,6 @@ static void destroy_active_playback_pipeline(bool keep_i2s)
         audio_pipeline_unregister(s_pipeline, s_playback_i2s_stream);
     }
 
-    if (s_pipeline) {
-        audio_pipeline_remove_listener(s_pipeline);
-    }
     if (s_pipeline) {
         audio_pipeline_deinit(s_pipeline);
     }
