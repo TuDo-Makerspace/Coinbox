@@ -9,8 +9,10 @@ import pytest
 try:
     from tests.integration.integration_helpers import (
         _http_get,
+        _http_post_json,
         _http_request,
         _log_contains_any_since,
+        _restart_into_bootstrap,
         _skip_to_main_app,
         _tail_log,
         _test_mp3_bytes,
@@ -21,8 +23,10 @@ try:
 except ModuleNotFoundError:
     from integration_helpers import (
         _http_get,
+        _http_post_json,
         _http_request,
         _log_contains_any_since,
+        _restart_into_bootstrap,
         _skip_to_main_app,
         _tail_log,
         _test_mp3_bytes,
@@ -42,6 +46,7 @@ PANIC_LOG_MARKERS = [
     "assert failed",
     "Backtrace:",
 ]
+DEFAULT_SOUND_FILENAME = "default.mp3"
 
 
 @pytest.fixture
@@ -133,6 +138,23 @@ def _audio_playback_stop(base_url: str, timeout_s: float = 3.0):
     )
 
 
+def _get_boot_config(base_url: str) -> dict:
+    status, _, body = _http_get(base_url, "/boot/config")
+    assert status == 200, f"GET /boot/config failed. status={status}, body={body}"
+    return _json_object(body, "GET /boot/config")
+
+
+def _set_boot_config(base_url: str, payload: dict) -> dict:
+    status, _, body = _http_post_json(
+        base_url=base_url,
+        path="/boot/config",
+        payload=payload,
+        timeout_s=4.0,
+    )
+    assert status == 200, f"POST /boot/config failed. status={status}, body={body}"
+    return _json_object(body, "POST /boot/config")
+
+
 def _volume_pct(state: dict) -> float:
     return float(state.get("volume_pct", -1.0))
 
@@ -151,6 +173,70 @@ def test_boot_starts_with_dac_and_amp_muted(qemu_mainapp_instance):
 
     muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=3.0, poll_s=0.1)
     assert muted, "Expected DAC+AMP to be muted after boot into main app."
+
+
+# Test: Entering the main app starts playback of the built-in default sound by default.
+# 1. Start from bootstrap mode on a fresh device.
+# 2. Capture the current log position.
+# 3. Leave bootstrap via `/skip`.
+# 4. Assert logs show playback starting for `default.mp3`.
+def test_entering_main_app_plays_default_sound_by_default(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _skip_to_main_app(base_url, log_path)
+
+    playback_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Starting playback: {DEFAULT_SOUND_FILENAME}"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.1,
+    )
+    assert playback_seen, (
+        "Expected the built-in default sound to play when entering the main app.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: Entering the main app does not play the default sound after boot sound is disabled.
+# 1. Start from bootstrap mode and enter the main app once.
+# 2. Disable boot sound through `POST /boot/config`.
+# 3. Restart back to bootstrap, capture the new log position, then leave bootstrap again.
+# 4. Assert no playback start for `default.mp3` appears after the second handoff.
+def test_entering_main_app_does_not_play_default_sound_when_boot_sound_disabled(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _skip_to_main_app(base_url, log_path)
+
+    boot_cfg = _get_boot_config(base_url)
+    assert boot_cfg.get("boot_sound_enabled") is True
+
+    updated_cfg = _set_boot_config(base_url, {"boot_sound_enabled": False})
+    assert updated_cfg.get("boot_sound_enabled") is False
+
+    _restart_into_bootstrap(base_url, log_path)
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _skip_to_main_app(base_url, log_path)
+
+    playback_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Starting playback: {DEFAULT_SOUND_FILENAME}"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.1,
+    )
+    assert not playback_seen, (
+        "Did not expect the default boot sound to play after disabling it.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
 
 # Test: Audio test (not playing) accepts frequency and volume updates.

@@ -207,21 +207,24 @@
       justify-content: flex-end;
       margin-top: 0.85rem;
     }
-    .network-toggle {
+    .settings-toggle {
       margin-top: 0.85rem;
       padding: 0.85rem;
       border: 1px solid var(--border);
       border-radius: 10px;
       background: #f8fafc;
     }
-    .network-toggle-row {
+    .settings-toggle.no-top-margin {
+      margin-top: 0;
+    }
+    .settings-toggle-row {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 0.75rem;
       cursor: pointer;
     }
-    .network-toggle-row input[type="checkbox"] {
+    .settings-toggle-row input[type="checkbox"] {
       order: 2;
       margin-top: 0;
       margin-left: 1rem;
@@ -231,14 +234,14 @@
       accent-color: #2563eb;
       flex: 0 0 auto;
     }
-    .network-toggle-copy {
+    .settings-toggle-copy {
       display: flex;
       flex: 1 1 auto;
       flex-direction: column;
       gap: 0.2rem;
       min-width: 0;
     }
-    .network-toggle-heading {
+    .settings-toggle-heading {
       display: flex;
       align-items: center;
       gap: 0.6rem;
@@ -246,12 +249,12 @@
       min-width: 0;
       min-height: 1.65rem;
     }
-    .network-toggle-heading .sensor-label {
+    .settings-toggle-heading .sensor-label {
       color: var(--text);
       flex: 0 1 auto;
       min-width: 0;
     }
-    .network-toggle-note {
+    .settings-toggle-note {
       margin: 0;
     }
     .network-actions button {
@@ -508,7 +511,7 @@
       .log-box { height: 55vh; }
       .card { padding: 1rem; }
       .dual-slider { grid-template-columns: 1fr; }
-      .network-toggle-row {
+      .settings-toggle-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         grid-template-areas:
@@ -518,13 +521,13 @@
         column-gap: 0.75rem;
         row-gap: 0.2rem;
       }
-      .network-toggle-row input[type="checkbox"] {
+      .settings-toggle-row input[type="checkbox"] {
         grid-area: checkbox;
       }
-      .network-toggle-copy {
+      .settings-toggle-copy {
         display: contents;
       }
-      .network-toggle-heading {
+      .settings-toggle-heading {
         grid-area: title;
         display: flex;
         flex-direction: column;
@@ -532,15 +535,15 @@
         gap: 0.35rem;
         min-height: 0;
       }
-      .network-toggle-heading .sensor-label {
+      .settings-toggle-heading .sensor-label {
         display: block;
       }
-      .network-toggle-heading .net-state {
+      .settings-toggle-heading .net-state {
         display: inline-flex;
         margin-left: 0;
         margin-bottom: 0.3rem;
       }
-      .network-toggle-note {
+      .settings-toggle-note {
         grid-area: note;
       }
     }
@@ -553,6 +556,23 @@
 
   <div class="content">
     <h1>Settings</h1>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Start-Up</h2>
+      </div>
+      <div class="settings-toggle no-top-margin">
+        <label class="settings-toggle-row" for="startup-sound-enabled">
+          <input id="startup-sound-enabled" type="checkbox" disabled>
+          <div class="settings-toggle-copy">
+            <div class="settings-toggle-heading">
+              <div class="sensor-label">Play startup sound</div>
+            </div>
+            <p class="note settings-toggle-note">Play the default coin sound when the system starts.</p>
+          </div>
+        </label>
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-header">
@@ -583,15 +603,15 @@
           <input id="network-sta-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
         </div>
       </div>
-      <div class="network-toggle">
-        <label class="network-toggle-row" for="network-disable-ap-when-sta-connected">
+      <div class="settings-toggle">
+        <label class="settings-toggle-row" for="network-disable-ap-when-sta-connected">
           <input id="network-disable-ap-when-sta-connected" type="checkbox">
-          <div class="network-toggle-copy">
-            <div class="network-toggle-heading">
+          <div class="settings-toggle-copy">
+            <div class="settings-toggle-heading">
               <div class="sensor-label">Disable Access Point when connected to Wi-Fi</div>
               <div class="net-state" id="network-toggle-state" data-state="reboot-required" hidden>Reboot required</div>
             </div>
-            <p class="note network-toggle-note">If enabled, the Access Point stays off whenever the device has an active Wi-Fi connection.</p>
+            <p class="note settings-toggle-note">If enabled, the Access Point stays off whenever the device has an active Wi-Fi connection.</p>
           </div>
         </label>
       </div>
@@ -744,6 +764,7 @@
     const toggleState = document.getElementById('network-toggle-state');
     const disableApWhenStaConnectedInput = document.getElementById('network-disable-ap-when-sta-connected');
     const networkSaveBtn = document.getElementById('network-save');
+    const startupSoundInput = document.getElementById('startup-sound-enabled');
     const securityStatus = document.getElementById('security-status');
     const securityStatusPill = document.getElementById('security-status-pill');
     const securityStatusPillText = document.getElementById('security-status-pill-text');
@@ -761,6 +782,9 @@
     let lastNetworkIpsData = {};
     let networkSaving = false;
     let networkSaveOldLabel = 'Save network settings';
+    let bootConfigLoaded = false;
+    let bootConfigSaving = false;
+    let bootSoundEnabledSnapshot = true;
     let securitySaving = false;
     const NETWORK_PASSWORD_MASK_VALUE = 'xxxxxxxxxxxx';
     const apPasswordState = { masked: false, edited: false };
@@ -1040,6 +1064,58 @@
       } finally {
         restoreNetworkSaveButton();
         fetchNetworkConfig();
+      }
+    }
+
+    function renderBootConfig(data) {
+      if (!startupSoundInput) return;
+      startupSoundInput.checked = !!data?.boot_sound_enabled;
+      startupSoundInput.disabled = bootConfigSaving || !bootConfigLoaded;
+    }
+
+    async function fetchBootConfig() {
+      if (!startupSoundInput) return;
+      try {
+        const res = await fetch('/boot/config', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch start-up settings');
+        const data = await res.json();
+        bootConfigLoaded = true;
+        bootSoundEnabledSnapshot = !!data?.boot_sound_enabled;
+        renderBootConfig(data);
+      } catch (_) {
+        bootConfigLoaded = false;
+        renderBootConfig({ boot_sound_enabled: false });
+      }
+    }
+
+    async function saveBootConfig() {
+      if (!startupSoundInput || bootConfigSaving || !bootConfigLoaded) return;
+      const enabled = !!startupSoundInput.checked;
+      if (enabled === bootSoundEnabledSnapshot) return;
+
+      bootConfigSaving = true;
+      renderBootConfig({ boot_sound_enabled: enabled });
+      try {
+        const res = await fetch('/boot/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ boot_sound_enabled: enabled }),
+        });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) {}
+          throw new Error(reason || 'Failed to save start-up settings');
+        }
+        const data = await res.json();
+        bootConfigLoaded = true;
+        bootSoundEnabledSnapshot = !!data?.boot_sound_enabled;
+        renderBootConfig(data);
+      } catch (e) {
+        startupSoundInput.checked = bootSoundEnabledSnapshot;
+        alert(e.message || 'Failed to save start-up settings');
+      } finally {
+        bootConfigSaving = false;
+        renderBootConfig({ boot_sound_enabled: bootSoundEnabledSnapshot });
       }
     }
 
@@ -1958,6 +2034,11 @@
         saveNetworkConfig();
       });
     }
+    if (startupSoundInput) {
+      startupSoundInput.addEventListener('change', () => {
+        saveBootConfig();
+      });
+    }
     bindMaskedNetworkPasswordInput(apPasswordInput, apPasswordState);
     bindMaskedNetworkPasswordInput(staPasswordInput, staPasswordState);
     if (securitySaveBtn) {
@@ -1982,6 +2063,7 @@
         fetchGpioState();
         fetchNetworkIps();
         fetchNetworkConfig();
+        fetchBootConfig();
         fetchSecurityConfig();
         fetchToneStatus();
       }
@@ -1998,6 +2080,7 @@
     fetchGpioState();
     fetchNetworkIps();
     fetchNetworkConfig();
+    fetchBootConfig();
     fetchSecurityConfig();
     startLogAutoRefresh();
     startGpioAutoRefresh();

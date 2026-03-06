@@ -23,6 +23,7 @@ extern "C" {
 
 esp_err_t start_mainapp(void);
 esp_err_t mainapp_reset_security_defaults(void);
+esp_err_t mainapp_reset_boot_defaults(void);
 
 #ifdef __cplusplus
 }

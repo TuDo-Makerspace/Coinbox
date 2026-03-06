@@ -103,6 +103,9 @@ _Static_assert(
 #define AUTH_TOKEN_NUM_BYTES 16
 #define AUTH_TOKEN_HEX_LEN (AUTH_TOKEN_NUM_BYTES * 2)
 
+#define BOOT_NVS_NAMESPACE "boot"
+#define BOOT_NVS_KEY_SOUND_ENABLED "startup_sound"
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Vars
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -114,6 +117,7 @@ static bool s_ui_password_set = false;
 static char s_ui_password_hash_hex[UI_PASSWORD_HASH_HEX_LEN + 1] = {0};
 static char s_auth_session_token[AUTH_TOKEN_HEX_LEN + 1] = {0};
 static char s_auth_cookie_header[160] = {0};
+static bool s_boot_sound_enabled = true;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Path and Name Parsing
@@ -568,6 +572,85 @@ esp_err_t mainapp_reset_security_defaults(void)
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+// Start-Up Settings
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static esp_err_t boot_config_load_from_nvs(void)
+{
+    s_boot_sound_enabled = true;
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(BOOT_NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    uint8_t enabled = 1;
+    err = nvs_get_u8(nvs, BOOT_NVS_KEY_SOUND_ENABLED, &enabled);
+    nvs_close(nvs);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        s_boot_sound_enabled = true;
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_boot_sound_enabled = (enabled != 0);
+    return ESP_OK;
+}
+
+static esp_err_t boot_config_store_enabled(bool enabled)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(BOOT_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_u8(nvs, BOOT_NVS_KEY_SOUND_ENABLED, enabled ? 1 : 0);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_boot_sound_enabled = enabled;
+    return ESP_OK;
+}
+
+esp_err_t mainapp_reset_boot_defaults(void)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(BOOT_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        return err;
+    }
+
+    if (err == ESP_OK) {
+        err = nvs_erase_key(nvs, BOOT_NVS_KEY_SOUND_ENABLED);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    s_boot_sound_enabled = true;
+    return ESP_OK;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
 // Content Type and URI Helpers
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -856,6 +939,23 @@ static esp_err_t send_security_config_json(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t send_boot_config_json(httpd_req_t *req)
+{
+    char resp[56];
+    int len = snprintf(resp, sizeof(resp),
+                       "{\"boot_sound_enabled\":%s}",
+                       s_boot_sound_enabled ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
 static esp_err_t auth_login_post_handler(httpd_req_t *req)
 {
     if (req->content_len <= 0 || req->content_len > 320) {
@@ -1004,6 +1104,58 @@ static esp_err_t security_config_post_handler(httpd_req_t *req)
         security_clear_auth_cookie_header(req);
     }
     return send_security_config_json(req);
+}
+
+static esp_err_t boot_config_get_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
+    }
+    return send_boot_config_json(req);
+}
+
+static esp_err_t boot_config_post_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
+    }
+
+    if (req->content_len <= 0 || req->content_len > 128) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request body");
+        return ESP_FAIL;
+    }
+
+    char body[129];
+    int received = 0;
+    while (received < req->content_len) {
+        int r = httpd_req_recv(req, body + received, req->content_len - received);
+        if (r <= 0) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read body");
+            return ESP_FAIL;
+        }
+        received += r;
+    }
+    body[req->content_len] = '\0';
+
+    bool boot_sound_enabled = s_boot_sound_enabled;
+    if (!json_has_key(body, "boot_sound_enabled")) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Nothing to update");
+        return ESP_FAIL;
+    }
+    if (!json_get_bool(body, "boot_sound_enabled", &boot_sound_enabled)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid boot sound setting");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = boot_config_store_enabled(boot_sound_enabled);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save boot config");
+        return ESP_FAIL;
+    }
+
+    return send_boot_config_json(req);
 }
 
 static esp_err_t network_ips_handler(httpd_req_t *req)
@@ -1740,6 +1892,13 @@ static esp_err_t reset_settings_handler(httpd_req_t *req)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to reset security settings: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset security settings");
+        return ESP_FAIL;
+    }
+
+    err = mainapp_reset_boot_defaults();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset start-up settings: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset start-up settings");
         return ESP_FAIL;
     }
 
@@ -2705,6 +2864,21 @@ static esp_err_t redirect_to_sounds_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static void maybe_play_startup_sound(void)
+{
+    if (!s_boot_sound_enabled) {
+        return;
+    }
+
+    esp_err_t err = audio_start_file(FILES_DEFAULT_SOUND_NAME);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "Failed to start startup sound %s: %s",
+                 FILES_DEFAULT_SOUND_NAME,
+                 esp_err_to_name(err));
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Entry
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2717,14 +2891,21 @@ esp_err_t start_mainapp(void)
         return sec_err;
     }
 
+    esp_err_t boot_cfg_err = boot_config_load_from_nvs();
+    if (boot_cfg_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize start-up settings: %s", esp_err_to_name(boot_cfg_err));
+        return boot_cfg_err;
+    }
+
     ESP_LOGI(TAG, "UI password lock: %s", s_ui_password_set ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Startup sound: %s", s_boot_sound_enabled ? "enabled" : "disabled");
 
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     /* Directory listings plus metadata lookups use a bit more stack now that
      * payloads and metadata are separate; give the HTTPD task extra room. */
     config.stack_size = 8192;
-    config.max_uri_handlers = 40;
+    config.max_uri_handlers = 44;
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
@@ -2880,6 +3061,22 @@ esp_err_t start_mainapp(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &security_config_post_uri);
+
+    httpd_uri_t boot_config_get_uri = {
+        .uri = "/boot/config",
+        .method = HTTP_GET,
+        .handler = boot_config_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &boot_config_get_uri);
+
+    httpd_uri_t boot_config_post_uri = {
+        .uri = "/boot/config",
+        .method = HTTP_POST,
+        .handler = boot_config_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &boot_config_post_uri);
 
     httpd_uri_t gpio_state_uri = {
         .uri = "/gpio/state",
@@ -3044,6 +3241,8 @@ esp_err_t start_mainapp(void)
         .user_ctx  = NULL
     };
     httpd_register_uri_handler(server, &file_upload);
+
+    maybe_play_startup_sound();
 
     return ESP_OK;
 }

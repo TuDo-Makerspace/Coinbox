@@ -274,6 +274,28 @@ def test_auth_blocks_settings_reset_endpoint(qemu_mainapp_instance):
     assert _is_login_redirect(status, headers, "/sounds/")
 
 
+# Test: `/boot/config` requires auth for both reads and writes.
+# 1. Start from main app mode and enable auth.
+# 2. Call unauthenticated `GET /boot/config`.
+# 3. Call unauthenticated `POST /boot/config`.
+# 4. Assert both requests return `401 Unauthorized`.
+def test_auth_blocks_boot_config_endpoint(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    _set_security_password(base_url, AUTH_PASSWORD)
+
+    get_status, _, get_body = _http_get(base_url, "/boot/config")
+    assert get_status == 401, f"Expected 401 for GET /boot/config, got {get_status}. body={get_body}"
+    assert "Unauthorized" in get_body
+
+    post_status, _, post_body = _http_post_json(
+        base_url=base_url,
+        path="/boot/config",
+        payload={"boot_sound_enabled": False},
+    )
+    assert post_status == 401, f"Expected 401 for POST /boot/config, got {post_status}. body={post_body}"
+    assert "Unauthorized" in post_body
+
+
 # Test: `/skip` and `/recovery` cannot bypass auth once login is enabled.
 # 1. Start from main app mode and enable auth.
 # 2. Access `GET /skip` and `GET /recovery` without cookie.

@@ -225,6 +225,13 @@ static esp_err_t bootstrap_reset_settings_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    err = mainapp_reset_boot_defaults();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset start-up settings: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset start-up settings");
+        return ESP_FAIL;
+    }
+
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, "Settings reset to defaults");
     return ESP_OK;
