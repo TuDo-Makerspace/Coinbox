@@ -1382,6 +1382,13 @@ esp_err_t init_wifi(void)
         return err;
     }
 
+    err = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG_STA, "Failed to disable Wi-Fi power save: %s", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG_STA, "Wi-Fi power save disabled");
+    }
+
     /* If STA is configured, keep trying in the background */
   #if CONFIG_NETWORK_WIFI_STA
     if (s_runtime_config.sta_ssid[0] != '\0') {
