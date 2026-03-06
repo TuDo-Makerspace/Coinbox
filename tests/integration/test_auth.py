@@ -251,6 +251,29 @@ def test_auth_blocks_protected_endpoints(qemu_mainapp_instance):
         assert "Unauthorized" in body
 
 
+# Test: `/settings/reset` requires auth and must not reboot the device when unauthenticated.
+# 1. Start from main app mode and enable auth.
+# 2. Call `POST /settings/reset` without cookie.
+# 3. Assert `401 Unauthorized`.
+# 4. Verify the device remains in main app mode and still redirects `/sounds/` to login.
+def test_auth_blocks_settings_reset_endpoint(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    _set_security_password(base_url, AUTH_PASSWORD)
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/settings/reset",
+        timeout_s=3.0,
+        data=b"",
+    )
+    assert status == 401, f"Expected 401 for POST /settings/reset, got {status}. body={body}"
+    assert "Unauthorized" in body
+
+    status, headers, _ = _http_get(base_url, "/sounds/")
+    assert _is_login_redirect(status, headers, "/sounds/")
+
+
 # Test: `/skip` and `/recovery` cannot bypass auth once login is enabled.
 # 1. Start from main app mode and enable auth.
 # 2. Access `GET /skip` and `GET /recovery` without cookie.

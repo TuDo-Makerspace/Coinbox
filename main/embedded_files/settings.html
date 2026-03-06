@@ -89,6 +89,32 @@
     }
     .actions button.danger-btn:hover { background: #fecaca; }
     .actions button.danger-btn:active { background: #fca5a5; }
+    .actions button.warn-btn {
+      background: #fef3c7;
+      border-color: #fde68a;
+      color: #92400e;
+    }
+    .actions button.warn-btn:hover { background: #fde68a; }
+    .actions button.warn-btn:active { background: #fcd34d; }
+    .danger-zone {
+      margin-top: 0.5rem;
+      padding: 1rem;
+      border-radius: 12px;
+      border: 1px solid #cbd5e1;
+      background: #fcf8f8;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .danger-zone h3 {
+      margin: 0;
+      font-size: 1rem;
+      color: #991b1b;
+    }
+    .danger-zone p {
+      color: #64748b;
+      font-size: 0.95rem;
+    }
     .network-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -590,7 +616,16 @@
       </div>
       <div class="actions">
         <button id="restart-device">Restart device</button>
-        <button id="format-storage" class="danger-btn">Format storage</button>
+      </div>
+      <div class="danger-zone">
+        <div>
+          <h3>Danger Zone</h3>
+          <p>Please proceed with caution, as these actions may remove existing files and settings.</p>
+        </div>
+        <div class="actions">
+          <button id="reset-settings" class="warn-btn">Reset settings</button>
+          <button id="format-storage" class="danger-btn">Format storage</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1750,27 +1785,44 @@
     if (downloadLaserBtn) downloadLaserBtn.addEventListener('click', () => exportCsvFor('laser', laserEvents));
     if (downloadHallBtn) downloadHallBtn.addEventListener('click', () => exportCsvFor('hall', hallEvents));
 
+    async function postSystemAction(path, fallbackErrorMessage) {
+      const res = await fetch(path, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(body || fallbackErrorMessage);
+      }
+      return res;
+    }
+
     document.getElementById('download-log').addEventListener('click', downloadLog);
     document.getElementById('restart-device').addEventListener('click', async () => {
       if (!confirm('Restart the device?')) return;
       try {
-        const res = await fetch('/restart', { method: 'POST' });
-        if (!res.ok) throw new Error('Restart failed');
+        await postSystemAction('/restart', 'Restart failed');
         alert('Device restarting...');
         setTimeout(() => location.replace('/'), 800);
       } catch (e) {
         alert(e.message || 'Restart failed');
       }
     });
+    document.getElementById('reset-settings').addEventListener('click', async () => {
+      if (!confirm('Reset all settings to defaults? This will remove the UI password, restore network settings, and restart the device.')) return;
+      try {
+        await postSystemAction('/settings/reset', 'Reset settings failed');
+        alert('Settings reset to defaults. Device restarting...');
+        setTimeout(() => location.replace('/'), 800);
+      } catch (e) {
+        alert(e.message || 'Reset settings failed');
+      }
+    });
     document.getElementById('format-storage').addEventListener('click', async () => {
       if (!confirm('Format storage? This will delete all files.')) return;
       try {
-        const res = await fetch('/format', { method: 'POST' });
-        if (!res.ok) throw new Error('Format failed');
+        await postSystemAction('/format', 'Format failed');
         alert('Storage formatted');
         location.reload();
       } catch (e) {
-        alert(e.message);
+        alert(e.message || 'Format failed');
       }
     });
     if (networkSaveBtn) {

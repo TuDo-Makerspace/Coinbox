@@ -7,11 +7,21 @@ import pytest
 try:
     from tests.integration.integration_helpers import (
         BOOT_TIMEOUT_S,
+        CUSTOM_AP_PASSWORD,
+        CUSTOM_AP_SSID,
+        CUSTOM_STA_PASSWORD,
+        CUSTOM_STA_SSID,
+        CUSTOM_UI_PASSWORD,
         _assert_sound_download_status,
+        _get_network_config,
+        _get_security_config,
         _http_get,
         _http_request,
         _is_bootstrap_root_page,
+        _is_login_redirect,
         _log_contains_any_since,
+        _set_network_config,
+        _set_security_password,
         _skip_to_main_app,
         _tail_log,
         _test_mp3_bytes,
@@ -22,11 +32,21 @@ try:
 except ModuleNotFoundError:
     from integration_helpers import (
         BOOT_TIMEOUT_S,
+        CUSTOM_AP_PASSWORD,
+        CUSTOM_AP_SSID,
+        CUSTOM_STA_PASSWORD,
+        CUSTOM_STA_SSID,
+        CUSTOM_UI_PASSWORD,
         _assert_sound_download_status,
+        _get_network_config,
+        _get_security_config,
         _http_get,
         _http_request,
         _is_bootstrap_root_page,
+        _is_login_redirect,
         _log_contains_any_since,
+        _set_network_config,
+        _set_security_password,
         _skip_to_main_app,
         _tail_log,
         _test_mp3_bytes,
@@ -101,6 +121,101 @@ def test_restart_endpoint_reboots_device(qemu_mainapp_instance):
     _skip_to_main_app(base_url, log_path)
     status, _, _ = _http_get(base_url, "/sounds/")
     assert status == 200
+
+
+# Test: Settings reset in main app restores defaults and reboots device.
+# 1. Start from main app mode and capture baseline network/security config.
+# 2. Change as many resettable settings as this build supports:
+#    - AP and STA config, when available.
+#    - UI auth password.
+# 3. Call authenticated `POST /settings/reset` and accept either immediate response or reboot-race disconnect.
+# 4. Wait until bootstrap root page is served after reboot.
+# 5. Skip back to main app and verify network/security config matches baseline defaults and auth is gone.
+def test_reset_settings_endpoint_restores_defaults_and_reboots_device(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    baseline_network = _get_network_config(base_url)
+    baseline_security = _get_security_config(base_url)
+    assert baseline_security.get("password_set") is False, (
+        "Expected auth to be disabled at baseline for main-app settings reset test."
+    )
+
+    network_payload = {}
+    if baseline_network.get("ap_supported"):
+        network_payload["ap_ssid"] = CUSTOM_AP_SSID
+        network_payload["ap_password"] = CUSTOM_AP_PASSWORD
+    if baseline_network.get("sta_supported"):
+        network_payload["sta_ssid"] = CUSTOM_STA_SSID
+        network_payload["sta_password"] = CUSTOM_STA_PASSWORD
+
+    if network_payload:
+        network_custom = _set_network_config(base_url, network_payload)
+        if "ap_ssid" in network_payload:
+            assert network_custom.get("ap_ssid") == CUSTOM_AP_SSID
+            assert network_custom.get("ap_password_set") is True
+        if "sta_ssid" in network_payload:
+            assert network_custom.get("sta_ssid") == CUSTOM_STA_SSID
+            assert network_custom.get("sta_password_set") is True
+
+    auth_cookie = _set_security_password(base_url, CUSTOM_UI_PASSWORD)
+    auth_headers = {"Cookie": auth_cookie}
+
+    status, headers, _ = _http_get(base_url, "/sounds/")
+    assert _is_login_redirect(status, headers, "/sounds/")
+
+    security_custom = _get_security_config(base_url, headers=auth_headers)
+    assert security_custom.get("password_set") is True
+
+    if network_payload:
+        network_custom = _get_network_config(base_url, headers=auth_headers)
+        if "ap_ssid" in network_payload:
+            assert network_custom.get("ap_ssid") == CUSTOM_AP_SSID
+        if "sta_ssid" in network_payload:
+            assert network_custom.get("sta_ssid") == CUSTOM_STA_SSID
+
+    reset_status = None
+    reset_body = ""
+    reset_exc = None
+    try:
+        reset_status, _, reset_body = _http_request(
+            base_url=base_url,
+            method="POST",
+            path="/settings/reset",
+            timeout_s=3.0,
+            data=b"",
+            headers=auth_headers,
+        )
+    except Exception as exc:
+        reset_exc = repr(exc)
+
+    if reset_exc is None:
+        assert reset_status == 200, (
+            "Expected 200 from /settings/reset before reboot, "
+            f"got status={reset_status}, body={reset_body}"
+        )
+
+    rebooted = _wait_for_bootstrap_root(base_url, timeout_s=float(BOOT_TIMEOUT_S + 20.0))
+    assert rebooted, (
+        "Device did not reboot into bootstrap after /settings/reset.\n"
+        f"reset_status={reset_status}\n"
+        f"reset_body={reset_body}\n"
+        f"reset_exc={reset_exc}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    _skip_to_main_app(base_url, log_path)
+
+    network_after_reset = _get_network_config(base_url)
+    security_after_reset = _get_security_config(base_url)
+    assert network_after_reset == baseline_network
+    assert security_after_reset == baseline_security
+
+    status, headers, _ = _http_get(base_url, "/sounds/")
+    assert status == 200, (
+        "Expected /sounds/ to be accessible after /settings/reset removed auth.\n"
+        f"status={status}, location={headers.get('Location')}"
+    )
 
 
 # Test: Format endpoint clears storage files.

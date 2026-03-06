@@ -1573,6 +1573,20 @@ static void restart_timer_cb(TimerHandle_t timer)
     perform_restart();
 }
 
+static void schedule_restart_timer(const char *timer_name)
+{
+    TimerHandle_t timer = xTimerCreate(timer_name, pdMS_TO_TICKS(500), pdFALSE, NULL, restart_timer_cb);
+    if (!timer) {
+        ESP_LOGE(TAG, "Failed to create %s timer; restarting immediately", timer_name ? timer_name : "restart");
+        perform_restart();
+        return;
+    }
+    if (xTimerStart(timer, 0) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start %s timer; restarting immediately", timer_name ? timer_name : "restart");
+        perform_restart();
+    }
+}
+
 static esp_err_t restart_handler(httpd_req_t *req)
 {
     esp_err_t auth_err = security_require_auth(req);
@@ -1581,18 +1595,42 @@ static esp_err_t restart_handler(httpd_req_t *req)
     }
 
     httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     httpd_resp_sendstr(req, "Restarting");
 
-    TimerHandle_t timer = xTimerCreate("restart", pdMS_TO_TICKS(500), pdFALSE, NULL, restart_timer_cb);
-    if (!timer) {
-        ESP_LOGE(TAG, "Failed to create restart timer; restarting immediately");
-        perform_restart();
-        return ESP_OK;
+    schedule_restart_timer("restart");
+    return ESP_OK;
+}
+
+static esp_err_t reset_settings_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
     }
-    if (xTimerStart(timer, 0) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to start restart timer; restarting immediately");
-        perform_restart();
+
+    ESP_LOGW(TAG, "Resetting configured settings to defaults from main app");
+
+    esp_err_t err = network_reset_config_to_defaults(false);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset network settings: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset network settings");
+        return ESP_FAIL;
     }
+
+    err = mainapp_reset_security_defaults();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset security settings: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset security settings");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    security_clear_auth_cookie_header(req);
+    httpd_resp_sendstr(req, "Settings reset to defaults");
+
+    schedule_restart_timer("settings-reset");
     return ESP_OK;
 }
 
@@ -2816,6 +2854,14 @@ esp_err_t start_mainapp(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &settings_page);
+
+    httpd_uri_t settings_reset_uri = {
+        .uri = "/settings/reset",
+        .method = HTTP_POST,
+        .handler = reset_settings_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &settings_reset_uri);
 
     httpd_uri_t format_storage_uri = {
         .uri = "/format",
