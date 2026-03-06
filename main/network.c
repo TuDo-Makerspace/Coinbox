@@ -23,7 +23,9 @@
 #include "lwip/sys.h"
 #include "sdkconfig.h"
 
-/*─── Configuration macro aliases ─────────────────────────────────────────────*/
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Constants
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #if CONFIG_NETWORK_WIFI_STA
   #define ESP_WIFI_STA_ENABLE      CONFIG_NETWORK_WIFI_STA
@@ -58,6 +60,10 @@
 #define SOFTAP_IPV4_ADDR "4.3.2.1"
 #define SOFTAP_IPV4_NETMASK "255.255.255.0"
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Static Vars
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 static const char *TAG_AP  = "WiFi SoftAP";
 static const char *TAG_STA = "WiFi Sta";
 #if CONFIG_NETWORK_ETH_OPENETH
@@ -82,6 +88,10 @@ static esp_eth_phy_t *s_eth_phy = NULL;
 static esp_eth_netif_glue_handle_t s_eth_glue = NULL;
 #endif
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Types
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 typedef struct {
     char ap_ssid[NETWORK_WIFI_SSID_MAX_LEN + 1];
     char ap_password[NETWORK_WIFI_PSK_MAX_LEN + 1];
@@ -92,12 +102,24 @@ typedef struct {
 static network_runtime_config_t s_runtime_config;
 static bool s_runtime_config_loaded = false;
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Forward Declarations
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 #if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
 static esp_err_t softap_set_dns_addr(esp_netif_t *esp_netif_ap, esp_netif_t *esp_netif_sta);
 #endif
 #if CONFIG_NETWORK_ETH_OPENETH
 static esp_err_t ethernet_init_openeth(esp_netif_t **out_esp_netif_eth);
 #endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Helpers
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// Config Validation
+//-------------------------------------------------------------------------
 
 static void copy_or_empty(char *dst, size_t dst_size, const char *src)
 {
@@ -180,6 +202,10 @@ static void load_nvs_string_or_default(nvs_handle_t nvs, const char *key, char *
     }
     copy_or_empty(out, out_size, fallback);
 }
+
+//-------------------------------------------------------------------------
+// Runtime Config Persistence
+//-------------------------------------------------------------------------
 
 static esp_err_t ensure_runtime_config_loaded(void)
 {
@@ -316,6 +342,10 @@ static esp_err_t apply_sta_config(const char *ssid, const char *password)
 #endif
 
 #if CONFIG_NETWORK_WIFI_AP || CONFIG_NETWORK_WIFI_STA || CONFIG_NETWORK_ETH_OPENETH
+//-------------------------------------------------------------------------
+// IP Queries
+//-------------------------------------------------------------------------
+
 static bool fetch_ipv4_for_ifkey(const char *if_key, char *out, size_t out_size)
 {
     if (!if_key || !out || out_size == 0) {
@@ -340,6 +370,14 @@ static bool fetch_ipv4_for_ifkey(const char *if_key, char *out, size_t out_size)
     return (n > 0 && (size_t)n < out_size);
 }
 #endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Public
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// Status Queries
+//-------------------------------------------------------------------------
 
 esp_err_t network_get_ipv4_strings(char *ap_out, size_t ap_out_size,
                                    char *sta_out, size_t sta_out_size)
@@ -463,6 +501,10 @@ static bool has_pending_sta_reboot_requirement(void)
 }
 #endif
 
+//-------------------------------------------------------------------------
+// Config State
+//-------------------------------------------------------------------------
+
 esp_err_t network_get_public_config(network_public_config_t *out)
 {
     if (!out) {
@@ -487,6 +529,10 @@ esp_err_t network_get_public_config(network_public_config_t *out)
 #endif
     return ESP_OK;
 }
+
+//-------------------------------------------------------------------------
+// Config Mutations
+//-------------------------------------------------------------------------
 
 esp_err_t network_update_config(const char *ap_ssid,
                                 const char *ap_password,
@@ -665,7 +711,9 @@ esp_err_t network_restore_configured_sta(void)
 #endif
 }
 
-/*─── Event handler ──────────────────────────────────────────────────────────*/
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Event Handling
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
@@ -755,9 +803,15 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-/*─── SoftAP init ─────────────────────────────────────────────────────────────*/
-
 #if CONFIG_NETWORK_WIFI_AP
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Interface Bring-Up Helpers
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// SoftAP
+//-------------------------------------------------------------------------
+
 static esp_err_t configure_softap_ipv4(esp_netif_t *esp_netif_ap)
 {
     if (!esp_netif_ap) {
@@ -825,9 +879,11 @@ static esp_err_t wifi_init_softap(esp_netif_t **out_esp_netif_ap)
 }
 #endif  // CONFIG_NETWORK_WIFI_AP
 
-/*─── STA init ────────────────────────────────────────────────────────────────*/
-
 #if CONFIG_NETWORK_WIFI_STA
+//-------------------------------------------------------------------------
+// Station
+//-------------------------------------------------------------------------
+
 static esp_err_t wifi_init_sta(esp_netif_t **out_esp_netif_sta)
 {
     if (!out_esp_netif_sta) {
@@ -860,9 +916,11 @@ static esp_err_t wifi_init_sta(esp_netif_t **out_esp_netif_sta)
 }
 #endif  // CONFIG_NETWORK_WIFI_STA
 
-/*─── OpenCores Ethernet init (QEMU) ────────────────────────────────────────*/
-
 #if CONFIG_NETWORK_ETH_OPENETH
+//-------------------------------------------------------------------------
+// Ethernet (Used for QEMU)
+//-------------------------------------------------------------------------
+
 static void ethernet_release_resources(esp_netif_t *esp_netif_eth)
 {
     if (s_eth_handle) {
@@ -948,9 +1006,11 @@ static esp_err_t ethernet_init_openeth(esp_netif_t **out_esp_netif_eth)
 }
 #endif
 
-/*─── DNS relay for SoftAP ───────────────────────────────────────────────────*/
-
 #if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+//-------------------------------------------------------------------------
+// AP/STA Integration
+//-------------------------------------------------------------------------
+
 static esp_err_t softap_set_dns_addr(esp_netif_t *esp_netif_ap, esp_netif_t *esp_netif_sta)
 {
     if (!esp_netif_ap || !esp_netif_sta) {
@@ -988,7 +1048,9 @@ static esp_err_t softap_set_dns_addr(esp_netif_t *esp_netif_ap, esp_netif_t *esp
 }
 #endif
 
-/*─── init_wifi ───────────────────────────────────────────────────────────────*/
+//-------------------------------------------------------------------------
+// Lifecycle
+//-------------------------------------------------------------------------
 
 esp_err_t init_wifi(void)
 {
