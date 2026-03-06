@@ -2,13 +2,17 @@
 #include <esp_http_server.h>
 #include <esp_event.h>
 #include <esp_system.h>
-#include "ws_server.h"
+#include "mainapp.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "sys/param.h"
 #include <esp_app_format.h>
 #include <esp_littlefs.h>
 #include "esp_log.h"
+#include "sdkconfig.h"
+#if CONFIG_NETWORK_ETH_OPENETH
+#include "esp_private/system_internal.h"
+#endif
 
 static const char *TAG = "ota";
 
@@ -261,9 +265,14 @@ static esp_err_t ota_littlefs(httpd_req_t *req){
 
 static void reboot_timer_cb(TimerHandle_t xTimer)
 {
+    (void)xTimer;
     ESP_LOGE(TAG, "Restarting...");
     vTaskDelay(pdMS_TO_TICKS(1000));
-    esp_restart(); 
+#if CONFIG_NETWORK_ETH_OPENETH
+    esp_restart_noos_dig();
+#else
+    esp_restart();
+#endif
 }
 
 esp_err_t ota_update_handler(httpd_req_t *req)
@@ -316,13 +325,13 @@ esp_err_t ota_update_handler(httpd_req_t *req)
         NULL,                        // timer “ID” (not needed here)
         reboot_timer_cb             // callback
     );
-    ESP_LOGE(TAG, "OTA complete");
+    ESP_LOGI(TAG, "OTA complete");
 
     if (xTimerStart(reboot_timer, /*ticks to wait*/ 100) != pdPASS) {
         ESP_LOGE(TAG, "Failed to start reboot timer");
     }
     
-    ESP_LOGW(TAG, "Flashing: %s; Packages received: %d; Status: Rebooting now ...", is_fw ? "OS" : "SPIFFS", 100);
+    ESP_LOGI(TAG, "Flashing: %s; Packages received: %d; Status: Rebooting now ...", is_fw ? "OS" : "SPIFFS", 100);
     
     // Success
     httpd_resp_set_status(req, "200");

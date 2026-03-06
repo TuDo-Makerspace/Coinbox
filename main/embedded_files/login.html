@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coinbox Login</title>
+  <link rel="stylesheet" href="/glyphs.css">
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 1rem;
+      position: relative;
+      overflow-x: hidden;
+      isolation: isolate;
+    }
+    .card {
+      width: min(440px, 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--card);
+      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+      padding: 1.3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    h1 { font-size: 1.5rem; }
+    p { color: var(--muted); }
+    label {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+    button {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.7rem 0.95rem;
+      font: inherit;
+      font-weight: 700;
+      background: #e5edff;
+      cursor: pointer;
+    }
+    button:hover { background: #d7e4ff; }
+    button:disabled { opacity: 0.7; cursor: not-allowed; }
+    .error {
+      color: #b91c1c;
+      font-size: 0.95rem;
+      margin-top: -0.2rem;
+    }
+    .error:empty {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Password required</h1>
+    <p>Enter the configured password to continue.</p>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" maxlength="64" autofocus>
+    <button id="submit" type="button">Unlock</button>
+    <div id="error" class="error" aria-live="polite"></div>
+  </div>
+
+  <script src="/glyphs.js"></script>
+  <script>
+    if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
+      window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
+    }
+
+    const passwordInput = document.getElementById('password');
+    const submitBtn = document.getElementById('submit');
+    const errorEl = document.getElementById('error');
+
+    function resolveNextPath() {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get('next') || '/sounds/';
+      if (!raw.startsWith('/') || raw.startsWith('/login') || raw.startsWith('/auth/')) {
+        return '/sounds/';
+      }
+      return raw;
+    }
+
+    async function submit() {
+      const password = passwordInput.value;
+      if (!password) {
+        errorEl.textContent = 'Please enter a password.';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      errorEl.textContent = '';
+      const next = resolveNextPath();
+
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password, next }),
+        });
+
+        if (!res.ok) {
+          let msg = 'Invalid password.';
+          try {
+            const text = (await res.text()).trim();
+            if (text) msg = text;
+          } catch (_) {}
+          throw new Error(msg);
+        }
+
+        const data = await res.json();
+        const target = (data && typeof data.next === 'string') ? data.next : next;
+        window.location.replace(target || '/sounds/');
+      } catch (e) {
+        errorEl.textContent = e.message || 'Login failed.';
+        passwordInput.select();
+        submitBtn.disabled = false;
+      }
+    }
+
+    submitBtn.addEventListener('click', submit);
+    passwordInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submit();
+      }
+    });
+  </script>
+</body>
+</html>

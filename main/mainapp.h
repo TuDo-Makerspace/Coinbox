@@ -21,7 +21,8 @@
 extern "C" {
 #endif
 
-esp_err_t start_ws_server(const char *base_path);
+esp_err_t start_mainapp(void);
+esp_err_t mainapp_reset_security_defaults(void);
 
 #ifdef __cplusplus
 }

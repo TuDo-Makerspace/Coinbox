@@ -1,0 +1,24 @@
+.bg-glyph-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.bg-glyph {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: #9eaaba;
+  font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+  line-height: 1;
+  user-select: none;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}
+
+body > *:not(.bg-glyph-layer):not(.glyph-overlay-exempt) {
+  position: relative;
+  z-index: 1;
+}

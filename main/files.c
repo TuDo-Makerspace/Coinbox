@@ -7,13 +7,26 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_littlefs.h"
+#include "esp_random.h"
+#include "sdkconfig.h"
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Constants
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 #define FILES_PATH_MAX 512
 #define FILE_ENTRY_MAGIC 0x46454E54u /* 'FENT' */
 #define FILE_ENTRY_VERSION 2
 
 static const char *TAG = "files";
-static char g_base_path[FILES_PATH_MAX] = {0};
+static const char *MOUNT_TAG = "mount";
+static const char *BASE_PATH = CONFIG_BASE_PATH;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Structs
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
 typedef struct __attribute__((packed)) {
     uint32_t magic;
     uint8_t version;
@@ -23,10 +36,32 @@ typedef struct __attribute__((packed)) {
     uint8_t reserved;
 } file_entry_meta_t;
 
-static uint8_t clamp_percent(uint8_t value)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Vars
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static char s_base_path[FILES_PATH_MAX] = {0};
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Private Helpers
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// Common
+//-------------------------------------------------------------------------
+
+static uint8_t clamp_probability(uint8_t value)
 {
-    if (value > 100) {
-        return 100;
+    if (value > FILE_PROBABILITY_MAX) {
+        return FILE_PROBABILITY_MAX;
+    }
+    return value;
+}
+
+static uint8_t clamp_volume(uint8_t value)
+{
+    if (value > FILE_VOLUME_MAX) {
+        return FILE_VOLUME_MAX;
     }
     return value;
 }
@@ -51,30 +86,52 @@ static void set_name(file_properties_t *props, const char *name)
     }
 }
 
-void file_props_init(file_properties_t *props, const char *path)
+//-------------------------------------------------------------------------
+// Storage
+//-------------------------------------------------------------------------
+
+static esp_err_t mount_storage(void)
 {
-    if (!props) {
-        return;
+    ESP_LOGI(MOUNT_TAG, "Initializing LittleFS");
+    if (!BASE_PATH || BASE_PATH[0] == '\0') {
+        ESP_LOGE(MOUNT_TAG, "Base path not configured");
+        return ESP_ERR_INVALID_ARG;
     }
-    memset(props, 0, sizeof(*props));
-    set_name(props, path ? basename_from_path(path) : NULL);
-    props->probability = 0;
-    props->volume = 0;
-    props->enabled = false;
+
+    esp_vfs_littlefs_conf_t conf = {
+        .base_path              = BASE_PATH,
+        .partition_label        = "storage",
+        .format_if_mount_failed = true,
+        .dont_mount             = false
+    };
+
+    esp_err_t ret = esp_vfs_littlefs_register(&conf);
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(MOUNT_TAG, "Failed to mount or format LittleFS");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(MOUNT_TAG, "LittleFS partition not found");
+        } else {
+            ESP_LOGE(MOUNT_TAG, "Failed to initialize LittleFS (%s)", esp_err_to_name(ret));
+        }
+        return ret;
+    }
+
+    size_t total = 0, used = 0;
+    ret = esp_littlefs_info(conf.partition_label, &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGE(MOUNT_TAG, "Failed to get LittleFS partition info (%s)", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(MOUNT_TAG, "LittleFS partition mounted at '%s' (total: %d, used: %d)",
+             BASE_PATH, total, used);
+    return ESP_OK;
 }
 
-void file_props_set(file_properties_t *props, const char *name, uint8_t probability, uint8_t volume, bool enabled)
-{
-    if (!props) {
-        return;
-    }
-    if (name) {
-        set_name(props, basename_from_path(name));
-    }
-    props->probability = clamp_percent(probability);
-    props->volume = clamp_percent(volume);
-    props->enabled = enabled;
-}
+//-------------------------------------------------------------------------
+// Paths
+//-------------------------------------------------------------------------
 
 static bool has_meta_extension(const char *name)
 {
@@ -88,10 +145,10 @@ static esp_err_t full_path_for_name(const char *name, char *out, size_t out_size
     if (!name || !out || out_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (g_base_path[0] == '\0') {
+    if (s_base_path[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
     }
-    int len = snprintf(out, out_size, "%s/%s", g_base_path, name);
+    int len = snprintf(out, out_size, "%s/%s", s_base_path, name);
     if (len < 0 || (size_t)len >= out_size) {
         return ESP_ERR_INVALID_SIZE;
     }
@@ -103,7 +160,7 @@ static esp_err_t meta_path_for_name(const char *name, char *out, size_t out_size
     if (!name || !out || out_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (g_base_path[0] == '\0') {
+    if (s_base_path[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
     }
     if (strchr(name, '/')) {
@@ -111,42 +168,25 @@ static esp_err_t meta_path_for_name(const char *name, char *out, size_t out_size
     }
     char base[FILE_ENTRY_NAME_MAX];
     strlcpy(base, name, sizeof(base));
-    int len = snprintf(out, out_size, "%s/%s.meta", g_base_path, base);
+    int len = snprintf(out, out_size, "%s/%s.meta", s_base_path, base);
     if (len < 0 || (size_t)len >= out_size) {
         return ESP_ERR_INVALID_SIZE;
     }
     return ESP_OK;
 }
 
+//-------------------------------------------------------------------------
+// Metadata
+//-------------------------------------------------------------------------
+
 static void build_meta(file_entry_meta_t *hdr, const file_properties_t *props)
 {
     hdr->magic = FILE_ENTRY_MAGIC;
     hdr->version = FILE_ENTRY_VERSION;
-    hdr->probability = clamp_percent(props->probability);
-    hdr->volume = clamp_percent(props->volume);
+    hdr->probability = clamp_probability(props->probability);
+    hdr->volume = clamp_volume(props->volume);
     hdr->enabled = props->enabled ? 1 : 0;
     hdr->reserved = 0;
-}
-
-esp_err_t files_write_meta(const char *name, const file_properties_t *props)
-{
-    if (!name || !props) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    char path[FILES_PATH_MAX];
-    esp_err_t err = meta_path_for_name(name, path, sizeof(path));
-    if (err != ESP_OK) {
-        return err;
-    }
-    FILE *f = fopen(path, "wb");
-    if (!f) {
-        return ESP_FAIL;
-    }
-    file_entry_meta_t hdr;
-    build_meta(&hdr, props);
-    size_t written = fwrite(&hdr, 1, sizeof(hdr), f);
-    fclose(f);
-    return (written == sizeof(hdr)) ? ESP_OK : ESP_FAIL;
 }
 
 static esp_err_t file_props_load(const char *name, file_properties_t *out)
@@ -185,39 +225,104 @@ static esp_err_t file_props_load(const char *name, file_properties_t *out)
         return ESP_ERR_INVALID_RESPONSE;
     }
 
-    file_props_init(out, basename_from_path(audio_path));
-    out->probability = clamp_percent(hdr.probability);
-    out->volume = clamp_percent(hdr.volume);
+    files_props_init(out, basename_from_path(audio_path));
+    out->probability = clamp_probability(hdr.probability);
+    out->volume = clamp_volume(hdr.volume);
     out->enabled = hdr.enabled ? true : false;
     return ESP_OK;
 }
 
-esp_err_t files_set_base_path(const char *base_path)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Public Interface
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// File Properties
+//-------------------------------------------------------------------------
+
+void files_props_init(file_properties_t *props, const char *path)
 {
-    if (!base_path) {
+    if (!props) {
+        return;
+    }
+    memset(props, 0, sizeof(*props));
+    set_name(props, path ? basename_from_path(path) : NULL);
+    props->probability = 0;
+    props->volume = 0;
+    props->enabled = false;
+}
+
+void files_props_set(file_properties_t *props, const char *name, uint8_t probability, uint8_t volume, bool enabled)
+{
+    if (!props) {
+        return;
+    }
+    if (name) {
+        set_name(props, basename_from_path(name));
+    }
+    props->probability = clamp_probability(probability);
+    props->volume = clamp_volume(volume);
+    props->enabled = enabled;
+}
+
+//-------------------------------------------------------------------------
+// Storage
+//-------------------------------------------------------------------------
+
+esp_err_t files_init(void)
+{
+    const char *base_path = BASE_PATH;
+    if (!base_path || base_path[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-    if (strlcpy(g_base_path, base_path, sizeof(g_base_path)) >= sizeof(g_base_path)) {
+    if (strlcpy(s_base_path, base_path, sizeof(s_base_path)) >= sizeof(s_base_path)) {
         ESP_LOGE(TAG, "Base path too long");
-        g_base_path[0] = '\0';
+        s_base_path[0] = '\0';
         return ESP_ERR_INVALID_ARG;
     }
-    DIR *dir = opendir(g_base_path);
+    esp_err_t ret = mount_storage();
+    if (ret != ESP_OK) {
+        s_base_path[0] = '\0';
+        return ret;
+    }
+    DIR *dir = opendir(s_base_path);
     if (!dir) {
-        ESP_LOGE(TAG, "Failed to open base path: %s", g_base_path);
-        g_base_path[0] = '\0';
+        ESP_LOGE(TAG, "Failed to open base path: %s", s_base_path);
+        s_base_path[0] = '\0';
         return ESP_FAIL;
     }
     closedir(dir);
     return ESP_OK;
 }
 
+esp_err_t files_format_storage(void)
+{
+    ESP_LOGW(MOUNT_TAG, "Formatting LittleFS partition");
+    esp_err_t err = esp_vfs_littlefs_unregister("storage");
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+        ESP_LOGE(MOUNT_TAG, "Failed to unmount before format: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_littlefs_format("storage");
+    if (err != ESP_OK) {
+        ESP_LOGE(MOUNT_TAG, "Format failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    return mount_storage();
+}
+
+//-------------------------------------------------------------------------
+// Files Listing
+//-------------------------------------------------------------------------
+
 size_t files_count(void)
 {
-    if (g_base_path[0] == '\0') {
+    if (s_base_path[0] == '\0') {
         return 0;
     }
-    DIR *dir = opendir(g_base_path);
+    DIR *dir = opendir(s_base_path);
     if (!dir) {
         return 0;
     }
@@ -230,7 +335,7 @@ size_t files_count(void)
         if (has_meta_extension(entry->d_name)) {
             continue;
         }
-        int len = snprintf(entrypath, sizeof(entrypath), "%s/%s", g_base_path, entry->d_name);
+        int len = snprintf(entrypath, sizeof(entrypath), "%s/%s", s_base_path, entry->d_name);
         if (len < 0 || len >= (int)sizeof(entrypath)) {
             continue;
         }
@@ -255,11 +360,11 @@ esp_err_t files_filename(size_t index, char *out_name, size_t out_size)
     if (!out_name || out_size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (g_base_path[0] == '\0') {
+    if (s_base_path[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
     }
 
-    DIR *dir = opendir(g_base_path);
+    DIR *dir = opendir(s_base_path);
     if (!dir) {
         return ESP_FAIL;
     }
@@ -274,7 +379,7 @@ esp_err_t files_filename(size_t index, char *out_name, size_t out_size)
         if (has_meta_extension(entry->d_name)) {
             continue;
         }
-        int len = snprintf(entrypath, sizeof(entrypath), "%s/%s", g_base_path, entry->d_name);
+        int len = snprintf(entrypath, sizeof(entrypath), "%s/%s", s_base_path, entry->d_name);
         if (len < 0 || len >= (int)sizeof(entrypath)) {
             continue;
         }
@@ -300,16 +405,112 @@ esp_err_t files_filename(size_t index, char *out_name, size_t out_size)
     return result;
 }
 
+esp_err_t files_pick_weighted_enabled(char *out_name, size_t out_size, uint32_t *out_total_weight, size_t *out_candidates)
+{
+    if (!out_name || out_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_base_path[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    out_name[0] = '\0';
+    if (out_total_weight) {
+        *out_total_weight = 0;
+    }
+    if (out_candidates) {
+        *out_candidates = 0;
+    }
+
+    DIR *dir = opendir(s_base_path);
+    if (!dir) {
+        return ESP_FAIL;
+    }
+
+    struct dirent *entry = NULL;
+    uint32_t total_weight = 0;
+    size_t candidates = 0;
+    bool selected = false;
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (has_meta_extension(entry->d_name)) {
+            continue;
+        }
+
+        file_properties_t meta;
+        if (file_props_load(entry->d_name, &meta) != ESP_OK) {
+            continue;
+        }
+        if (!meta.enabled || meta.probability == 0) {
+            continue;
+        }
+
+        uint32_t weight = (uint32_t)meta.probability;
+        total_weight += weight;
+        candidates++;
+
+        // Weighted replacement ensures probability proportional to file weight.
+        if ((esp_random() % total_weight) < weight) {
+            strlcpy(out_name, entry->d_name, out_size);
+            selected = true;
+        }
+    }
+
+    closedir(dir);
+
+    if (out_total_weight) {
+        *out_total_weight = total_weight;
+    }
+    if (out_candidates) {
+        *out_candidates = candidates;
+    }
+
+    if (!selected) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    return ESP_OK;
+}
+
+//-------------------------------------------------------------------------
+// Files Metadata
+//-------------------------------------------------------------------------
+
 esp_err_t files_read_meta(const char *name, file_properties_t *out)
 {
     if (!name || !out) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (g_base_path[0] == '\0') {
+    if (s_base_path[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
     }
     return file_props_load(name, out);
 }
+
+esp_err_t files_write_meta(const char *name, const file_properties_t *props)
+{
+    if (!name || !props) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path[FILES_PATH_MAX];
+    esp_err_t err = meta_path_for_name(name, path, sizeof(path));
+    if (err != ESP_OK) {
+        return err;
+    }
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        return ESP_FAIL;
+    }
+    file_entry_meta_t hdr;
+    build_meta(&hdr, props);
+    size_t written = fwrite(&hdr, 1, sizeof(hdr), f);
+    fclose(f);
+    return (written == sizeof(hdr)) ? ESP_OK : ESP_FAIL;
+}
+
+//-------------------------------------------------------------------------
+// Files Mutation
+//-------------------------------------------------------------------------
 
 esp_err_t files_delete_with_meta(const char *name)
 {

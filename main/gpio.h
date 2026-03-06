@@ -2,28 +2,65 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <unistd.h>
 #include <string.h>
-#include <stdbool.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "esp_err.h"
+#include "sdkconfig.h"
 
-void configure_gpio();
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Constants
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void mute_output(bool mute);
-esp_err_t set_amp_muted(bool mute);
-esp_err_t toggle_amp_muted(bool *muted_out);
-bool is_amp_muted(void);
+#define LASER_BLOCKED 1
+#define HALL_LID_CLOSED 0
+#define GPIO_EVENT_BUFFER_CAPACITY 128
 
-extern volatile uint32_t laser_isr_count;
-extern volatile uint32_t hall_isr_count;
+typedef struct
+{
+    uint64_t timestamp_us;
+    uint8_t level;
+} gpio_edge_event_t;
 
-extern bool laser_detection_enabled;
-extern TimerHandle_t s_isr_timer;
-extern TaskHandle_t  s_worker_task;
+typedef gpio_edge_event_t gpio_laser_event_t;
+typedef gpio_edge_event_t gpio_hall_event_t;
+
+typedef enum
+{
+    GPIO_RUNTIME_BOOTSTRAP = 0,
+    GPIO_RUNTIME_MAIN_APP = 1,
+} gpio_runtime_mode_t;
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Interface
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// Init
+//-------------------------------------------------------------------------
+
+esp_err_t gpio_init(void);
+void gpio_set_runtime_mode(gpio_runtime_mode_t mode);
+gpio_runtime_mode_t gpio_get_runtime_mode(void);
+
+//-------------------------------------------------------------------------
+// Laser
+//-------------------------------------------------------------------------
 
 int gpio_get_laser_level(void);
+uint32_t gpio_get_laser_changes(void);
+uint32_t gpio_get_laser_breaks(void);
+size_t gpio_laser_events_drain(gpio_laser_event_t *out_events, size_t max_events, uint32_t *dropped_events);
+
+//-------------------------------------------------------------------------
+// Hall/Lid detecion
+//-------------------------------------------------------------------------
+
 int gpio_get_hall_level(void);
-bool gpio_is_laser_beam_blocked(void);
-bool gpio_is_lid_open(void);
+uint32_t get_hall_changes(void);
+size_t gpio_hall_events_drain(gpio_hall_event_t *out_events, size_t max_events, uint32_t *dropped_events);
+
+#if CONFIG_TEST_GPIO_INJECTION
+esp_err_t gpio_test_set_laser_level(int level);
+esp_err_t gpio_test_set_hall_level(int level);
+#endif

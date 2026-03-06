@@ -6,5 +6,6 @@
     "C_Cpp.default.compilerPath": "/home/patrick/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32-elf-gcc",
     "C_Cpp.default.intelliSenseMode": "gcc-x64",
     "C_Cpp.default.cStandard": "gnu17",
-    "C_Cpp.default.cppStandard": "gnu++17"
+    "C_Cpp.default.cppStandard": "gnu++17",
+    "idf.currentSetup": "/home/patrick/esp/v5.5.2/esp-idf"
 }

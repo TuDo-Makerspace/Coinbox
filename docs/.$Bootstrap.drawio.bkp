@@ -1,0 +1,500 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.2.5 Chrome/138.0.7204.251 Electron/37.6.1 Safari/537.36" version="28.2.5">
+  <diagram name="Page-1" id="0XChSSK2MoHIEqqGRqh3">
+    <mxGraphModel dx="3400" dy="3508" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-28" target="AIQ1Np-hdQCirGZL_06A-4" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="450" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="AIQ1Np-hdQCirGZL_06A-4" target="AIQ1Np-hdQCirGZL_06A-6" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;" parent="1" source="AIQ1Np-hdQCirGZL_06A-4" target="Tncqt1R6NkhHVzk6sJvk-6" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="680" y="570" />
+              <mxPoint x="680" y="485" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-4" value="&lt;b&gt;Register 404&#39;s to 404 handler&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;404 -&amp;gt;&amp;nbsp;&lt;/font&gt;&lt;span style=&quot;font-family: &amp;quot;Courier New&amp;quot;;&quot;&gt;bootstrap_404_redirect_handler&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="240" y="540" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="AIQ1Np-hdQCirGZL_06A-6" target="AIQ1Np-hdQCirGZL_06A-8" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=none;endFill=0;dashed=1;dashPattern=8 8;" parent="1" source="AIQ1Np-hdQCirGZL_06A-6" target="Tncqt1R6NkhHVzk6sJvk-33" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1210" y="590" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-6" value="&lt;b&gt;Register root to root handler&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;&#39;/&#39; -&amp;gt; bootstrap_root_handler&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="240" y="630" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="AIQ1Np-hdQCirGZL_06A-8" target="AIQ1Np-hdQCirGZL_06A-10" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;" parent="1" source="AIQ1Np-hdQCirGZL_06A-8" target="Tncqt1R6NkhHVzk6sJvk-47" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1670" y="760" />
+              <mxPoint x="1670" y="485" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-8" value="&lt;b&gt;Register &#39;/recovery&#39; to recovery handler&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;&#39;/&#39; -&amp;gt;&amp;nbsp;bootstrap_recovery_handler&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="240" y="720" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="AIQ1Np-hdQCirGZL_06A-10" target="AIQ1Np-hdQCirGZL_06A-13" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;" parent="1" source="AIQ1Np-hdQCirGZL_06A-10" target="Dofs1zH7k67t7EqSbKb9-13" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="600" y="840" />
+              <mxPoint x="600" y="770" />
+              <mxPoint x="1680" y="770" />
+              <mxPoint x="1680" y="850" />
+              <mxPoint x="2080" y="850" />
+              <mxPoint x="2080" y="485" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-10" value="&lt;b&gt;Register &#39;/skip&#39; to skip handler&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;&#39;/skip&#39; -&amp;gt;&amp;nbsp;bootstrap_skip_handler&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="240" y="810" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;dashPattern=8 8;" parent="1" source="AIQ1Np-hdQCirGZL_06A-13" target="esGQzwJlYZwZxPdjjzYD-8" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1800" y="940" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="640" y="930" />
+              <mxPoint x="640" y="780" />
+              <mxPoint x="1670" y="780" />
+              <mxPoint x="1670" y="950" />
+              <mxPoint x="2550" y="950" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="AIQ1Np-hdQCirGZL_06A-13" value="&lt;b&gt;Register &#39;/update&#39; to OTA update handler&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;&#39;/update&#39; -&amp;gt;&amp;nbsp;ota_update_handler&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="240" y="900" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" target="Tncqt1R6NkhHVzk6sJvk-1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="960" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-1" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="390" y="1000" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-3" value="Boostrap Started, waiting for events..." style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="295" y="1030" width="220" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-4" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="940" y="470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-6" target="Tncqt1R6NkhHVzk6sJvk-4" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="940" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-6" value="404/unspported URI" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="760" y="470" width="120" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-9" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="Tncqt1R6NkhHVzk6sJvk-10" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="954.86" y="500" as="sourcePoint" />
+            <mxPoint x="954.86" y="540" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-33" target="Tncqt1R6NkhHVzk6sJvk-14" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1180" y="485" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-10" value="&lt;b&gt;Redirect to root (/)&lt;/b&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;httpd_resp_set_hdr(req, &quot;Location&quot;, &quot;/&quot;)&lt;/font&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="790" y="540" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-12" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="1390" y="470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-14" target="Tncqt1R6NkhHVzk6sJvk-12" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1390" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-14" value="/" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="1300" y="470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-15" value="&lt;font face=&quot;Courier New&quot;&gt;bootstrap_root_handler&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="1315" y="440" width="180" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-16" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="Tncqt1R6NkhHVzk6sJvk-17" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1404.8600000000001" y="500" as="sourcePoint" />
+            <mxPoint x="1404.8600000000001" y="540" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-37" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-17" target="Tncqt1R6NkhHVzk6sJvk-36" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-17" value="&lt;b&gt;Get remaining seconds of timer&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;seconds = get_remaining_seconds()&lt;br&gt;&lt;br&gt;&lt;/font&gt;Note that this will return 0s in case the recovery timer has been cancelled." style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="540" width="330" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-18" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="390" y="-130" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-19" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-18" target="Tncqt1R6NkhHVzk6sJvk-21" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="90" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-21" target="Tncqt1R6NkhHVzk6sJvk-26" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="90" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-21" value="&lt;b&gt;Init recovery requested flag&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;s_recovery_requested = false&lt;/font&gt;&lt;br&gt;&lt;br&gt;Setting this to true halts the automatic countdown to start the main application." style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="280" y="-60" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-22" value="&lt;font face=&quot;Courier New&quot;&gt;bootstrap&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="375" y="-150" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-24" target="Tncqt1R6NkhHVzk6sJvk-18" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-24" value="app_main" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="280" y="-130" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-26" target="Tncqt1R6NkhHVzk6sJvk-27" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-26" value="&lt;b&gt;Init main started flag&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;s_main_started&amp;nbsp;= false&lt;/font&gt;&lt;br&gt;&lt;br&gt;This flag is used to catch race conditions where recovery has been requested right as the application was about to start into main" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="280" y="90" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-27" target="Tncqt1R6NkhHVzk6sJvk-28" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-27" value="&lt;b&gt;Start the boostrap HTTP server&lt;br&gt;&lt;/b&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;font face=&quot;Courier New&quot;&gt;esp_err_t err = httpd_start(&amp;amp;s_bootstrap_server, &amp;amp;config)&lt;/font&gt;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="170" y="240" width="470" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-27" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-28" target="esGQzwJlYZwZxPdjjzYD-21" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="170" y="425" />
+              <mxPoint x="170" y="1105" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-28" value="&lt;b&gt;Start the recovery timer (10s) and assign timeout callback&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;xTimerCreate (...)&lt;br&gt;&lt;/font&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;10s -&amp;gt;&amp;nbsp;recovery_timeout_cb&lt;br&gt;xTimerStart(...)&lt;br&gt;&lt;br&gt;&lt;/font&gt;We do this before registering handlers since the handlers need the timer to be initialised!&lt;font face=&quot;Courier New&quot;&gt;&lt;/font&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="220" y="350" width="370" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;endArrow=none;endFill=0;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-10" target="Tncqt1R6NkhHVzk6sJvk-33" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1120" y="565" as="sourcePoint" />
+            <mxPoint x="1300" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-33" value="" style="shape=waypoint;sketch=0;size=6;pointerEvents=1;points=[];fillColor=none;resizable=0;rotatable=0;perimeter=centerPerimeter;snapToPoint=1;" parent="1" vertex="1">
+          <mxGeometry x="1170" y="555" width="20" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-35" value="&lt;span style=&quot;font-family: &amp;quot;Courier New&amp;quot;;&quot;&gt;bootstrap_404_redirect_handler&lt;/span&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="835" y="440" width="240" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-36" target="Tncqt1R6NkhHVzk6sJvk-38" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-36" value="&lt;b&gt;Load the the boostrap template HTML into a buffer&lt;/b&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;bootstrap.html -&amp;gt; page&lt;/font&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="690" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-41" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-38" target="Tncqt1R6NkhHVzk6sJvk-40" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-38" value="&lt;b&gt;Replace template placeholders&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;{{SECONDS}} -&amp;gt; seconds&lt;br&gt;{{AUTO_REFRESH}} -&amp;gt; auto_refresh&lt;br&gt;{{IS_RECOVERY}} -&amp;gt; is_recovery&lt;br&gt;&lt;br&gt;&lt;/font&gt;If the user decided to enter recovery mode (is_recovery = 1), the page will server a different view and stop auto refreshing since there&#39;s no countdown left. This logic is handled on client side js.&lt;font face=&quot;Courier New&quot;&gt;&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="800" width="330" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-44" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-40" target="Tncqt1R6NkhHVzk6sJvk-42" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-40" value="&lt;b&gt;Send the index page to the client&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="980" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-42" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="1390" y="1060" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-45" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="1850" y="470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-46" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-47" target="Tncqt1R6NkhHVzk6sJvk-45" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1850" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-47" value="/recovery" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="1720" y="470" width="70" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-48" value="&lt;font face=&quot;Courier New&quot;&gt;bootstrap_recovery_handler&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="1760" y="440" width="210" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-49" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="Tncqt1R6NkhHVzk6sJvk-50" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1864.8600000000001" y="500" as="sourcePoint" />
+            <mxPoint x="1864.8600000000001" y="540" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-50" target="Dofs1zH7k67t7EqSbKb9-1" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-41" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#808080;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="Tncqt1R6NkhHVzk6sJvk-50" target="esGQzwJlYZwZxPdjjzYD-29" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2060" y="565" />
+              <mxPoint x="2060" y="1290" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-42" value="Affects" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="esGQzwJlYZwZxPdjjzYD-41" vertex="1" connectable="0">
+          <mxGeometry x="-0.4165" y="-4" relative="1" as="geometry">
+            <mxPoint y="52" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Tncqt1R6NkhHVzk6sJvk-50" value="&lt;span&gt;&lt;b style=&quot;forced-color-adjust: none; color: rgb(255, 255, 255); font-family: Helvetica; font-size: 12px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; letter-spacing: normal; orphans: 2; text-align: center; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; box-shadow: none !important;&quot;&gt;Signal that recovery has been requested&lt;br style=&quot;forced-color-adjust: none; box-shadow: none !important;&quot;&gt;&lt;/b&gt;&lt;font style=&quot;forced-color-adjust: none; color: rgb(255, 255, 255); font-size: 12px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; font-weight: 400; letter-spacing: normal; orphans: 2; text-align: center; text-indent: 0px; text-transform: none; widows: 2; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal; text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; box-shadow: none !important;&quot; face=&quot;Courier New&quot;&gt;s_recovery_requested = true&lt;/font&gt;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;labelBackgroundColor=none;" parent="1" vertex="1">
+          <mxGeometry x="1700" y="540" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Dofs1zH7k67t7EqSbKb9-1" target="Dofs1zH7k67t7EqSbKb9-3" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;strokeColor=#808080;" parent="1" source="Dofs1zH7k67t7EqSbKb9-1" target="Tncqt1R6NkhHVzk6sJvk-17" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-9" value="Affects" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="Dofs1zH7k67t7EqSbKb9-6" vertex="1" connectable="0">
+          <mxGeometry x="0.0411" y="-1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;dashed=1;strokeColor=#808080;" parent="1" source="Dofs1zH7k67t7EqSbKb9-1" target="Tncqt1R6NkhHVzk6sJvk-38" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-8" value="Affects" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="Dofs1zH7k67t7EqSbKb9-7" vertex="1" connectable="0">
+          <mxGeometry x="0.0009" relative="1" as="geometry">
+            <mxPoint y="30" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-1" value="&lt;b&gt;Cancel the recovery timer&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;cancel_recovery_timer()&lt;br&gt;&lt;br&gt;&lt;/font&gt;This stops &amp;amp; deletes the recovery timer and sets&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;s_recovery_timer = NULL&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1700" y="620" width="330" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-3" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="1850" y="800" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-11" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="2270" y="470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Dofs1zH7k67t7EqSbKb9-13" target="Dofs1zH7k67t7EqSbKb9-11" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="2270" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-13" value="/skip" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2175" y="470" width="35" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-14" value="&lt;font face=&quot;Courier New&quot;&gt;bootstrap_skip_handler&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="2195" y="440" width="180" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-15" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="ZblBVeZuAxSfTw1MTgEL-7" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="2284.86" y="500" as="sourcePoint" />
+            <mxPoint x="2284.86" y="540" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="Dofs1zH7k67t7EqSbKb9-17" target="esGQzwJlYZwZxPdjjzYD-1" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="2284.9655172413795" y="810" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;strokeColor=#FFFF00;" parent="1" source="Dofs1zH7k67t7EqSbKb9-17" target="ZblBVeZuAxSfTw1MTgEL-5" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2490" y="690" />
+              <mxPoint x="2490" y="1455" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="Dofs1zH7k67t7EqSbKb9-17" value="&lt;span style=&quot;forced-color-adjust: none; orphans: 2; text-align: center; text-indent: 0px; widows: 2; text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; box-shadow: none !important; color: rgb(255, 255, 255);&quot;&gt;&lt;b style=&quot;color: rgb(255, 255, 255); font-family: Helvetica; font-size: 12px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; letter-spacing: normal; text-transform: none; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal;&quot;&gt;Schedule start of main application&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;schedule_main_start()&lt;br&gt;&lt;br&gt;&lt;/font&gt;This creates the task to enter the main application (s_start_task -&amp;gt;&amp;nbsp;&lt;font face=&quot;Courier New&quot;&gt;enter_main_task&lt;/font&gt;). This function is guarded to not allow multiple task creations.&lt;br&gt;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;labelBorderColor=none;labelBackgroundColor=none;strokeColor=#FFFF00;" parent="1" vertex="1">
+          <mxGeometry x="2120" y="620" width="330" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-1" value="&lt;b&gt;Serve the boostrap skip page&lt;/b&gt;&lt;br&gt;bootstrap_skip.html" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="2175" y="790" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-1" target="esGQzwJlYZwZxPdjjzYD-3" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="2285" y="980" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-3" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="2270" y="900" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-6" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="2680" y="470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-8" target="esGQzwJlYZwZxPdjjzYD-6" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="2680" y="485" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-8" value="/update (with payload)" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="2480" y="470" width="140" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-9" value="&lt;font face=&quot;Courier New&quot;&gt;ota_update_handler&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="2620" y="440" width="150" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-10" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="esGQzwJlYZwZxPdjjzYD-12" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="2694.86" y="500" as="sourcePoint" />
+            <mxPoint x="2694.86" y="540" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-12" target="esGQzwJlYZwZxPdjjzYD-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-12" value="&lt;b&gt;Performs OTA update&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;labelBorderColor=none;labelBackgroundColor=none;" parent="1" vertex="1">
+          <mxGeometry x="2600" y="540" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-15" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="2680" y="620" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-21" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="830" y="1090" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-23" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="esGQzwJlYZwZxPdjjzYD-24" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="844.86" y="1120" as="sourcePoint" />
+            <mxPoint x="844.86" y="1160" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-24" target="esGQzwJlYZwZxPdjjzYD-29" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-24" value="&lt;b&gt;Cancel the recovery timer&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;cancel_recovery_timer()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="680" y="1160" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-25" value="&lt;font face=&quot;Courier New&quot;&gt;recovery_timeout_cb&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;" parent="1" vertex="1">
+          <mxGeometry x="765" y="1060" width="160" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-29" target="esGQzwJlYZwZxPdjjzYD-31" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-35" value="Yes" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="esGQzwJlYZwZxPdjjzYD-32" vertex="1" connectable="0">
+          <mxGeometry x="-0.3558" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-34" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-29" target="esGQzwJlYZwZxPdjjzYD-37" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="1370" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-36" value="No" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" parent="esGQzwJlYZwZxPdjjzYD-34" vertex="1" connectable="0">
+          <mxGeometry x="-0.1" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-29" value="&lt;font style=&quot;font-size: 9px;&quot;&gt;recovery requested?&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="805" y="1250" width="80" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-31" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="720" y="1275" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;dashed=1;dashPattern=8 8;strokeColor=#FFFF00;" parent="1" source="esGQzwJlYZwZxPdjjzYD-37" target="ZblBVeZuAxSfTw1MTgEL-5" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-37" value="&lt;span style=&quot;forced-color-adjust: none; orphans: 2; text-align: center; text-indent: 0px; widows: 2; text-decoration-thickness: initial; text-decoration-style: initial; text-decoration-color: initial; box-shadow: none !important; color: rgb(255, 255, 255);&quot;&gt;&lt;b style=&quot;color: rgb(255, 255, 255); font-family: Helvetica; font-size: 12px; font-style: normal; font-variant-ligatures: normal; font-variant-caps: normal; letter-spacing: normal; text-transform: none; word-spacing: 0px; -webkit-text-stroke-width: 0px; white-space: normal;&quot;&gt;Schedule start of main application&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;schedule_main_start()&lt;br&gt;&lt;br&gt;&lt;/font&gt;This creates the task to enter the main application (s_start_task -&amp;gt;&amp;nbsp;&lt;font face=&quot;Courier New&quot;&gt;enter_main_task&lt;/font&gt;). This function is guarded to not allow multiple task creations.&lt;br&gt;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;labelBorderColor=none;labelBackgroundColor=none;strokeColor=#FFFF00;" parent="1" vertex="1">
+          <mxGeometry x="680" y="1385" width="330" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="esGQzwJlYZwZxPdjjzYD-37" target="esGQzwJlYZwZxPdjjzYD-40" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="850" y="1520" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="esGQzwJlYZwZxPdjjzYD-40" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="830" y="1570" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-1" value="" style="shape=collate;html=1;" parent="1" vertex="1">
+          <mxGeometry x="825" y="1010" width="40" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-2" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="1390" y="1470" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-3" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" target="ZblBVeZuAxSfTw1MTgEL-4" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1404.8600000000001" y="1500" as="sourcePoint" />
+            <mxPoint x="1404.8600000000001" y="1540" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="ZblBVeZuAxSfTw1MTgEL-4" target="ZblBVeZuAxSfTw1MTgEL-11" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-4" value="&lt;b&gt;Cancel the recovery timer&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;cancel_recovery_timer()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="1540" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-5" value="&lt;font face=&quot;Courier New&quot;&gt;enter_main_task&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;autosize=1;resizable=0;fontColor=#FFFF00;" parent="1" vertex="1">
+          <mxGeometry x="1340" y="1440" width="130" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="ZblBVeZuAxSfTw1MTgEL-7" target="Dofs1zH7k67t7EqSbKb9-17" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-7" value="&lt;b&gt;Cancel the recovery timer&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;cancel_recovery_timer()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="2120" y="540" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="ZblBVeZuAxSfTw1MTgEL-11" target="ZblBVeZuAxSfTw1MTgEL-13" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-11" value="&lt;b&gt;Stop the bootstrap HTTP server&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="1630" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="ZblBVeZuAxSfTw1MTgEL-13" target="ZblBVeZuAxSfTw1MTgEL-15" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="ZblBVeZuAxSfTw1MTgEL-15" target="ZblBVeZuAxSfTw1MTgEL-17" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-15" value="&lt;b&gt;Delete the start task&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="1240" y="2310" width="330" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-17" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="1390" y="2400" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-31" value="" style="group" parent="1" vertex="1" connectable="0">
+          <mxGeometry x="1200" y="1730" width="410" height="540" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-13" value="&lt;b&gt;Start the main appliaction&lt;/b&gt;&lt;br&gt;&lt;font face=&quot;Courier New&quot;&gt;start_main_application()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;verticalAlign=top;spacingTop=10;" parent="ZblBVeZuAxSfTw1MTgEL-31" vertex="1">
+          <mxGeometry x="10" width="390" height="540" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="ZblBVeZuAxSfTw1MTgEL-31" source="ZblBVeZuAxSfTw1MTgEL-19" target="ZblBVeZuAxSfTw1MTgEL-22" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-19" value="&lt;div style=&quot;text-align: center;&quot;&gt;&lt;b style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Configure GPIO&#39;s&lt;/b&gt;&lt;/div&gt;&lt;span style=&quot;background-color: transparent;&quot;&gt;&lt;div style=&quot;text-align: center;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;font face=&quot;Courier New&quot;&gt;configure_gpio()&lt;/font&gt;&lt;/span&gt;&lt;/div&gt;&lt;br&gt;&lt;b style=&quot;color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Configure output GPIOs&lt;/b&gt;&lt;/span&gt;&lt;br style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Set selected pins as outputs, no pulls, no interrupts; mute amplifier.&lt;br&gt;&lt;/span&gt;&lt;br&gt;&lt;p style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255)); display: inline !important;&quot;&gt;&lt;strong&gt;Configure input GPIOs with interrupts&lt;/strong&gt;&lt;/p&gt;&lt;div&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;- Laser receiver: input, pull-up enabled, rising-edge interrupt&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;- Hall sensor: input, no pulls, any-edge interrupt&lt;/span&gt;&lt;br&gt;&lt;strong style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;br&gt;Set up GPIO interrupt handling&lt;/strong&gt;&lt;br style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Install ISR service and attach ISRs for laser and hall sensors.&lt;/span&gt;&lt;br&gt;&lt;strong style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;br&gt;Create event queue and worker task&lt;/strong&gt;&lt;br style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;ISRs push events to a queue; a dedicated task processes them.&lt;/span&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingRight=10;" parent="ZblBVeZuAxSfTw1MTgEL-31" vertex="1">
+          <mxGeometry x="45" y="60" width="320" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-28" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="ZblBVeZuAxSfTw1MTgEL-31" source="ZblBVeZuAxSfTw1MTgEL-22" target="ZblBVeZuAxSfTw1MTgEL-26" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-22" value="&lt;b&gt;Start Main Application/Webserver&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;start_mainapp()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;strokeColor=#00FF00;" parent="ZblBVeZuAxSfTw1MTgEL-31" vertex="1">
+          <mxGeometry x="50" y="390" width="310" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ZblBVeZuAxSfTw1MTgEL-26" value="&lt;b&gt;Mark main application as started&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;s_main_started = true&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="ZblBVeZuAxSfTw1MTgEL-31" vertex="1">
+          <mxGeometry x="50" y="470" width="310" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eC1RdppAyhiD3utsTyVc-1" value="&lt;b&gt;&lt;font style=&quot;font-size: 100px;&quot;&gt;Coinbox: Bootstrap&lt;/font&gt;&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="900" y="40" width="960" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="eC1RdppAyhiD3utsTyVc-2" value="&lt;font style=&quot;font-size: 50px;&quot;&gt;As of 2026-02-27&lt;/font&gt;" style="text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;" vertex="1" parent="1">
+          <mxGeometry x="915" y="160" width="410" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

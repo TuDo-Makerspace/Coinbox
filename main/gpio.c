@@ -3,278 +3,501 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "gpio.h"
 #include "audio.h"
+#include "files.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/timers.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 
 #define TAG "gpio"
 
-static void gpio_laser_isr_handler(void *arg);
-static void gpio_hall_isr_handler(void *arg);
-static void isr_timer_callback(TimerHandle_t xTimer);
-
-volatile uint32_t laser_isr_count = 0;
-volatile uint32_t hall_isr_count = 0;
-
-bool laser_detection_enabled = true;
-TimerHandle_t s_isr_timer = NULL;
-TaskHandle_t  s_worker_task = NULL;
-
-// GPIO definitions
-// GPIO outputs
-#define GPIO_MUTE_AMP 22
-#define GPIO_OUTPUT_PIN_SEL (1ULL << GPIO_MUTE_AMP)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Constants
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
 // GPIO inputs
 #define GPIO_LASER_RECEIVER 23
 #define GPIO_HALL_LID_SENSOR 2
 #define GPIO_INPUT_PIN_SEL ((1ULL << GPIO_LASER_RECEIVER) | (1ULL << GPIO_HALL_LID_SENSOR))
+#define LASER_EVENT_TASK_STACK (6144)
 
-static bool s_amp_pin_configured;
-static bool s_amp_muted = true;
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Structs
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
-static esp_err_t ensure_amp_pin_configured(void)
+typedef struct
 {
-    if (s_amp_pin_configured) {
-        return ESP_OK;
-    }
-    gpio_config_t cfg = {
-        .pin_bit_mask = (1ULL << GPIO_MUTE_AMP),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_down_en = 0,
-        .pull_up_en = 0,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    esp_err_t err = gpio_config(&cfg);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to configure amp mute pin: %s", esp_err_to_name(err));
-        return err;
-    }
-    s_amp_pin_configured = true;
-    s_amp_muted = gpio_get_level(GPIO_MUTE_AMP) != 0;
-    return ESP_OK;
-}
+    gpio_edge_event_t events[GPIO_EVENT_BUFFER_CAPACITY];
+    uint16_t capacity;
+    volatile uint16_t head;
+    volatile uint16_t count;
+    volatile uint32_t dropped;
+    volatile uint32_t rises;
+    volatile uint32_t falls;
+    volatile uint8_t last_level;
+    volatile bool last_level_valid;
+    portMUX_TYPE mux;
+} gpio_history_t;
 
-void configure_gpio()
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Forward Declarations
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void gpio_laser_isr_handler(void *arg);
+static void gpio_hall_isr_handler(void *arg);
+static void laser_event_task(void *arg);
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Vars
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+// IRQ history ring-buffers to build settings graphs
+
+static gpio_history_t s_laser_history = {
+    .capacity = GPIO_EVENT_BUFFER_CAPACITY,
+    .head = 0,
+    .count = 0,
+    .dropped = 0,
+    .rises = 0,
+    .falls = 0,
+    .last_level = 0,
+    .last_level_valid = false,
+    .mux = portMUX_INITIALIZER_UNLOCKED,
+};
+
+static gpio_history_t s_hall_history = {
+    .capacity = GPIO_EVENT_BUFFER_CAPACITY,
+    .head = 0,
+    .count = 0,
+    .dropped = 0,
+    .rises = 0,
+    .falls = 0,
+    .last_level = 0,
+    .last_level_valid = false,
+    .mux = portMUX_INITIALIZER_UNLOCKED,
+};
+
+static volatile gpio_runtime_mode_t s_runtime_mode = GPIO_RUNTIME_BOOTSTRAP;
+
+// Laser debouncing
+static uint16_t s_debounce_time_laser_ms = 0;      // disabled for now
+static uint16_t s_debounce_time_hall_ms = 3000;
+static uint32_t s_laser_trigger_cooldown_ms = 0;    // disabled for now
+
+// Laser task
+static TaskHandle_t s_laser_task;
+
+#if CONFIG_TEST_GPIO_INJECTION
+static volatile bool s_test_laser_override_valid;
+static volatile uint8_t s_test_laser_override_level;
+static volatile bool s_test_hall_override_valid;
+static volatile uint8_t s_test_hall_override_level;
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Handlers
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static inline void IRAM_ATTR gpio_input_event_push_from_isr(gpio_history_t *input, uint8_t level)
 {
-    // Create a one-shot software timer with period = 1 tick
-    s_isr_timer = xTimerCreate(
-        "isr_timer",
-        pdMS_TO_TICKS(1), // 1 tick; adjust if you want a bit more delay
-        pdFALSE,          // one-shot
-        NULL,
-        isr_timer_callback);
+    const uint64_t ts_us = (uint64_t)esp_timer_get_time();
+    const uint8_t normalized_level = level ? 1 : 0;
 
-    if (s_isr_timer == NULL)
-    {
-        printf("Failed to create ISR timer!\n");
-        return;
-    }
-
-    // zero-initialize the config structure.
-    gpio_config_t io_conf = {};
-    // disable interrupt
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    // set as output mode
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    // bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    // disable pull-down mode
-    io_conf.pull_down_en = 0;
-    // disable pull-up mode
-    io_conf.pull_up_en = 0;
-    // configure GPIO with the given settings
-    gpio_config(&io_conf);
-
-    gpio_set_level(GPIO_MUTE_AMP, 1);
-    s_amp_pin_configured = true;
-    s_amp_muted = true;
-
-    // Configure input pins with interrupts
-    gpio_config_t io_conf_in = {};
-    io_conf_in.intr_type = GPIO_INTR_ANYEDGE; // enable interrupts on any edge (change to NEG/POSEDGE if needed)
-    io_conf_in.mode = GPIO_MODE_INPUT;
-    io_conf_in.pin_bit_mask = GPIO_INPUT_PIN_SEL;
-    io_conf_in.pull_up_en = 1; // enable pull-up if required by your sensors
-    io_conf_in.pull_down_en = 0;
-    gpio_config(&io_conf_in);
-
-    // Install ISR service and attach handlers (implement gpio_input_isr_handler elsewhere)
-    gpio_install_isr_service(0); // or ESP_INTR_FLAG_DEFAULT
-    gpio_isr_handler_add(GPIO_LASER_RECEIVER, gpio_laser_isr_handler, (void *)GPIO_LASER_RECEIVER);
-    gpio_isr_handler_add(GPIO_HALL_LID_SENSOR, gpio_hall_isr_handler, (void *)GPIO_HALL_LID_SENSOR);
-
-    printf("ISR + timer setup complete\n");
-}
-
-int gpio_get_laser_level(void)
-{
-    return gpio_get_level(GPIO_LASER_RECEIVER);
-}
-
-int gpio_get_hall_level(void)
-{
-    return gpio_get_level(GPIO_HALL_LID_SENSOR);
-}
-
-bool gpio_is_laser_beam_blocked(void)
-{
-    return gpio_get_laser_level() == 1;
-}
-
-bool gpio_is_lid_open(void)
-{
-    return gpio_get_hall_level() != 0;
-}
-
-void mute_output(bool mute)
-{
-    if (mute) {
-        ESP_LOGI(TAG, "Muting output");
-        gpio_set_level(GPIO_MUTE_AMP, 1);
+    taskENTER_CRITICAL_ISR(&input->mux);
+    if (input->last_level_valid) {
+        if (normalized_level != input->last_level) {
+            if (normalized_level) {
+                input->rises++;
+            } else {
+                input->falls++;
+            }
+        }
     } else {
-        ESP_LOGI(TAG, "Unmuting output");
-        gpio_set_level(GPIO_MUTE_AMP, 0);
-        vTaskDelay(configTICK_RATE_HZ / 20); // give amp some time to turn on before soft unmute
+        input->last_level_valid = true;
     }
-    s_amp_muted = mute;
+    input->last_level = normalized_level;
+
+    input->events[input->head].timestamp_us = ts_us;
+    input->events[input->head].level = normalized_level;
+    input->head = (uint16_t)((input->head + 1) % input->capacity);
+    if (input->count < input->capacity) {
+        input->count++;
+    } else {
+        input->dropped++;
+    }
+    taskEXIT_CRITICAL_ISR(&input->mux);
 }
 
-esp_err_t set_amp_muted(bool mute)
+static inline void gpio_input_event_push(gpio_history_t *input, uint8_t level)
 {
-    esp_err_t err = ensure_amp_pin_configured();
-    if (err != ESP_OK) {
-        return err;
+    const uint64_t ts_us = (uint64_t)esp_timer_get_time();
+    const uint8_t normalized_level = level ? 1 : 0;
+
+    taskENTER_CRITICAL(&input->mux);
+    if (input->last_level_valid) {
+        if (normalized_level != input->last_level) {
+            if (normalized_level) {
+                input->rises++;
+            } else {
+                input->falls++;
+            }
+        }
+    } else {
+        input->last_level_valid = true;
     }
-    err = gpio_set_level(GPIO_MUTE_AMP, mute ? 1 : 0);
-    if (err != ESP_OK) {
-        return err;
+    input->last_level = normalized_level;
+
+    input->events[input->head].timestamp_us = ts_us;
+    input->events[input->head].level = normalized_level;
+    input->head = (uint16_t)((input->head + 1) % input->capacity);
+    if (input->count < input->capacity) {
+        input->count++;
+    } else {
+        input->dropped++;
     }
-    s_amp_muted = gpio_get_level(GPIO_MUTE_AMP) != 0;
-    return ESP_OK;
+    taskEXIT_CRITICAL(&input->mux);
 }
 
-esp_err_t toggle_amp_muted(bool *muted_out)
+static size_t gpio_input_events_drain(gpio_history_t *input,
+                                      gpio_edge_event_t *out_events,
+                                      size_t max_events,
+                                      uint32_t *dropped_events)
 {
-    esp_err_t err = ensure_amp_pin_configured();
-    if (err != ESP_OK) {
-        return err;
+    if (!out_events || max_events == 0) {
+        return 0;
     }
 
-    bool target = !is_amp_muted();
-    err = set_amp_muted(target);
-    if (err != ESP_OK) {
-        return err;
+    size_t copied = 0;
+    uint32_t dropped = 0;
+
+    taskENTER_CRITICAL(&input->mux);
+    uint16_t count = input->count;
+    uint16_t head = input->head;
+    uint16_t tail = (uint16_t)((head + input->capacity - count) % input->capacity);
+
+    if (count > max_events) {
+        uint16_t skip = (uint16_t)(count - max_events);
+        tail = (uint16_t)((tail + skip) % input->capacity);
+        dropped += skip;
+        count = (uint16_t)max_events;
     }
-    if (muted_out) {
-        *muted_out = is_amp_muted();
+
+    for (uint16_t i = 0; i < count; ++i) {
+        uint16_t idx = (uint16_t)((tail + i) % input->capacity);
+        out_events[copied++] = input->events[idx];
     }
-    return ESP_OK;
+
+    dropped += input->dropped;
+    input->head = 0;
+    input->count = 0;
+    input->dropped = 0;
+    taskEXIT_CRITICAL(&input->mux);
+
+    if (dropped_events) {
+        *dropped_events = dropped;
+    }
+    return copied;
 }
 
-bool is_amp_muted(void)
+static uint32_t gpio_input_get_rises(gpio_history_t *input)
 {
-    if (ensure_amp_pin_configured() != ESP_OK) {
-        return true;
-    }
-    s_amp_muted = gpio_get_level(GPIO_MUTE_AMP) != 0;
-    return s_amp_muted;
+    uint32_t rises = 0;
+    taskENTER_CRITICAL(&input->mux);
+    rises = input->rises;
+    taskEXIT_CRITICAL(&input->mux);
+    return rises;
 }
 
-// lid open, dont detect coins
-// lid open, volume to minimal level to prevent laud noises
-uint16_t debaunce_time_laser_ms = 50;
-uint16_t debaunce_time_hall_ms = 3000;
+static uint32_t gpio_input_get_changes(gpio_history_t *input)
+{
+    uint32_t rises = 0;
+    uint32_t falls = 0;
+    taskENTER_CRITICAL(&input->mux);
+    rises = input->rises;
+    falls = input->falls;
+    taskEXIT_CRITICAL(&input->mux);
+    return rises + falls;
+}
 
 static void IRAM_ATTR gpio_laser_isr_handler(void *arg)
 {
-    // GPIO is high when laser detects a coin
+    (void)arg; // unused for now
+    const int level = gpio_get_level(GPIO_LASER_RECEIVER);
 
-    uint32_t gpio_num = (uint32_t)arg;
-    int level = gpio_get_level(gpio_num);
+    gpio_input_event_push_from_isr(&s_laser_history, (uint8_t)(level ? 1 : 0));
 
-    static TickType_t last_tick = 0;
-    const TickType_t debounce_ticks = pdMS_TO_TICKS(debaunce_time_laser_ms);
-
-    TickType_t now = xTaskGetTickCountFromISR();
-    if (now - last_tick < debounce_ticks)
-    {
-        // Bounce: ignore
+    if (!s_laser_task || s_runtime_mode != GPIO_RUNTIME_MAIN_APP) {
         return;
     }
-    last_tick = now;
 
-    if (level == 1 && laser_detection_enabled)
-    {
-        // Coin detected
-        laser_isr_count++;
-
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-
-        // One-shot timer with period = 1 tick. Resetting it here
-        // means "fire 1 tick after the last interrupt".
-        if (xTimerResetFromISR(s_isr_timer, &xHigherPriorityTaskWoken) != pdPASS)
-        {
-            // Could not queue command to timer task (rare, but you can log later)
-        }
-
-        if (xHigherPriorityTaskWoken)
-        {
-            portYIELD_FROM_ISR();
-        }
+    uint32_t tick = (uint32_t)xTaskGetTickCountFromISR();
+    BaseType_t hp_task_woken = pdFALSE;
+    // Keep only the latest trigger value; do not enqueue a backlog.
+    xTaskNotifyFromISR(s_laser_task, tick, eSetValueWithOverwrite, &hp_task_woken);
+    if (hp_task_woken == pdTRUE) {
+        portYIELD_FROM_ISR();
     }
 }
 
 static void IRAM_ATTR gpio_hall_isr_handler(void *arg)
 {
-    // GPIO is low when hall sensor detects lid closed, high when lid open
+    (void)arg; // unused for now
+    const int level = gpio_get_level(GPIO_HALL_LID_SENSOR);
 
-    uint32_t gpio_num = (uint32_t)arg;
-    int level = gpio_get_level(gpio_num);
-
-    static TickType_t last_tick = 0;
-    const TickType_t debounce_ticks = pdMS_TO_TICKS(debaunce_time_hall_ms);
-
-    TickType_t now = xTaskGetTickCountFromISR();
-    if (now - last_tick < debounce_ticks)
-    {
-        // Bounce: ignore
-        return;
-    }
-    last_tick = now;
-
-    if (level == 0)
-    {
-        // Lid is closed, turn up volume, enable coin detection
-        set_lid_level(false);
-        laser_detection_enabled = true;
-    }
-    else
-    {
-        // Lid is open, turn down volume, disable coin detection
-        hall_isr_count++;
-        set_lid_level(true);
-        laser_detection_enabled = false;
-    }
+    gpio_input_event_push_from_isr(&s_hall_history, (uint8_t)(level ? 1 : 0));
 }
 
-static void isr_timer_callback(TimerHandle_t xTimer)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Tasks
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void laser_event_task(void *arg)
 {
-    (void)xTimer;
+    (void)arg;
+    TickType_t last_play_tick = 0;
+    const TickType_t debounce_ticks = s_debounce_time_laser_ms ? pdMS_TO_TICKS(s_debounce_time_laser_ms) : 0;
+    const TickType_t cooldown_ticks = s_laser_trigger_cooldown_ms ? pdMS_TO_TICKS(s_laser_trigger_cooldown_ms) : 0;
 
-    // If a worker task is still "considered alive", kill it
-    if (s_worker_task != NULL) {
-        printf("Timer: previous worker (%p) still alive, deleting it\n",
-               (void *)s_worker_task);
-        vTaskDelete(s_worker_task);
-        s_worker_task = NULL;
+    uint32_t evt_tick = 0;
+    while (true) {
+        if (xTaskNotifyWait(0, UINT32_MAX, &evt_tick, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        // If multiple triggers arrived before we started processing, use the newest.
+        uint32_t latest_tick = evt_tick;
+        while (xTaskNotifyWait(0, UINT32_MAX, &latest_tick, 0) == pdTRUE) {
+            evt_tick = latest_tick;
+        }
+        (void)evt_tick;
+
+        if (debounce_ticks > 0) {
+            vTaskDelay(debounce_ticks);
+        }
+
+        if (s_runtime_mode != GPIO_RUNTIME_MAIN_APP) {
+            continue;
+        }
+
+        if (gpio_get_laser_level() != LASER_BLOCKED) {
+            continue; // only trigger playback for blocked-beam level
+        }
+
+        if (cooldown_ticks > 0) {
+            TickType_t now = xTaskGetTickCount();
+            if ((now - last_play_tick) < cooldown_ticks) {
+                continue; // rate limit to avoid rapid retriggers
+            }
+            last_play_tick = now;
+        }
+
+        char selected_name[FILE_ENTRY_NAME_MAX] = {0};
+        uint32_t total_weight = 0;
+        size_t candidates = 0;
+
+        esp_err_t pick_err = files_pick_weighted_enabled(
+            selected_name,
+            sizeof(selected_name),
+            &total_weight,
+            &candidates);
+        if (pick_err != ESP_OK) {
+            ESP_LOGW(TAG,
+                     "Coin detected, but no enabled weighted sounds found (candidates=%u, total_weight=%u)",
+                     (unsigned)candidates,
+                     (unsigned)total_weight);
+            continue;
+        }
+
+        ESP_LOGI(TAG,
+                 "Coin detected! Starting playback of %s (candidates=%u, total_weight=%u)",
+                 selected_name,
+                 (unsigned)candidates,
+                 (unsigned)total_weight);
+
+        esp_err_t err = audio_start_file(selected_name);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start audio on coin detection: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "Playback started for file: %s", selected_name);
+        }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Public Interface
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+//-------------------------------------------------------------------------
+// Init
+//-------------------------------------------------------------------------
+
+esp_err_t gpio_init(void)
+{
+    esp_err_t err;
+
+    // Configure input pins with interrupts
+    // Laser receiver: keep internal pull-up enabled
+    gpio_config_t io_conf_laser = {};
+    io_conf_laser.intr_type = GPIO_INTR_ANYEDGE; // capture all state transitions for settings graph
+    io_conf_laser.mode = GPIO_MODE_INPUT;
+    io_conf_laser.pin_bit_mask = (1ULL << GPIO_LASER_RECEIVER);
+    io_conf_laser.pull_up_en = 1;
+    io_conf_laser.pull_down_en = 0;
+    err = gpio_config(&io_conf_laser);
+    if (err != ESP_OK) {
+        return err;
     }
 
-    // Create a new worker task and remember its handle
-    s_worker_task = create_play_audio_task();
+    // Hall lid sensor: external pull already present, so disable internal pull-up
+    gpio_config_t io_conf_hall = {};
+    io_conf_hall.intr_type = GPIO_INTR_ANYEDGE;
+    io_conf_hall.mode = GPIO_MODE_INPUT;
+    io_conf_hall.pin_bit_mask = (1ULL << GPIO_HALL_LID_SENSOR);
+    io_conf_hall.pull_up_en = 0;
+    io_conf_hall.pull_down_en = 0;
+    err = gpio_config(&io_conf_hall);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (!s_laser_task) {
+        // Slightly larger stack; audio_start_file and logging use some stack.
+        BaseType_t res = xTaskCreate(laser_event_task, "laser-events", LASER_EVENT_TASK_STACK, NULL, tskIDLE_PRIORITY + 6, &s_laser_task);
+        if (res != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create laser event task");
+            s_laser_task = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    // Install ISR service and attach handlers (implement gpio_input_isr_handler elsewhere)
+    err = gpio_install_isr_service(0); // or ESP_INTR_FLAG_DEFAULT
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
+    }
+
+    err = gpio_isr_handler_add(GPIO_LASER_RECEIVER, gpio_laser_isr_handler, (void *)GPIO_LASER_RECEIVER);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = gpio_isr_handler_add(GPIO_HALL_LID_SENSOR, gpio_hall_isr_handler, (void *)GPIO_HALL_LID_SENSOR);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    taskENTER_CRITICAL(&s_laser_history.mux);
+    s_laser_history.last_level = (uint8_t)(gpio_get_level(GPIO_LASER_RECEIVER) ? 1 : 0);
+    s_laser_history.last_level_valid = true;
+    taskEXIT_CRITICAL(&s_laser_history.mux);
+
+    taskENTER_CRITICAL(&s_hall_history.mux);
+    s_hall_history.last_level = (uint8_t)(gpio_get_level(GPIO_HALL_LID_SENSOR) ? 1 : 0);
+    s_hall_history.last_level_valid = true;
+    taskEXIT_CRITICAL(&s_hall_history.mux);
+
+    ESP_LOGI(TAG, "ISR + timer setup complete");
+    return ESP_OK;
 }
+
+void gpio_set_runtime_mode(gpio_runtime_mode_t mode)
+{
+    s_runtime_mode = mode;
+}
+
+gpio_runtime_mode_t gpio_get_runtime_mode(void)
+{
+    return s_runtime_mode;
+}
+
+//-------------------------------------------------------------------------
+// Laser
+//-------------------------------------------------------------------------
+
+int gpio_get_laser_level(void)
+{
+#if CONFIG_TEST_GPIO_INJECTION
+    if (s_test_laser_override_valid) {
+        return s_test_laser_override_level ? 1 : 0;
+    }
+#endif
+    return gpio_get_level(GPIO_LASER_RECEIVER);
+}
+
+uint32_t gpio_get_laser_changes(void)
+{
+    return gpio_input_get_changes(&s_laser_history);
+}
+
+uint32_t gpio_get_laser_breaks(void)
+{
+    return gpio_input_get_rises(&s_laser_history);
+}
+
+size_t gpio_laser_events_drain(gpio_laser_event_t *out_events, size_t max_events, uint32_t *dropped_events)
+{
+    return gpio_input_events_drain(&s_laser_history, out_events, max_events, dropped_events);
+}
+
+//-------------------------------------------------------------------------
+// Hall/Lid detection
+//-------------------------------------------------------------------------
+
+int gpio_get_hall_level(void)
+{
+#if CONFIG_TEST_GPIO_INJECTION
+    if (s_test_hall_override_valid) {
+        return s_test_hall_override_level ? 1 : 0;
+    }
+#endif
+    return gpio_get_level(GPIO_HALL_LID_SENSOR);
+}
+
+
+uint32_t get_hall_changes(void)
+{
+    return gpio_input_get_changes(&s_hall_history);
+}
+
+size_t gpio_hall_events_drain(gpio_hall_event_t *out_events, size_t max_events, uint32_t *dropped_events)
+{
+    return gpio_input_events_drain(&s_hall_history, out_events, max_events, dropped_events);
+}
+
+#if CONFIG_TEST_GPIO_INJECTION
+esp_err_t gpio_test_set_laser_level(int level)
+{
+    if (level != 0 && level != 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_test_laser_override_level = (uint8_t)level;
+    s_test_laser_override_valid = true;
+    gpio_input_event_push(&s_laser_history, (uint8_t)level);
+
+    if (level == LASER_BLOCKED && s_laser_task && s_runtime_mode == GPIO_RUNTIME_MAIN_APP) {
+        uint32_t tick = (uint32_t)xTaskGetTickCount();
+        xTaskNotify(s_laser_task, tick, eSetValueWithOverwrite);
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t gpio_test_set_hall_level(int level)
+{
+    if (level != 0 && level != 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    s_test_hall_override_level = (uint8_t)level;
+    s_test_hall_override_valid = true;
+    gpio_input_event_push(&s_hall_history, (uint8_t)level);
+
+    return ESP_OK;
+}
+#endif

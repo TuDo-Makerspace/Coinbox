@@ -39,7 +39,7 @@ menu "Coinbox Configuration"
       
         config NETWORK_WIFI_STA
           bool "Enable Station mode"
-          default n
+          default y
           help
             Let Coinbox join an existing AP.
       
@@ -64,6 +64,15 @@ menu "Coinbox Configuration"
                 attempting to reconnect to the Access Point (AP) when the AP doesn't exist.
         endif
 
+        config NETWORK_ETH_OPENETH
+          bool "Enable OpenCores Ethernet (QEMU)"
+          default n
+          depends on IDF_TARGET_ESP32
+          select ETH_USE_OPENETH
+          help
+            Enable QEMU OpenCores Ethernet networking (open_eth).
+            This is intended for emulation and is not meant for real ESP32 hardware.
+
     endmenu
 
     menu "mDNS Settings"
@@ -80,19 +89,45 @@ menu "Coinbox Configuration"
                 Friendly service name shown by mDNS browsers.
     endmenu
 
+    menu "Storage Settings"
+        config BASE_PATH
+            string "Base path"
+            default "/data"
+            help
+                Base path used to mount the LittleFS storage partition.
+    endmenu
+
     menu "Audio Test"
         config AUDIO_MAX_AMPLITUDE
             hex "Audio test amplitude"
             default 0x30
             range 0x01 0x7FFF
             help
-                Peak amplitude for the maintenance audio test tone.
+                Peak amplitude for the settings audio test tone.
                 Lower values reduce volume; keep small to protect ears/speakers.
+    endmenu
+
+    menu "Test Hooks"
+        config TEST_GPIO_INJECTION
+            bool "Enable test-only GPIO injection endpoints"
+            default n
+            help
+                Adds test-only HTTP endpoints under /test/gpio/* to inject input GPIO
+                levels and inspect/control output mute GPIO levels in emulation tests.
+                Keep disabled in production firmware.
+
+        config TEST_AUDIO_MOCK_BACKEND
+            bool "Enable test-only mock audio backend"
+            default n
+            help
+                Replaces real audio output pipelines with deterministic sleep-based
+                timing for tone/sweep/playback in integration tests.
+                Keep disabled in production firmware.
     endmenu
 
     config RECOVERY_ENTRY_TIME
         int "Recovery entry timeout (seconds)"
-        default 5
+        default 10
         range 1 300
         help
             The number of seconds to stay on the bootstrap page before

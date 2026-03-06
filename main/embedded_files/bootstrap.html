@@ -1,32 +1,296 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Coinbox - Starting</title>
+  <link rel="stylesheet" href="/glyphs.css">
   <style>
-    :root { --text:#0f172a; --muted:#475569; --card:#fff; --border:#e5e7eb; --accent:#2563eb; --accent-2:#1d4ed8; }
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#f5f7fb; color:var(--text); line-height:1.5; min-height:100vh; display:flex; align-items:center; justify-content:center; text-align:center; }
-    .content { padding:clamp(1.4rem,3vw+0.5rem,2.6rem); max-width:960px; margin:0 auto; display:flex; align-items:center; justify-content:center; width:100%; }
-    .card { width:100%; background:var(--card); border:1px solid var(--border); border-radius:12px; box-shadow:0 6px 18px rgba(0,0,0,0.05); padding:50px; display:flex; flex-direction:column; gap:1.1rem; align-items:center; text-align:center; }
-    h1 { font-size:clamp(1.7rem,1vw+1.35rem,2.2rem); }
-    .status-row { display:flex; gap:0.9rem; align-items:center; justify-content:center; flex-wrap:wrap; text-align:center; }
-    .badge { display:inline-flex; align-items:center; justify-content:center; padding:0.6rem 0.9rem; border-radius:12px; background:#e0e7ff; color:var(--accent); font-weight:700; min-width:74px; font-size:1rem; }
-    .status-text { color:var(--muted); font-size:0.98rem; }
-    .actions { display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:0.15rem; justify-content:center; }
-    .btn { text-decoration:none; padding:0.75em 1.2em; border-radius:10px; border:1px solid var(--border); font-weight:700; color:var(--text); background:#eef2ff; min-width:150px; text-align:center; transition:background 0.15s, transform 0.1s, box-shadow 0.15s; }
-    .btn:hover { background:#e0e7ff; }
-    .btn:active { transform:scale(0.98); }
-    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent-2); box-shadow:0 8px 20px rgba(37,99,235,0.18); }
-    .btn.primary:hover { background:var(--accent-2); }
-    .note { color:var(--muted); font-size:0.95rem; }
-    @media (max-width:640px) { .card { padding:50px; } .status-row { align-items:flex-start; } .actions { flex-direction:column; align-items:stretch; } .btn { width:100%; } }
+    :root {
+      --text: #0f172a;
+      --muted: #475569;
+      --card: #fff;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-2: #1d4ed8;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f7fb;
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+      text-align: center;
+      position: relative;
+      overflow-x: hidden;
+      isolation: isolate;
+    }
+
+    .content {
+      padding: clamp(1rem, calc(2vw + 0.5rem), 2.5rem);
+      max-width: 960px;
+      margin: 0 auto;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+    }
+
+    .card {
+      position: relative;
+      width: 100%;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.05);
+      padding: 50px;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+      align-items: center;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: clamp(1.7rem, calc(1vw + 1.35rem), 2.2rem);
+    }
+
+    .card-tools {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .tool-btn {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #eef2ff;
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+    }
+
+    .tool-btn svg {
+      width: 19px;
+      height: 19px;
+      fill: currentColor;
+    }
+
+    .tool-btn:hover {
+      background: #e0e7ff;
+    }
+
+    .tool-btn:active {
+      transform: scale(0.98);
+    }
+
+    .tool-btn:disabled {
+      opacity: 0.65;
+      cursor: progress;
+    }
+
+    .tool-btn.danger {
+      background: #fee2e2;
+      color: #991b1b;
+      border-color: #fecaca;
+    }
+
+    .tool-btn.danger:hover {
+      background: #fecaca;
+    }
+
+    .tool-btn.warning {
+      background: #fef3c7;
+      color: #92400e;
+      border-color: #fde68a;
+    }
+
+    .tool-btn.warning:hover {
+      background: #fde68a;
+    }
+
+    .status-row {
+      display: flex;
+      gap: 0.9rem;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      text-align: center;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.6rem 0.9rem;
+      border-radius: 12px;
+      background: #e0e7ff;
+      color: var(--accent);
+      font-weight: 700;
+      min-width: 74px;
+      font-size: 1rem;
+    }
+
+    .status-text {
+      color: var(--muted);
+      font-size: 0.98rem;
+      white-space: pre-line;
+    }
+
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-top: 0.15rem;
+      justify-content: center;
+    }
+
+    .btn {
+      text-decoration: none;
+      padding: 0.75em 1.2em;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-weight: 700;
+      color: var(--text);
+      background: #eef2ff;
+      min-width: 150px;
+      text-align: center;
+      transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+    }
+
+    .btn:hover {
+      background: #e0e7ff;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent-2);
+    }
+
+    .btn.primary:hover {
+      background: var(--accent-2);
+    }
+
+    .note {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .connection-lost-overlay {
+      position: absolute;
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.45);
+      z-index: 9999;
+    }
+
+    .connection-lost-overlay[data-visible="1"] {
+      display: flex;
+    }
+
+    .connection-lost-card {
+      width: min(560px, 100%);
+      background: #ffffff;
+      border: 1px solid #fecaca;
+      border-radius: 12px;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.2);
+      padding: 1.1rem 1.15rem;
+      text-align: left;
+    }
+
+    .connection-lost-card h2 {
+      margin: 0 0 0.45rem;
+      color: #991b1b;
+      font-size: clamp(1.05rem, 1vw + 0.9rem, 1.35rem);
+    }
+
+    .connection-lost-card p {
+      margin: 0;
+      color: #1f2937;
+      line-height: 1.45;
+      font-size: 0.98rem;
+    }
+
+    @media (max-width:640px) {
+      .card {
+        padding: 1.25rem;
+      }
+
+      .card.recovery-active .card-tools {
+        position: static;
+        width: 100%;
+        justify-content: flex-end;
+      }
+
+      .card.recovery-active {
+        padding-bottom: 3rem;
+      }
+
+      .status-row {
+        align-items: flex-start;
+      }
+
+      .actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn {
+        width: 100%;
+      }
+    }
   </style>
 </head>
+
 <body>
   <div class="content">
     <div class="card" id="card">
+      <div class="card-tools">
+        <button class="tool-btn warning" id="reset-settings-icon" type="button" style="display:none;"
+          aria-label="Reset settings to defaults" title="Reset settings to defaults">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M13 3a9 9 0 1 0 8.95 10h-2.02A7 7 0 1 1 13 5c1.93 0 3.68.78 4.95 2.05L15 10h7V3l-2.62 2.62A8.96 8.96 0 0 0 13 3z" />
+          </svg>
+        </button>
+        <button class="tool-btn danger" id="format-storage-icon" type="button" style="display:none;"
+          aria-label="Format storage" title="Format storage">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M9 3a1 1 0 0 0-1 1v1H5.5a1 1 0 1 0 0 2H6v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7h.5a1 1 0 1 0 0-2H16V4a1 1 0 0 0-1-1H9Zm1 2h4V5h-4V5Zm-1 4a1 1 0 1 1 2 0v8a1 1 0 1 1-2 0V9Zm6-1a1 1 0 0 1 1 1v8a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Z" />
+          </svg>
+        </button>
+      </div>
       <h1 id="title">Coinbox is starting</h1>
       <div class="status-row" id="status-row">
         <span class="badge" id="countdown">{{SECONDS}}</span>
@@ -36,26 +300,352 @@
         <a class="btn primary" id="start-now" href="/skip">Start now</a>
         <a class="btn" id="stay" href="#">Enter recovery mode</a>
       </div>
+      <p class="note" id="extend-note">{{ EXTEND_NOTE }}</p>
     </div>
   </div>
+  <div class="connection-lost-overlay glyph-overlay-exempt" id="connection-lost-overlay" data-visible="0" aria-live="assertive">
+    <div class="connection-lost-card" role="alert" aria-atomic="true">
+      <h2>Connection lost!</h2>
+      <p>Please make sure the coinbox is powered on and that you are connected to the correct AP or STA network, especially if you recently changed or reset the network settings or were previously connected to the recovery AP.</p>
+    </div>
+  </div>
+  <script src="/glyphs.js"></script>
   <script>
-    let remaining={{SECONDS}};
-    let autoRefresh={{AUTO_REFRESH}};
-    let isRecovery={{IS_RECOVERY}};
-    let refreshed=false;
-    const el=document.getElementById('countdown');
-    const statusRow=document.getElementById('status-row');
-    const actions=document.getElementById('actions');
-    const titleEl=document.getElementById('title');
-    const statusText=document.getElementById('status-text');
-    const stayBtn=document.getElementById('stay');
-    const startBtn=document.getElementById('start-now');
-    function renderRecovery(){titleEl.textContent='Recovery Mode';statusRow.style.display='flex';el.style.display='none';actions.style.display='flex';stayBtn.style.display='none';startBtn.textContent='Enter main mode';statusText.textContent='Awaiting OTA update...';autoRefresh=0;isRecovery=true;}
-    async function enterRecovery(){if(isRecovery)return;try{await fetch('/recovery');}catch(_){ }renderRecovery();}
-    function tick(){if(isRecovery){return;}if(remaining<=0){el.textContent='0';if(autoRefresh&&!refreshed){refreshed=true;setTimeout(()=>location.replace('/'),300);}return;}el.textContent=remaining;remaining-=1;}
-    stayBtn.addEventListener('click',(e)=>{e.preventDefault();enterRecovery();});
-    if(isRecovery){renderRecovery();}
-    tick(); setInterval(tick,1000);
+    if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
+      window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
+    }
+
+    const connectionLostOverlay = document.getElementById('connection-lost-overlay');
+    const CONNECTION_FAILURE_THRESHOLD = 2;
+    let connectionFailures = 0;
+
+    function showConnectionLostPopup() {
+      if (!connectionLostOverlay) return;
+      connectionLostOverlay.dataset.visible = '1';
+    }
+
+    function hideConnectionLostPopup() {
+      if (!connectionLostOverlay) return;
+      connectionLostOverlay.dataset.visible = '0';
+    }
+
+    function recordConnectionSuccess() {
+      connectionFailures = 0;
+      hideConnectionLostPopup();
+    }
+
+    function recordConnectionFailure() {
+      connectionFailures += 1;
+      if (connectionFailures >= CONNECTION_FAILURE_THRESHOLD) {
+        showConnectionLostPopup();
+      }
+    }
+
+    if (typeof window.fetch === 'function') {
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = (...args) => {
+        return nativeFetch(...args)
+          .then((response) => {
+            recordConnectionSuccess();
+            return response;
+          })
+          .catch((error) => {
+            if (!error || error.name !== 'AbortError') {
+              recordConnectionFailure();
+            }
+            throw error;
+          });
+      };
+    }
+
+    let remaining = {{ SECONDS }};
+    let autoRefresh = {{ AUTO_REFRESH }};
+    let isRecovery = {{ IS_RECOVERY }};
+    let forceHandoff = {{ FORCE_HANDOFF }};
+    let refreshed = false;
+    let laserExtensionSeen = {{ LASER_EXTENSION_SEEN }};
+    const el = document.getElementById('countdown');
+    const cardEl = document.getElementById('card');
+    const statusRow = document.getElementById('status-row');
+    const actions = document.getElementById('actions');
+    const titleEl = document.getElementById('title');
+    const statusText = document.getElementById('status-text');
+    const stayBtn = document.getElementById('stay');
+    const startBtn = document.getElementById('start-now');
+    const extendNote = document.getElementById('extend-note');
+    const resetBtn = document.getElementById('reset-settings-icon');
+    const formatBtn = document.getElementById('format-storage-icon');
+    const cardTools = cardEl ? cardEl.querySelector('.card-tools') : null;
+    let resetting = false;
+    let formatting = false;
+    let handoffProbeInFlight = false;
+    let handoffProbeIntervalId = null;
+    let skipRequestSent = false;
+    const handoffTarget = '/sounds/';
+    const LASER_EXTENDED_NOTE = 'Laser beam interrupted three times. Countdown extended.';
+    function markLaserExtensionSeen() {
+      laserExtensionSeen = true;
+      if (extendNote) {
+        extendNote.textContent = LASER_EXTENDED_NOTE;
+      }
+    }
+
+    function extractLaserExtensionSeenFromHtml(html) {
+      if (!html) return false;
+      const scriptMatch = html.match(/let\s+laserExtensionSeen\s*=\s*(\d+)\s*;/i);
+      return scriptMatch ? parseInt(scriptMatch[1], 10) === 1 : false;
+    }
+
+    function updateToolButtons() {
+      const busy = resetting || formatting;
+      if (resetBtn) {
+        resetBtn.disabled = busy;
+        resetBtn.title = resetting ? 'Resetting settings...' : 'Reset settings to defaults';
+      }
+      if (formatBtn) {
+        formatBtn.disabled = busy;
+        formatBtn.title = formatting ? 'Formatting...' : 'Format storage';
+      }
+    }
+
+    function setRecoveryStatus(info) {
+      if (!statusText) return;
+      const lines = [];
+
+      if (info && info.sta_ssid) {
+        lines.push(`Connected to: ${info.sta_ssid}`);
+        lines.push(`IP: ${(info && info.sta) || 'not assigned'}`);
+        lines.push('');
+      }
+
+      lines.push('Recovery AP: coinboxrecovery')
+      lines.push(`AP IP: ${(info && info.ap) || 'not assigned'}`);
+
+      lines.push('');
+
+      lines.push('Awaiting OTA update...');
+
+      statusText.textContent = lines.join('\n');
+    }
+    async function refreshDeviceIps() {
+      try {
+        const res = await fetch('/network/ips', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch IP addresses');
+        const data = await res.json();
+        setRecoveryStatus(data || {});
+      } catch (_) {
+        setRecoveryStatus({});
+      }
+    }
+
+    function extractCountdownFromHtml(html) {
+      if (!html) return null;
+      const badgeMatch = html.match(/id="countdown">\s*(\d+)\s*</i);
+      if (badgeMatch) return parseInt(badgeMatch[1], 10);
+      const scriptMatch = html.match(/let\s+remaining\s*=\s*(\d+)\s*;/i);
+      if (scriptMatch) return parseInt(scriptMatch[1], 10);
+      return null;
+    }
+
+    async function syncCountdownHint() {
+      if (isRecovery || laserExtensionSeen || remaining <= 0) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/', { cache: 'no-store' });
+        if (!res.ok) return;
+        const html = await res.text();
+        const serverRemaining = extractCountdownFromHtml(html);
+        const serverLaserExtensionSeen = extractLaserExtensionSeenFromHtml(html);
+        if (serverRemaining === null || Number.isNaN(serverRemaining)) {
+          return;
+        }
+
+        if (serverLaserExtensionSeen) {
+          markLaserExtensionSeen();
+        }
+
+        const jump = serverRemaining - remaining;
+        if (jump > 1) {
+          remaining = serverRemaining;
+          el.textContent = remaining;
+        }
+      } catch (_) { }
+    }
+
+    function probeMainAppReady() {
+      if (handoffProbeInFlight) return;
+      handoffProbeInFlight = true;
+
+      fetch(handoffTarget, { cache: 'no-store', redirect: 'manual' })
+        .then(r => {
+          const locationHeader = r.headers.get('location');
+          const redirectedAwayFromBootstrapRoot =
+            r.status >= 300 && r.status < 400 && locationHeader && locationHeader !== '/';
+
+          if (r.ok || redirectedAwayFromBootstrapRoot) {
+            location.replace(handoffTarget);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          handoffProbeInFlight = false;
+        });
+    }
+
+    function startHandoffProbeLoop() {
+      if (handoffProbeIntervalId !== null) return;
+      probeMainAppReady();
+      handoffProbeIntervalId = setInterval(probeMainAppReady, 800);
+    }
+
+    function renderRecovery() {
+      if (cardEl) cardEl.classList.add('recovery-active');
+      titleEl.textContent = 'Recovery Mode';
+      statusRow.style.display = 'flex';
+      el.style.display = 'none';
+      actions.style.display = 'flex';
+      if (extendNote) extendNote.style.display = 'none';
+      stayBtn.style.display = 'none';
+      if (resetBtn) resetBtn.style.display = 'inline-flex';
+      if (formatBtn) formatBtn.style.display = 'inline-flex';
+      updateToolButtons();
+      startBtn.textContent = 'Exit recovery mode';
+      autoRefresh = 0;
+      isRecovery = true;
+      refreshDeviceIps();
+    }
+
+    async function enterRecovery() {
+      if (isRecovery) return;
+      try {
+        await fetch('/recovery');
+      } catch (_) { }
+      renderRecovery();
+    }
+
+    async function resetSettings() {
+      if (!isRecovery || !resetBtn || resetting || formatting) return;
+      if (!confirm('Reset all configured settings to their defaults? This will keep your files but reset all settings, including security and network settings.')) return;
+      resetting = true;
+      updateToolButtons();
+      try {
+        const res = await fetch('/settings/reset', { method: 'POST' });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) { }
+          throw new Error(reason || 'Reset failed');
+        }
+        alert('Settings have been restored to defaults. You may need to reconnect to the device after exiting recovery mode.');
+      } catch (e) {
+        alert(e.message || 'Reset failed');
+      }
+      resetting = false;
+      updateToolButtons();
+    }
+
+    async function formatStorage() {
+      if (!isRecovery || !formatBtn || formatting || resetting) return;
+      if (!confirm('Format storage? This will delete all files.')) return;
+      formatting = true;
+      updateToolButtons();
+      try {
+        const res = await fetch('/format', { method: 'POST' });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) { }
+          throw new Error(reason || 'Format failed');
+        }
+        alert('Storage formatted');
+      } catch (e) {
+        alert(e.message || 'Format failed');
+      }
+      formatting = false;
+      updateToolButtons();
+    }
+
+    function renderStartingCard() {
+      if (cardEl) cardEl.classList.remove('recovery-active');
+      titleEl.textContent = 'Starting main application';
+      statusRow.style.display = 'none';
+      actions.style.display = 'none';
+      if (extendNote) extendNote.style.display = 'none';
+      if (cardTools) cardTools.style.display = 'none';
+      if (resetBtn) resetBtn.style.display = 'none';
+      if (formatBtn) formatBtn.style.display = 'none';
+
+      let note = document.getElementById('handoff-note');
+      if (!note && cardEl) {
+        note = document.createElement('p');
+        note.id = 'handoff-note';
+        note.className = 'status-text';
+        cardEl.appendChild(note);
+      }
+      if (note) {
+        note.textContent = 'Getting things ready...';
+      }
+      startHandoffProbeLoop();
+    }
+
+    function requestSkipHandoff() {
+      if (skipRequestSent || forceHandoff) {
+        return;
+      }
+
+      skipRequestSent = true;
+      forceHandoff = 1;
+      renderStartingCard();
+
+      fetch('/skip', { cache: 'no-store' })
+        .catch(() => {
+          // Fallback for rare request races: try classic navigation once.
+          setTimeout(() => {
+            location.replace('/skip');
+          }, 350);
+        });
+    }
+
+    function tick() {
+      if (forceHandoff) {
+        return;
+      }
+      if (isRecovery) {
+        return;
+      }
+      if (remaining <= 0) {
+        el.textContent = '0';
+        renderStartingCard();
+        if (autoRefresh && !refreshed) {
+          refreshed = true;
+          forceHandoff = 1;
+        }
+        return;
+      }
+      el.textContent = remaining;
+      remaining -= 1;
+    }
+
+    stayBtn.addEventListener('click', (e) => { e.preventDefault(); enterRecovery(); });
+    if (startBtn) {
+      startBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        requestSkipHandoff();
+      });
+    }
+    if (resetBtn) { resetBtn.addEventListener('click', () => { resetSettings(); }); }
+    if (formatBtn) { formatBtn.addEventListener('click', () => { formatStorage(); }); }
+    if (cardEl && !isRecovery) { cardEl.classList.remove('recovery-active'); }
+    if (laserExtensionSeen) { markLaserExtensionSeen(); }
+    if (forceHandoff) {
+      renderStartingCard();
+    } else if (isRecovery) {
+      renderRecovery();
+    }
+    setInterval(() => { if (isRecovery && !forceHandoff) { refreshDeviceIps(); } }, 5000);
+    setInterval(() => { if (!isRecovery && !forceHandoff) { syncCountdownHint(); } }, 1500);
+    tick(); setInterval(tick, 1000);
   </script>
 </body>
+
 </html>

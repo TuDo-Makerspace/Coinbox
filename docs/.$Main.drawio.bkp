@@ -1,0 +1,86 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/28.2.5 Chrome/138.0.7204.251 Electron/37.6.1 Safari/537.36" version="28.2.5">
+  <diagram name="Page-1" id="0XChSSK2MoHIEqqGRqh3">
+    <mxGraphModel dx="1188" dy="1829" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-2" value="" style="ellipse;html=1;shape=startState;fillColor=#000000;strokeColor=#ff0000;" parent="1" vertex="1">
+          <mxGeometry x="390" y="10" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-3" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;verticalAlign=bottom;endArrow=open;endSize=8;strokeColor=#ff0000;rounded=0;" parent="1" source="_-I3z2eby6WCbaxVHvPk-2" target="_-I3z2eby6WCbaxVHvPk-15" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="230" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-4" target="_-I3z2eby6WCbaxVHvPk-5" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-4" value="&lt;b&gt;Init flash&lt;/b&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;nvs_flash_init()&lt;/font&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="330" y="230" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-5" target="_-I3z2eby6WCbaxVHvPk-7" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-5" value="&lt;b&gt;Init Network Stack&lt;/b&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;esp_netif_init()&lt;/font&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="330" y="330" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-7" target="_-I3z2eby6WCbaxVHvPk-9" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-7" value="&lt;b&gt;Init default RTOS event loop&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;esp_event_loop_create_default()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="280" y="430" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-9" target="_-I3z2eby6WCbaxVHvPk-20" edge="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="405" y="680" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-9" value="&lt;b&gt;Initialise File System&lt;/b&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;files_init()&lt;br&gt;&lt;/font&gt;&lt;br&gt;Mounts the storage partition to the base path (/data). The storage partition contains all audio files + meta files.&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="280" y="540" width="250" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-15" target="_-I3z2eby6WCbaxVHvPk-4" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-15" value="&lt;b&gt;Init logger&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;logger_init()&lt;/font&gt;&lt;br&gt;&lt;br&gt;This redirects &lt;font face=&quot;Courier New&quot;&gt;ESP_LOG*&lt;/font&gt; calls to &lt;font face=&quot;Courier New&quot;&gt;logger_vprintf&lt;/font&gt; which stores logs into a global buffer that allows us to access logs from the WebUI" style="rounded=0;whiteSpace=wrap;html=1;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="280" y="70" width="250" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-20" target="_-I3z2eby6WCbaxVHvPk-22" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-20" value="&lt;div style=&quot;&quot;&gt;&lt;b style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;Initialise audio&lt;/b&gt;&lt;/div&gt;&lt;font face=&quot;Courier New&quot;&gt;&lt;div style=&quot;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;audio_init()&lt;/span&gt;&lt;/div&gt;&lt;br&gt;&lt;div style=&quot;text-align: left;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255)); font-family: Helvetica;&quot;&gt;1. Define local base bath&lt;/span&gt;&lt;/div&gt;&lt;/font&gt;&lt;div style=&quot;text-align: left;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;2. Define the test file path (WILL BE REMOVED LATER)&lt;/span&gt;&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;3. Configure the mute pins:&lt;/span&gt;&lt;/div&gt;&lt;font face=&quot;Courier New&quot;&gt;&lt;/font&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;div style=&quot;text-align: left;&quot;&gt;3.1 Set AMP + DAC Mute pins to GPIO OUTPUT&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;3.2 Mute amp (AMP MUTE GPIO HIGH)&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;3.3 Mute DAC (DAC MUTE GPIO LOW)&lt;/div&gt;&lt;div style=&quot;text-align: left;&quot;&gt;3.4 Signal pins configured (s_pins_configured = true)&lt;/div&gt;&lt;/blockquote&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;&lt;div style=&quot;text-align: left;&quot;&gt;&lt;span style=&quot;background-color: transparent; color: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));&quot;&gt;4. Mute outputs (redundant?)&lt;/span&gt;&lt;/div&gt;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=center;spacingLeft=10;spacingRight=10;" parent="1" vertex="1">
+          <mxGeometry x="210" y="690" width="390" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-22" target="_-I3z2eby6WCbaxVHvPk-24" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-22" value="&lt;b&gt;Init WiFi&lt;/b&gt;&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;init_wifi()&lt;/font&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="330" y="940" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-27" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-24" target="_-I3z2eby6WCbaxVHvPk-26" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-24" value="&lt;b&gt;Announce mdns on &lt;font face=&quot;Courier New&quot;&gt;coinbox.local&lt;/font&gt;&lt;br&gt;&lt;/b&gt;&lt;font face=&quot;Courier New&quot;&gt;mdns_start_service()&lt;/font&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+          <mxGeometry x="280" y="1040" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-30" value="" style="group" parent="1" connectable="0" vertex="1">
+          <mxGeometry x="375" y="1140" width="60" height="64" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-26" value="" style="ellipse;html=1;shape=endState;fillColor=#000000;strokeColor=#ff0000;" parent="_-I3z2eby6WCbaxVHvPk-30" vertex="1">
+          <mxGeometry x="15" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-32" value="&lt;font face=&quot;Courier New&quot;&gt;app_main&lt;/font&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="375" y="-10" width="60" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-29" value="Enter Bootstrap&lt;div&gt;&lt;font face=&quot;Courier New&quot;&gt;bootstrap&lt;/font&gt;&lt;/div&gt;" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="350" y="1174" width="110" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-35" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" parent="1" source="_-I3z2eby6WCbaxVHvPk-33" target="_-I3z2eby6WCbaxVHvPk-2" edge="1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="_-I3z2eby6WCbaxVHvPk-33" value="ESP Boot" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" parent="1" vertex="1">
+          <mxGeometry x="280" y="10" width="60" height="30" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

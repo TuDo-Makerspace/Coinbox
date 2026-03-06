@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings</title>
+  <link rel="stylesheet" href="/glyphs.css">
+  <style>
+    :root {
+      --text: #0f172a;
+      --muted: #475569;
+      --card: #fff;
+      --border: #e5e7eb;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f7fb;
+      color: var(--text);
+      line-height: 1.5;
+      position: relative;
+      overflow-x: hidden;
+      isolation: isolate;
+    }
+    .content {
+      padding: clamp(1rem, 2vw + 0.5rem, 2.5rem);
+      max-width: 1000px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    h1 {
+      font-size: clamp(1.6rem, 1vw + 1.3rem, 2.1rem);
+    }
+    p {
+      color: var(--muted);
+    }
+    .log-box {
+      margin-top: 0.5em;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1em;
+      max-height: 320px;
+      overflow-y: auto;
+      font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
+      background: #f8fafc;
+      font-size: 0.95rem;
+    }
+    .log-section { display: flex; flex-direction: column; gap: 0.35rem; }
+    .log-controls { display: flex; justify-content: flex-end; }
+    .log-line {
+      white-space: pre-wrap;
+      display: block;
+      padding: 0.05em 0;
+      color: var(--text);
+    }
+    .log-line.info { color: #16a34a; }
+    .log-line.warn { color: #d97706; }
+    .log-line.error { color: #dc2626; }
+    .log-line.debug { color: #2563eb; }
+    .actions {
+      margin-top: 0.25em;
+      display: flex;
+      gap: 0.75em;
+      flex-wrap: wrap;
+    }
+    .actions button,
+    .log-controls button {
+      padding: 0.7em 1.1em;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #e5edff;
+      cursor: pointer;
+      font-weight: 700;
+      min-width: 140px;
+      flex: 1 1 180px;
+      transition: transform 0.1s, background 0.15s;
+    }
+    .log-controls button { flex: 0 0 auto; }
+    .actions button:hover,
+    .log-controls button:hover { background: #d7e4ff; }
+    .actions button:active,
+    .log-controls button:active { transform: scale(0.98); }
+    .actions button.danger-btn {
+      background: #fee2e2;
+      border-color: #fecaca;
+      color: #991b1b;
+    }
+    .actions button.danger-btn:hover { background: #fecaca; }
+    .actions button.danger-btn:active { background: #fca5a5; }
+    .network-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0.85rem;
+    }
+    .net-field {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .net-top-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .net-ip {
+      font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .net-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid #fecaca;
+      color: #991b1b;
+      background: #fee2e2;
+      font-size: 0.82rem;
+      font-weight: 700;
+    }
+    .net-state[hidden] {
+      display: none !important;
+    }
+    .net-state::before {
+      content: "";
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    .net-state[data-state="connected"] {
+      border-color: #bbf7d0;
+      color: #166534;
+      background: #dcfce7;
+    }
+    .net-state[data-state="connected"]::before {
+      background: #16a34a;
+    }
+    .net-state[data-state="reboot-required"] {
+      border-color: #fcd34d;
+      color: #92400e;
+      background: #fef3c7;
+    }
+    .net-state[data-state="reboot-required"]::before {
+      background: #f59e0b;
+    }
+    .network-note {
+      margin-top: 0.15rem;
+      margin-bottom: 0.8rem;
+    }
+    .net-field label {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .net-field input {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.7rem;
+      font: inherit;
+      width: 100%;
+      background: #fff;
+      color: var(--text);
+    }
+    .net-field input:disabled {
+      background: #eef2f7;
+      color: #64748b;
+      cursor: not-allowed;
+    }
+    .network-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+    .network-actions button {
+      padding: 0.7em 1.1em;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #e5edff;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 0.1s, background 0.15s;
+    }
+    .network-actions button:hover { background: #d7e4ff; }
+    .network-actions button:active { transform: scale(0.98); }
+    .security-card {
+      gap: 0.9rem;
+    }
+    .security-head {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .security-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.18rem 0.6rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      border: 1px solid #d1d5db;
+      color: #475569;
+      background: #e5e7eb;
+    }
+    .security-pill-icon {
+      width: 0.8rem;
+      height: 0.8rem;
+      fill: currentColor;
+      opacity: 0.9;
+    }
+    .security-pill[data-state="on"] {
+      border-color: #fcd34d;
+      color: #92400e;
+      background: #fef3c7;
+    }
+    .security-pill[data-state="error"] {
+      border-color: #fca5a5;
+      color: #991b1b;
+      background: #fee2e2;
+    }
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0.85rem;
+    }
+    .security-field {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .security-field label {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .security-field input {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.6rem 0.7rem;
+      font: inherit;
+      width: 100%;
+      background: #fff;
+      color: var(--text);
+    }
+    .security-note {
+      font-size: 0.9rem;
+    }
+    .security-actions {
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .security-actions button {
+      padding: 0.7em 1.1em;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #e5edff;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 0.1s, background 0.15s;
+      min-width: 170px;
+    }
+    .security-actions button:hover { background: #d7e4ff; }
+    .security-actions button:active { transform: scale(0.98); }
+    .security-actions button.danger-btn {
+      background: #fee2e2;
+      border-color: #fecaca;
+      color: #991b1b;
+    }
+    .security-actions button.danger-btn:hover { background: #fecaca; }
+    .security-actions button.danger-btn:active { background: #fca5a5; }
+    .security-actions button:disabled,
+    .security-actions button.danger-btn:disabled {
+      background: #e5e7eb;
+      border-color: #d1d5db;
+      color: #94a3b8;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .card h2 { margin: 0; font-size: 1.2rem; }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .tone-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ef4444;
+      box-shadow: 0 0 0 4px rgba(239,68,68,0.2);
+    }
+    .status-dot[data-state="on"] {
+      background: #16a34a;
+      box-shadow: 0 0 0 4px rgba(22,163,74,0.2);
+    }
+    .slider-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .slider-meta {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #2563eb;
+    }
+    .tone-actions {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    .tone-actions button {
+      padding: 0.85em 1.3em;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #e5edff;
+      cursor: pointer;
+      font-weight: 700;
+      min-width: 140px;
+      transition: transform 0.1s, background 0.15s, box-shadow 0.15s;
+    }
+    .tone-actions button:hover { background: #d7e4ff; }
+    .tone-actions button:active { transform: scale(0.98); }
+    .tone-actions button:disabled {
+      background: #e2e8f0;
+      color: #94a3b8;
+      border-color: #cbd5e1;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+    .note { color: var(--muted); font-size: 0.95rem; }
+    .dual-slider {
+      display: grid;
+      grid-template-columns: 3fr 1fr;
+      gap: 1.5rem;
+    }
+    .sensor-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.85rem;
+    }
+    .sensor {
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .sensor-label { color: var(--muted); font-weight: 600; font-size: 0.95rem; }
+    .sensor-reading { font-size: 1.1rem; font-weight: 700; }
+    .sensor-note { color: var(--muted); font-size: 0.95rem; }
+    .sensor-chart {
+      width: 100%;
+      height: 150px;
+      display: block;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .sensor-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 0.35rem;
+    }
+    .sensor-actions button {
+      padding: 0.45em 0.9em;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #e5edff;
+      cursor: pointer;
+      font-weight: 700;
+      transition: transform 0.1s, background 0.15s;
+    }
+    .sensor-actions button:hover { background: #d7e4ff; }
+    .sensor-actions button:active { transform: scale(0.98); }
+    @media (max-width: 640px) {
+      .actions { flex-direction: column; }
+      .actions button {
+        width: 100%;
+        flex: none;
+      }
+      .security-actions {
+        flex-direction: column;
+      }
+      .security-actions button {
+        width: 100%;
+        min-width: 0;
+      }
+      .log-controls { width: 100%; }
+      .log-controls button { width: 100%; }
+      .log-box { max-height: 55vh; }
+      .card { padding: 1rem; }
+      .dual-slider { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div id="navbar"></div>
+  <script src="/navbar.js"></script>
+
+  <div class="content">
+    <h1>Settings</h1>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Sensors</h2>
+      </div>
+      <div class="sensor-grid">
+        <div class="sensor">
+          <div class="sensor-label">Laser receiver (GPIO 23)</div>
+          <div class="sensor-reading" id="laser-level">--</div>
+          <div class="sensor-note" id="laser-meaning">Waiting for data...</div>
+          <div class="sensor-note">Changes: <span id="laser-changes">--</span></div>
+          <div class="sensor-note">Last interval: <span id="laser-interval">--</span></div>
+          <canvas class="sensor-chart" id="laser-chart" aria-label="Laser level over time"></canvas>
+          <div class="sensor-actions">
+            <button id="download-laser">Download CSV</button>
+          </div>
+        </div>
+        <div class="sensor">
+          <div class="sensor-label">Hall lid sensor (GPIO 2)</div>
+          <div class="sensor-reading" id="hall-level">--</div>
+          <div class="sensor-note" id="hall-meaning">Waiting for data...</div>
+          <div class="sensor-note">Changes: <span id="hall-changes">--</span></div>
+          <div class="sensor-note" aria-hidden="true">&nbsp;</div>
+          <canvas class="sensor-chart" id="hall-chart" aria-label="Lid level over time"></canvas>
+          <div class="sensor-actions">
+            <button id="download-hall">Download CSV</button>
+          </div>
+        </div>
+      </div>
+      <p class="note" id="gpio-updated">Last updated: --</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2>Audio test</h2>
+        </div>
+        <div class="tone-status">
+          <span class="status-dot" id="tone-status-dot" data-state="off"></span>
+          <span id="tone-status-text">Stopped</span>
+        </div>
+      </div>
+      <div class="dual-slider">
+        <div class="slider-row">
+          <label for="tone-frequency">Frequency</label>
+          <input type="range" id="tone-frequency" min="50" max="8000" value="440" step="5">
+          <div class="slider-meta">
+            <span id="tone-frequency-value">440 Hz</span>
+            <span id="tone-range-label">50-8000 Hz</span>
+          </div>
+        </div>
+        <div class="slider-row">
+          <label for="tone-volume">Volume</label>
+          <input type="range" id="tone-volume" min="0" max="100" value="25" step="1">
+          <div class="slider-meta">
+            <span id="tone-volume-value">25%</span>
+            <span id="tone-volume-label">0-100%</span>
+          </div>
+        </div>
+      </div>
+      <div class="tone-actions">
+        <button id="tone-toggle">Play</button>
+        <button id="tone-sweep">Sweep</button>
+      </div>
+    </div>
+
+    <div class="card log-section">
+      <div class="card-header">
+        <h2>Logs</h2>
+        <div class="log-controls">
+          <button id="download-log">Download log</button>
+        </div>
+      </div>
+      <p class="note">Logs are kept in memory and are cleared automatically when the buffer is full.</p>
+      <div id="log-box" class="log-box">Loading log...</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Network</h2>
+      </div>
+      <p class="note network-note">Changes will be applied after reboot</p>
+      <div class="network-grid">
+        <div class="net-field">
+          <div class="net-top-line">
+            <div class="sensor-label">Access Point</div>
+            <div class="net-state" id="network-ap-state" data-state="reboot-required" hidden>Reboot required</div>
+          </div>
+          <div class="net-ip" id="network-ap-ip">IP: --</div>
+          <label for="network-ap-ssid">AP SSID</label>
+          <input id="network-ap-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+          <label for="network-ap-password">AP Password</label>
+          <input id="network-ap-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
+        </div>
+        <div class="net-field">
+          <div class="net-top-line">
+            <div class="sensor-label">Station</div>
+            <div class="net-state" id="network-sta-state" data-state="disconnected">Disconnected</div>
+          </div>
+          <div class="net-ip" id="network-sta-ip">IP: --</div>
+          <label for="network-sta-ssid">STA SSID</label>
+          <input id="network-sta-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+          <label for="network-sta-password">STA Password</label>
+          <input id="network-sta-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
+        </div>
+      </div>
+      <div class="network-actions">
+        <button id="network-save">Save network settings</button>
+      </div>
+    </div>
+
+    <div class="card security-card">
+      <div class="card-header">
+        <div class="security-head">
+          <h2>Security</h2>
+          <span id="security-status-pill" class="security-pill" data-state="off">
+            <svg class="security-pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 1 1 4 0v2h-4V7Z"/>
+            </svg>
+            <span id="security-status-pill-text">Disabled</span>
+          </span>
+        </div>
+      </div>
+      <p class="note" id="security-status">Configure a password to access this website.</p>
+      <div class="security-grid">
+        <div class="security-field">
+          <label for="security-password">New Password</label>
+          <input id="security-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Set a password to lock the UI">
+        </div>
+        <div class="security-field">
+          <label for="security-password-confirm">Confirm Password</label>
+          <input id="security-password-confirm" type="password" maxlength="64" autocomplete="new-password" placeholder="Repeat password">
+        </div>
+      </div>
+      <p class="note security-note">Leave empty to keep current password.</p>
+      <div class="security-actions">
+        <button id="security-remove" class="danger-btn">Remove password</button>
+        <button id="security-save">Save password</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>System</h2>
+      </div>
+      <div class="actions">
+        <button id="restart-device">Restart device</button>
+        <button id="format-storage" class="danger-btn">Format storage</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/glyphs.js"></script>
+  <script>
+    if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
+      window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
+    }
+
+    const box = document.getElementById('log-box');
+    const apIpText = document.getElementById('network-ap-ip');
+    const staIpText = document.getElementById('network-sta-ip');
+    const apState = document.getElementById('network-ap-state');
+    const staState = document.getElementById('network-sta-state');
+    const apSsidInput = document.getElementById('network-ap-ssid');
+    const apPasswordInput = document.getElementById('network-ap-password');
+    const staSsidInput = document.getElementById('network-sta-ssid');
+    const staPasswordInput = document.getElementById('network-sta-password');
+    const networkSaveBtn = document.getElementById('network-save');
+    const securityStatus = document.getElementById('security-status');
+    const securityStatusPill = document.getElementById('security-status-pill');
+    const securityStatusPillText = document.getElementById('security-status-pill-text');
+    const securityPasswordInput = document.getElementById('security-password');
+    const securityPasswordConfirmInput = document.getElementById('security-password-confirm');
+    const securitySaveBtn = document.getElementById('security-save');
+    const securityRemoveBtn = document.getElementById('security-remove');
+    const LOG_POLL_MS = 3000;
+    const IP_POLL_MS = 10000;
+    let logIntervalId;
+    let ipIntervalId;
+    let logLoading = false;
+    let lastLogText = null;
+    let lastRenderWasError = false;
+    let lastNetworkIpsData = {};
+    let networkSaving = false;
+    let networkSaveOldLabel = 'Save network settings';
+    let securitySaving = false;
+    const NETWORK_PASSWORD_MASK_VALUE = 'xxxxxxxxxxxx';
+    const apPasswordState = { masked: false, edited: false };
+    const staPasswordState = { masked: false, edited: false };
+    const networkConfigSnapshot = {
+      loaded: false,
+      ap_ssid: '',
+      sta_ssid: '',
+      ap_reboot_required: false,
+      sta_reboot_required: false,
+    };
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function classify(line) {
+      const trimmed = line.trim();
+      const lower = trimmed.toLowerCase();
+      if (/^(e\b|e\s|\berror\b|\berr\b)/i.test(trimmed) || lower.includes('error')) return 'error';
+      if (/^(w\b|w\s|\bwarn\b|\bwarning\b)/i.test(trimmed) || lower.includes('warn')) return 'warn';
+      if (/^(i\b|i\s|\binfo\b)/i.test(trimmed) || lower.includes('info')) return 'info';
+      if (/^(d\b|d\s|\bdebug\b)/i.test(trimmed) || lower.includes('debug')) return 'debug';
+      return '';
+    }
+
+    function renderLog(text) {
+      if (!text) {
+        box.textContent = '(empty)';
+        return;
+      }
+      const lines = text.split(/\r?\n/);
+      box.innerHTML = lines.map((line) => {
+        const cls = classify(line);
+        return `<span class="log-line ${cls}">${escapeHtml(line)}</span>`;
+      }).join('');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function renderNetworkIps(data) {
+      lastNetworkIpsData = data || {};
+      if (apIpText) {
+        apIpText.textContent = `IP: ${data?.ap || 'not assigned'}`;
+      }
+      if (staIpText) {
+        staIpText.textContent = `IP: ${data?.sta || 'not assigned'}`;
+      }
+      if (staState) {
+        if (networkConfigSnapshot.sta_reboot_required) {
+          staState.dataset.state = 'reboot-required';
+          staState.textContent = 'Reboot required';
+          return;
+        }
+        const connected = !!data?.sta_ssid;
+        staState.dataset.state = connected ? 'connected' : 'disconnected';
+        staState.textContent = connected ? 'Connected' : 'Disconnected';
+      }
+    }
+
+    async function fetchNetworkIps() {
+      try {
+        const res = await fetch('/network/ips', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch IP addresses');
+        const data = await res.json();
+        renderNetworkIps(data);
+      } catch (_) {
+        renderNetworkIps({});
+      }
+    }
+
+    function hasOwn(obj, key) {
+      return Object.prototype.hasOwnProperty.call(obj, key);
+    }
+
+    function updateNetworkConfigSnapshot(data) {
+      networkConfigSnapshot.loaded = true;
+      networkConfigSnapshot.ap_ssid = data?.ap_ssid || '';
+      networkConfigSnapshot.sta_ssid = data?.sta_ssid || '';
+      networkConfigSnapshot.ap_reboot_required = !!data?.ap_reboot_required;
+      networkConfigSnapshot.sta_reboot_required = !!data?.sta_reboot_required;
+    }
+
+    function renderNetworkConfig(data) {
+      const apSupported = !!data?.ap_supported;
+      const staSupported = !!data?.sta_supported;
+      const apRebootRequired = !!data?.ap_reboot_required;
+
+      if (apSsidInput) {
+        apSsidInput.value = data?.ap_ssid || '';
+        apSsidInput.disabled = !apSupported;
+      }
+      if (apPasswordInput) {
+        apPasswordInput.disabled = !apSupported;
+        if (!apSupported) {
+          apPasswordInput.value = '';
+          apPasswordInput.placeholder = 'Not enabled in this firmware';
+          apPasswordState.masked = false;
+          apPasswordState.edited = false;
+        } else if (data?.ap_password_set) {
+          apPasswordInput.value = NETWORK_PASSWORD_MASK_VALUE;
+          apPasswordInput.placeholder = '';
+          apPasswordState.masked = true;
+          apPasswordState.edited = false;
+          forceSelectAll(apPasswordInput, apPasswordState);
+        } else {
+          apPasswordInput.value = '';
+          apPasswordInput.placeholder = 'Leave blank for open network';
+          apPasswordState.masked = false;
+          apPasswordState.edited = false;
+        }
+      }
+
+      if (staSsidInput) {
+        staSsidInput.value = data?.sta_ssid || '';
+        staSsidInput.disabled = !staSupported;
+      }
+      if (staPasswordInput) {
+        staPasswordInput.disabled = !staSupported;
+        if (!staSupported) {
+          staPasswordInput.value = '';
+          staPasswordInput.placeholder = 'Not enabled in this firmware';
+          staPasswordState.masked = false;
+          staPasswordState.edited = false;
+        } else if (data?.sta_password_set) {
+          staPasswordInput.value = NETWORK_PASSWORD_MASK_VALUE;
+          staPasswordInput.placeholder = '';
+          staPasswordState.masked = true;
+          staPasswordState.edited = false;
+          forceSelectAll(staPasswordInput, staPasswordState);
+        } else {
+          staPasswordInput.value = '';
+          staPasswordInput.placeholder = 'Leave blank for open network';
+          staPasswordState.masked = false;
+          staPasswordState.edited = false;
+        }
+      }
+
+      if (apState) {
+        apState.hidden = !apRebootRequired;
+      }
+
+      if (networkSaveBtn) {
+        networkSaveBtn.disabled = networkSaving || (!apSupported && !staSupported);
+      }
+
+      renderNetworkIps(lastNetworkIpsData);
+    }
+
+    async function fetchNetworkConfig() {
+      try {
+        const res = await fetch('/network/config', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch network config');
+        const data = await res.json();
+        updateNetworkConfigSnapshot(data);
+        renderNetworkConfig(data);
+      } catch (_) {
+        renderNetworkConfig({
+          ap_supported: false,
+          sta_supported: false,
+          ap_reboot_required: false,
+          sta_reboot_required: false,
+        });
+      }
+    }
+
+    function restoreNetworkSaveButton() {
+      networkSaving = false;
+      if (!networkSaveBtn) return;
+      const apSupported = !apSsidInput?.disabled;
+      const staSupported = !staSsidInput?.disabled;
+      networkSaveBtn.disabled = (!apSupported && !staSupported);
+      networkSaveBtn.textContent = networkSaveOldLabel || 'Save network settings';
+    }
+
+    async function saveNetworkConfig() {
+      if (!networkSaveBtn || networkSaving) return;
+      const apSupported = !apSsidInput?.disabled;
+      const staSupported = !staSsidInput?.disabled;
+      if (!networkConfigSnapshot.loaded) {
+        alert('Network settings are still loading. Please try again.');
+        return;
+      }
+      const payload = {};
+
+      if (apSupported && apSsidInput) {
+        const ssid = apSsidInput.value;
+        if (!ssid) {
+          alert('AP SSID must not be empty.');
+          return;
+        }
+        if (!networkConfigSnapshot.loaded || ssid !== networkConfigSnapshot.ap_ssid) {
+          payload.ap_ssid = ssid;
+        }
+      }
+      if (staSupported && staSsidInput) {
+        const ssid = staSsidInput.value;
+        if (!networkConfigSnapshot.loaded || ssid !== networkConfigSnapshot.sta_ssid) {
+          payload.sta_ssid = ssid;
+        }
+      }
+      if (apSupported && apPasswordInput && !apPasswordState.masked && apPasswordState.edited) {
+        if (apPasswordInput.value.length > 0 && (apPasswordInput.value.length < 8 || apPasswordInput.value.length > 64)) {
+          alert('AP password must be 8-64 characters, or empty for an open network.');
+          return;
+        }
+        payload.ap_password = apPasswordInput.value;
+      }
+      if (staSupported && staPasswordInput && !staPasswordState.masked && staPasswordState.edited) {
+        if (staPasswordInput.value.length > 0 && (staPasswordInput.value.length < 8 || staPasswordInput.value.length > 64)) {
+          alert('STA password must be 8-64 characters, or empty for an open network.');
+          return;
+        }
+        payload.sta_password = staPasswordInput.value;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        alert('No network changes to save.');
+        return;
+      }
+
+      networkSaving = true;
+      networkSaveOldLabel = networkSaveBtn.textContent || 'Save network settings';
+      networkSaveBtn.disabled = true;
+      networkSaveBtn.textContent = 'Saving...';
+      try {
+        const res = await fetch('/network/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) {}
+          throw new Error(reason || 'Failed to save network settings');
+        }
+        const data = await res.json();
+        updateNetworkConfigSnapshot(data);
+        renderNetworkConfig(data);
+        fetchNetworkIps();
+      } catch (e) {
+        alert(e.message || 'Failed to save network settings');
+      } finally {
+        restoreNetworkSaveButton();
+        fetchNetworkConfig();
+      }
+    }
+
+    function renderSecurityConfig(data) {
+      const configured = !!data?.password_set;
+      if (securityStatusPill) {
+        securityStatusPill.dataset.state = configured ? 'on' : 'off';
+      }
+      if (securityStatusPillText) {
+        securityStatusPillText.textContent = configured ? 'Enabled' : 'Disabled';
+      }
+      if (securitySaveBtn) {
+        securitySaveBtn.disabled = securitySaving;
+      }
+      if (securityRemoveBtn) {
+        securityRemoveBtn.disabled = securitySaving || !configured;
+      }
+    }
+
+    function forceSelectAll(input, state) {
+      if (!input || !state?.masked || input.disabled) return;
+      const len = input.value.length;
+      if (!len) return;
+      requestAnimationFrame(() => {
+        if (!state.masked || input.disabled || document.activeElement !== input) return;
+        try {
+          input.setSelectionRange(0, len);
+        } catch (_) {}
+      });
+    }
+
+    function clearMaskedPassword(input, state) {
+      if (!input || !state?.masked) return;
+      input.value = '';
+      state.masked = false;
+      state.edited = true;
+    }
+
+    function replaceMaskedPassword(input, state, replacement) {
+      if (!input || !state?.masked) return;
+      const next = replacement || '';
+      input.value = next;
+      state.masked = false;
+      state.edited = true;
+      const pos = next.length;
+      try {
+        input.setSelectionRange(pos, pos);
+      } catch (_) {}
+    }
+
+    function bindMaskedNetworkPasswordInput(input, state) {
+      if (!input) return;
+
+      input.addEventListener('focus', () => {
+        forceSelectAll(input, state);
+      });
+
+      input.addEventListener('click', () => {
+        forceSelectAll(input, state);
+      });
+
+      input.addEventListener('mouseup', (ev) => {
+        if (!state.masked) return;
+        ev.preventDefault();
+        forceSelectAll(input, state);
+      });
+
+      input.addEventListener('select', () => {
+        forceSelectAll(input, state);
+      });
+
+      input.addEventListener('keydown', (ev) => {
+        if (!state.masked) return;
+
+        if (ev.key === 'Backspace' || ev.key === 'Delete') {
+          ev.preventDefault();
+          clearMaskedPassword(input, state);
+          return;
+        }
+
+        if (ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown' ||
+            ev.key === 'Home' || ev.key === 'End') {
+          ev.preventDefault();
+          forceSelectAll(input, state);
+          return;
+        }
+
+        if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+          ev.preventDefault();
+          replaceMaskedPassword(input, state, ev.key);
+        }
+      });
+
+      input.addEventListener('beforeinput', (ev) => {
+        if (!state.masked) return;
+        if (ev.isComposing) return;
+        const type = ev.inputType || '';
+
+        if (type.startsWith('delete')) {
+          ev.preventDefault();
+          clearMaskedPassword(input, state);
+          return;
+        }
+
+        if (type.startsWith('insert')) {
+          const inserted = typeof ev.data === 'string' ? ev.data : '';
+          if (!inserted && type === 'insertFromPaste') {
+            return;
+          }
+          ev.preventDefault();
+          replaceMaskedPassword(input, state, inserted);
+        }
+      });
+
+      input.addEventListener('paste', (ev) => {
+        if (!state.masked) return;
+        ev.preventDefault();
+        const pasted = ev.clipboardData ? ev.clipboardData.getData('text') : '';
+        replaceMaskedPassword(input, state, pasted);
+      });
+
+      input.addEventListener('input', () => {
+        if (state.masked) {
+          if (input.value !== NETWORK_PASSWORD_MASK_VALUE) {
+            state.masked = false;
+            state.edited = true;
+          } else {
+            forceSelectAll(input, state);
+          }
+          return;
+        }
+        state.edited = true;
+      });
+    }
+
+    async function fetchSecurityConfig() {
+      try {
+        const res = await fetch('/security/config', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load security settings');
+        const data = await res.json();
+        renderSecurityConfig(data);
+      } catch (_) {
+        if (securityStatusPill) {
+          securityStatusPill.dataset.state = 'error';
+        }
+        if (securityStatusPillText) {
+          securityStatusPillText.textContent = 'Unknown';
+        }
+        if (securitySaveBtn) securitySaveBtn.disabled = securitySaving;
+        if (securityRemoveBtn) securityRemoveBtn.disabled = true;
+      }
+    }
+
+    async function saveSecurityPassword() {
+      if (securitySaving || !securityPasswordInput || !securityPasswordConfirmInput) return;
+      const password = securityPasswordInput.value;
+      const confirmPassword = securityPasswordConfirmInput.value;
+
+      if (!password) {
+        alert('Enter a password to enable the lock.');
+        return;
+      }
+      if (password.length > 64) {
+        alert('Password must be 1-64 characters.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        alert('Passwords do not match.');
+        return;
+      }
+
+      securitySaving = true;
+      const oldLabel = securitySaveBtn ? securitySaveBtn.textContent : '';
+      if (securitySaveBtn) {
+        securitySaveBtn.disabled = true;
+        securitySaveBtn.textContent = 'Saving...';
+      }
+      if (securityRemoveBtn) securityRemoveBtn.disabled = true;
+
+      try {
+        const res = await fetch('/security/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) {}
+          throw new Error(reason || 'Failed to save password');
+        }
+        const data = await res.json();
+        renderSecurityConfig(data);
+        securityPasswordInput.value = '';
+        securityPasswordConfirmInput.value = '';
+        alert('Password saved.');
+      } catch (e) {
+        alert(e.message || 'Failed to save password');
+      } finally {
+        securitySaving = false;
+        if (securitySaveBtn) securitySaveBtn.textContent = oldLabel || 'Save password';
+        fetchSecurityConfig();
+      }
+    }
+
+    async function removeSecurityPassword() {
+      if (securitySaving) return;
+      if (!confirm('Remove the UI password lock?')) return;
+
+      securitySaving = true;
+      const oldLabel = securityRemoveBtn ? securityRemoveBtn.textContent : '';
+      if (securityRemoveBtn) {
+        securityRemoveBtn.disabled = true;
+        securityRemoveBtn.textContent = 'Removing...';
+      }
+      if (securitySaveBtn) securitySaveBtn.disabled = true;
+
+      try {
+        const res = await fetch('/security/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ remove: true }),
+        });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) {}
+          throw new Error(reason || 'Failed to remove password');
+        }
+        const data = await res.json();
+        renderSecurityConfig(data);
+        if (securityPasswordInput) securityPasswordInput.value = '';
+        if (securityPasswordConfirmInput) securityPasswordConfirmInput.value = '';
+        alert('Password removed.');
+      } catch (e) {
+        alert(e.message || 'Failed to remove password');
+      } finally {
+        securitySaving = false;
+        if (securityRemoveBtn) securityRemoveBtn.textContent = oldLabel || 'Remove password';
+        fetchSecurityConfig();
+      }
+    }
+
+    async function fetchLog() {
+      if (logLoading) return;
+      logLoading = true;
+      try {
+        const res = await fetch('/logs', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch log');
+        const text = await res.text();
+        if (!lastRenderWasError && text === lastLogText) return;
+        renderLog(text);
+        lastLogText = text;
+        lastRenderWasError = false;
+      } catch (e) {
+        renderLog(e.message || 'Failed to fetch log');
+        lastRenderWasError = true;
+      } finally {
+        logLoading = false;
+      }
+    }
+
+    async function downloadLog() {
+      try {
+        const res = await fetch('/logs', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to download log');
+        const text = await res.text();
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'log.txt';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    const laserLevel = document.getElementById('laser-level');
+    const laserMeaning = document.getElementById('laser-meaning');
+    const laserChanges = document.getElementById('laser-changes');
+    const laserInterval = document.getElementById('laser-interval');
+    const hallLevel = document.getElementById('hall-level');
+    const hallMeaning = document.getElementById('hall-meaning');
+    const hallChanges = document.getElementById('hall-changes');
+    const downloadLaserBtn = document.getElementById('download-laser');
+    const downloadHallBtn = document.getElementById('download-hall');
+    const gpioUpdated = document.getElementById('gpio-updated');
+    const laserChart = document.getElementById('laser-chart');
+    const hallChart = document.getElementById('hall-chart');
+    const laserEvents = [];
+    const hallEvents = [];
+    const MAX_EVENTS = 60;
+    const GPIO_POLL_MS = 100;
+    let lastLaserChanges = null;
+    let lastHallChanges = null;
+    let lastLaserEventAt = null;
+    let lastLaserLevel = null;
+    let lastHallLevel = null;
+    let gpioIntervalId;
+    let gpioLoading = false;
+
+    function formatLevel(level) {
+      if (level === 1) return 'High';
+      if (level === 0) return 'Low';
+      return '—';
+    }
+
+    function renderGpioState(data) {
+      const laser = data?.laser || {};
+      const hall = data?.hall || {};
+      const laserBlocked = (typeof laser.laser_blocked === 'boolean')
+        ? laser.laser_blocked
+        : !!laser.beam_blocked;
+
+      const nowMs = Date.now();
+
+      laserLevel.textContent = formatLevel(laser.level);
+      laserMeaning.textContent = laserBlocked ? 'Beam broken' : 'Beam clear';
+      if (laserChanges) {
+        laserChanges.textContent = typeof laser.changes === 'number' ? laser.changes : '—';
+      }
+      const laserChangesVal = typeof laser.changes === 'number' ? laser.changes : null;
+      const currLaserLevel = typeof laser.level === 'number' ? laser.level : null;
+      const laserUptimeMs = typeof data?.uptime_ms === 'number' ? data.uptime_ms : null;
+      const laserRawEvents = Array.isArray(laser.events) ? laser.events : [];
+      const laserDropped = typeof laser.events_dropped === 'number' ? laser.events_dropped : 0;
+      let eventsChanged = false;
+      if (laserChangesVal !== null) {
+        if (lastLaserChanges !== null && laserChangesVal < lastLaserChanges) {
+          laserEvents.length = 0; // reset if counter rolled back
+          lastLaserEventAt = null;
+          lastLaserLevel = null;
+          eventsChanged = true;
+        }
+        lastLaserChanges = laserChangesVal;
+      }
+      if (laserRawEvents.length) {
+        laserRawEvents.forEach((rawEvt) => {
+          if (!rawEvt || typeof rawEvt.t_ms !== 'number' || typeof rawEvt.level !== 'number') return;
+          const evtUptimeMs = rawEvt.t_ms;
+          let evtTime = nowMs;
+          if (laserUptimeMs !== null) {
+            const ageMs = laserUptimeMs - evtUptimeMs;
+            evtTime = nowMs - (ageMs > 0 ? ageMs : 0);
+          }
+          const level = rawEvt.level ? 1 : 0;
+          const prev = (lastLaserLevel !== null) ? lastLaserLevel : (level ? 0 : 1);
+          const interval = lastLaserEventAt !== null ? Math.max(0, evtTime - lastLaserEventAt) : null;
+          laserEvents.push({ t: evtTime, level, prev, beam: level === 1, interval });
+          lastLaserEventAt = evtTime;
+          lastLaserLevel = level;
+          if (laserInterval) {
+            laserInterval.textContent = interval !== null ? `${interval} ms` : '—';
+          }
+          eventsChanged = true;
+        });
+        while (laserEvents.length > MAX_EVENTS) {
+          laserEvents.shift();
+        }
+      } else if (currLaserLevel !== null) {
+        lastLaserLevel = currLaserLevel;
+      }
+      if (laserDropped > 0) {
+        console.warn(`Dropped ${laserDropped} laser events in ISR buffer`);
+      }
+      if (currLaserLevel !== null && !laserRawEvents.length) {
+        if (laserInterval && lastLaserEventAt === null) {
+          laserInterval.textContent = '—';
+        }
+      }
+
+      hallLevel.textContent = formatLevel(hall.level);
+      hallMeaning.textContent = hall.lid_open ? 'Lid open' : 'Lid closed';
+      if (hallChanges) {
+        hallChanges.textContent = typeof hall.changes === 'number' ? hall.changes : '—';
+      }
+      const hallChangesVal = typeof hall.changes === 'number' ? hall.changes : null;
+      const currHallLevel = typeof hall.level === 'number' ? hall.level : null;
+      const hallUptimeMs = typeof data?.uptime_ms === 'number' ? data.uptime_ms : null;
+      const hallRawEvents = Array.isArray(hall.events) ? hall.events : [];
+      const hallDropped = typeof hall.events_dropped === 'number' ? hall.events_dropped : 0;
+      if (hallChangesVal !== null) {
+        if (lastHallChanges !== null && hallChangesVal < lastHallChanges) {
+          hallEvents.length = 0;
+          lastHallLevel = null;
+          eventsChanged = true;
+        }
+        lastHallChanges = hallChangesVal;
+      }
+      if (hallRawEvents.length) {
+        hallRawEvents.forEach((rawEvt) => {
+          if (!rawEvt || typeof rawEvt.t_ms !== 'number' || typeof rawEvt.level !== 'number') return;
+          const evtUptimeMs = rawEvt.t_ms;
+          let evtTime = nowMs;
+          if (hallUptimeMs !== null) {
+            const ageMs = hallUptimeMs - evtUptimeMs;
+            evtTime = nowMs - (ageMs > 0 ? ageMs : 0);
+          }
+          const level = rawEvt.level ? 1 : 0;
+          const prevLevel = lastHallLevel !== null ? lastHallLevel : (level ? 0 : 1);
+          hallEvents.push({ t: evtTime, level, prev: prevLevel, open: level !== 0 });
+          lastHallLevel = level;
+          eventsChanged = true;
+        });
+        while (hallEvents.length > MAX_EVENTS) {
+          hallEvents.shift();
+        }
+      } else if (currHallLevel !== null) {
+        lastHallLevel = currHallLevel;
+      }
+      if (hallDropped > 0) {
+        console.warn(`Dropped ${hallDropped} hall events in ISR buffer`);
+      }
+      if (eventsChanged) {
+        renderEventChart(laserChart, laserEvents, '#2563eb');
+        renderEventChart(hallChart, hallEvents, '#f97316');
+      }
+
+      if (gpioUpdated) {
+        const now = new Date();
+        gpioUpdated.textContent = `Last updated: ${now.toLocaleTimeString()}`;
+      }
+    }
+
+    function renderGpioError(msg) {
+      laserLevel.textContent = '—';
+      laserMeaning.textContent = msg || 'Failed to read GPIO';
+      if (laserChanges) laserChanges.textContent = '—';
+      if (laserInterval) laserInterval.textContent = '—';
+      hallLevel.textContent = '—';
+      hallMeaning.textContent = msg || 'Failed to read GPIO';
+      if (hallChanges) hallChanges.textContent = '—';
+      renderEventChart(laserChart, laserEvents, '#2563eb', true);
+      renderEventChart(hallChart, hallEvents, '#f97316', true);
+    }
+
+    function exportCsvFor(source, events) {
+      if (!events.length) {
+        alert('No events to export yet.');
+        return;
+      }
+      const rows = [];
+      rows.push(['source', 'timestamp_ms', 'iso', 'level', 'state', 'interval_ms'].join(','));
+      events.forEach((e) => {
+        const iso = new Date(e.t).toISOString();
+        const stateField = source === 'laser' ? (e.beam ? 'beam_blocked' : 'beam_clear') : (e.open ? 'lid_open' : 'lid_closed');
+        rows.push([
+          source,
+          e.t,
+          iso,
+          typeof e.level === 'number' ? e.level : '',
+          stateField,
+          typeof e.interval === 'number' ? e.interval : ''
+        ].join(','));
+      });
+      const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${source}_events.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    async function fetchGpioState() {
+      if (gpioLoading) return;
+      gpioLoading = true;
+      try {
+        const res = await fetch('/gpio/state', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch GPIO state');
+        const data = await res.json();
+        renderGpioState(data);
+      } catch (e) {
+        renderGpioError(e.message || 'Failed to read GPIO');
+      } finally {
+        gpioLoading = false;
+      }
+    }
+
+    function startGpioAutoRefresh() {
+      if (gpioIntervalId) clearInterval(gpioIntervalId);
+      gpioIntervalId = setInterval(() => {
+        if (!document.hidden) fetchGpioState();
+      }, GPIO_POLL_MS);
+    }
+    function startIpAutoRefresh() {
+      if (ipIntervalId) clearInterval(ipIntervalId);
+      ipIntervalId = setInterval(() => {
+        if (!document.hidden) fetchNetworkIps();
+      }, IP_POLL_MS);
+    }
+
+    function renderEventChart(canvas, events, color, showError) {
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.clientWidth * dpr;
+      const height = canvas.clientHeight * dpr;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      ctx.clearRect(0, 0, width, height);
+
+      const baseTextColor = '#94a3b8';
+      ctx.font = `${12 * dpr}px sans-serif`;
+      ctx.fillStyle = baseTextColor;
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+
+      if (showError) {
+        const msg = 'No data';
+        const textWidth = ctx.measureText(msg).width;
+        ctx.fillText(msg, (width - textWidth) / 2, height / 2);
+        return;
+      }
+
+      if (!events.length) {
+        const msg = 'Waiting for data...';
+        const textWidth = ctx.measureText(msg).width;
+        ctx.fillText(msg, (width - textWidth) / 2, height / 2);
+        return;
+      }
+
+      const padding = 12 * dpr;
+      const labelSpace = 24 * dpr;
+      const leftPad = padding + labelSpace;
+      const rightPad = padding;
+      const plotWidth = width - leftPad - rightPad;
+      const plotHeight = height - padding * 2;
+
+      const visible = events.slice(-MAX_EVENTS);
+      const minTime = visible[0].t;
+      const maxTime = visible[visible.length - 1].t;
+      const endTime = maxTime;
+      const span = Math.max(1, endTime - minTime);
+
+      // Draw grid lines (0 and 1)
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1 * dpr;
+      const labelX = padding;
+      const labelBoxPadX = 4 * dpr;
+      const labelBoxPadY = 2 * dpr;
+      [0, 1].forEach((v) => {
+        const y = padding + plotHeight - v * plotHeight;
+        ctx.beginPath();
+        ctx.moveTo(leftPad, y);
+        ctx.lineTo(width - rightPad, y);
+        ctx.stroke();
+        const text = `${v}`;
+        const metrics = ctx.measureText(text);
+        const ascent = Math.abs(metrics.actualBoundingBoxAscent || 8 * dpr);
+        const descent = Math.abs(metrics.actualBoundingBoxDescent || 2 * dpr);
+        const textHeight = ascent + descent;
+        const boxWidth = metrics.width + labelBoxPadX * 2;
+        const boxHeight = textHeight + labelBoxPadY * 2;
+        const boxX = labelX - labelBoxPadX;
+        const boxY = y - textHeight / 2 - labelBoxPadY;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+        ctx.fillStyle = baseTextColor;
+        ctx.fillText(text, labelX, y);
+      });
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2 * dpr;
+
+      const xAt = (t) => leftPad + ((t - minTime) / span) * plotWidth;
+      const yAt = (level) => padding + plotHeight - (Math.max(0, Math.min(1, level)) * plotHeight);
+
+      const first = visible[0];
+      const startLevel = typeof first.prev === 'number' ? first.prev : (typeof first.level === 'number' ? (first.level ? 0 : 1) : 0);
+      const startX = xAt(first.t);
+
+      ctx.beginPath();
+      ctx.moveTo(startX, yAt(startLevel));
+      if (typeof first.level === 'number') {
+        ctx.lineTo(startX, yAt(first.level)); // initial vertical edge
+      }
+
+      let prevLevel = typeof first.level === 'number' ? first.level : startLevel;
+      let prevX = startX;
+
+      for (let i = 1; i < visible.length; i += 1) {
+        const p = visible[i];
+        if (typeof p.level !== 'number') continue;
+        const x = xAt(p.t);
+        const yPrev = yAt(prevLevel);
+        ctx.lineTo(x, yPrev); // horizontal segment
+        ctx.lineTo(x, yAt(p.level)); // vertical transition
+        prevLevel = p.level;
+        prevX = x;
+      }
+
+      const endX = xAt(endTime);
+      ctx.lineTo(endX, yAt(prevLevel));
+      ctx.stroke();
+
+      // X-axis time labels
+      ctx.fillStyle = '#94a3b8';
+      ctx.textAlign = 'center';
+      const windowSpan = endTime - minTime;
+      const timeLabel = windowSpan < 2000 ? `${windowSpan} ms window` : `${(windowSpan / 1000).toFixed(1)} s window`;
+      ctx.fillText(timeLabel, leftPad + plotWidth / 2, height - padding / 2);
+    }
+
+    const toneSlider = document.getElementById('tone-frequency');
+    const toneValue = document.getElementById('tone-frequency-value');
+    const toneRangeLabel = document.getElementById('tone-range-label');
+    const toneVolume = document.getElementById('tone-volume');
+    const toneVolumeValue = document.getElementById('tone-volume-value');
+    const toneVolumeLabel = document.getElementById('tone-volume-label');
+    const toneToggle = document.getElementById('tone-toggle');
+    const toneSweep = document.getElementById('tone-sweep');
+    const toneStatusDot = document.getElementById('tone-status-dot');
+    const toneStatusText = document.getElementById('tone-status-text');
+    const TONE_POLL_MS = 1000;
+    const TONE_FREQ_DEBOUNCE_MS = 150;
+    const TONE_VOLUME_DEBOUNCE_MS = 150;
+    let toneDisabled = false;
+    let toneBusy = false;
+    let toneIntervalId = null;
+    let toneFreqDebounce = null;
+    let toneFreqUserEditing = false;
+    let toneFreqPending = null;
+    let toneVolumeDebounce = null;
+    let toneVolumeSyncing = false;
+    let toneVolumeUserEditing = false;
+    let toneVolumePending = null;
+    let toneSweepBlockedReason = '';
+
+    function updateToneUI(data) {
+      if (!data) return;
+      const playbackActive = !!data.playback_active;
+      const sweepRunning = !!data.sweep_running;
+      const running = !!data.running;
+      toneDisabled = playbackActive || sweepRunning;
+      if (playbackActive) {
+        toneSweepBlockedReason = 'Disabled while device playback is active';
+      } else if (sweepRunning) {
+        toneSweepBlockedReason = 'Sweep is already running';
+      } else if (running) {
+        toneSweepBlockedReason = 'Sweep is blocked while test tone is playing';
+      } else {
+        toneSweepBlockedReason = '';
+      }
+
+      if (toneDisabled) {
+        // Drop optimistic values while controls are globally locked.
+        toneFreqPending = null;
+        toneVolumePending = null;
+        toneFreqUserEditing = false;
+        toneVolumeUserEditing = false;
+      }
+
+      const min = data.min_hz || Number(toneSlider.min);
+      const max = data.max_hz || Number(toneSlider.max);
+      toneSlider.min = min;
+      toneSlider.max = max;
+      const serverFreq = typeof data.freq_hz === 'number'
+        ? Math.round(data.freq_hz)
+        : Math.round(Number(toneSlider.value) || 440);
+      if (!toneFreqUserEditing) {
+        if (toneFreqPending !== null) {
+          if (Math.abs(serverFreq - toneFreqPending) <= 2) {
+            toneFreqPending = null; // backend caught up; use confirmed value
+            toneSlider.value = serverFreq;
+          }
+          // otherwise keep showing the optimistic pending value
+        } else {
+          toneSlider.value = serverFreq;
+        }
+      }
+      toneValue.textContent = `${Math.round(Number(toneSlider.value) || serverFreq)} Hz`;
+      toneRangeLabel.textContent = `${Math.round(min)}-${Math.round(max)} Hz`;
+      const volumePct = typeof data.volume_pct === 'number' ? Math.max(0, Math.min(100, data.volume_pct)) : Math.round(Number(toneVolume.value) || 25);
+      const serverVolume = Math.round(volumePct);
+      if (!toneVolumeUserEditing) {
+        if (toneVolumePending !== null) {
+          if (Math.abs(serverVolume - toneVolumePending) <= 1) {
+            toneVolumePending = null; // backend caught up; use confirmed value
+            toneVolume.value = serverVolume;
+          }
+          // otherwise keep showing the optimistic pending value
+        } else {
+          toneVolume.value = serverVolume;
+        }
+      }
+      toneVolumeValue.textContent = `${Math.round(toneVolume.value)}%`;
+      toneVolumeLabel.textContent = `0-${Math.round(100)}%`;
+      toneSlider.disabled = toneDisabled;
+      toneVolume.disabled = toneDisabled;
+      toneToggle.textContent = toneDisabled ? 'Disabled' : (running ? 'Stop' : 'Play');
+      toneToggle.disabled = toneDisabled || toneBusy;
+      toneSweep.disabled = !!toneSweepBlockedReason || toneBusy;
+      toneSweep.title = toneSweepBlockedReason;
+      if (playbackActive) {
+        toneStatusDot.dataset.state = 'off';
+        toneStatusText.textContent = 'Disabled while device playback is active';
+      } else if (sweepRunning) {
+        toneStatusDot.dataset.state = 'on';
+        toneStatusText.textContent = 'Sweep running';
+      } else {
+        toneStatusDot.dataset.state = running ? 'on' : 'off';
+        toneStatusText.textContent = running ? 'Playing' : 'Stopped';
+      }
+    }
+
+    async function fetchToneStatus() {
+      try {
+        const res = await fetch('/audio/test', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to load tone status');
+        const data = await res.json();
+        updateToneUI(data);
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    async function sendTone(action, freq, volume) {
+      const params = new URLSearchParams({ action });
+      if (typeof freq === 'number' && !Number.isNaN(freq)) {
+        params.set('freq', Math.round(freq));
+      }
+      if (typeof volume === 'number' && !Number.isNaN(volume)) {
+        params.set('volume', Math.round(volume));
+      }
+      if (params.has('volume')) {
+        toneVolumePending = Number(params.get('volume'));
+      }
+      const res = await fetch(`/audio/test?${params.toString()}`, { method: 'POST' });
+      if (!res.ok) {
+        let reason = '';
+        try { reason = (await res.text()).trim(); } catch (_) {}
+        throw new Error(reason || 'Audio test command failed');
+      }
+      const data = await res.json();
+      updateToneUI(data);
+      return data;
+    }
+
+    function scheduleToneFreqUpdate() {
+      if (toneDisabled) return;
+      if (toneFreqDebounce) clearTimeout(toneFreqDebounce);
+      toneFreqDebounce = setTimeout(async () => {
+        toneFreqDebounce = null;
+        toneFreqPending = Math.round(Number(toneSlider.value));
+        try {
+          await sendTone('update', Number(toneSlider.value));
+        } catch (e) {
+          console.warn(e);
+        }
+      }, TONE_FREQ_DEBOUNCE_MS);
+    }
+
+    function scheduleToneVolumeUpdate() {
+      if (toneDisabled) return;
+      if (toneVolumeDebounce) clearTimeout(toneVolumeDebounce);
+      toneVolumeDebounce = setTimeout(async () => {
+        toneVolumeDebounce = null;
+        toneVolumeSyncing = true;
+        try {
+          await sendTone('update', Number(toneSlider.value), Number(toneVolume.value));
+        } catch (e) {
+          console.warn(e);
+        }
+        toneVolumeSyncing = false;
+      }, TONE_VOLUME_DEBOUNCE_MS);
+    }
+
+    toneSlider.addEventListener('input', () => {
+      toneValue.textContent = `${Math.round(toneSlider.value)} Hz`;
+      toneFreqPending = Math.round(Number(toneSlider.value));
+      scheduleToneFreqUpdate();
+    });
+
+    toneSlider.addEventListener('change', () => {
+      if (toneDisabled || toneBusy) return;
+      toneFreqUserEditing = false;
+      scheduleToneFreqUpdate();
+    });
+    toneSlider.addEventListener('pointerdown', () => {
+      toneFreqUserEditing = true;
+    });
+    toneSlider.addEventListener('pointerup', () => {
+      toneFreqUserEditing = false;
+      scheduleToneFreqUpdate();
+    });
+    toneSlider.addEventListener('pointercancel', () => {
+      toneFreqUserEditing = false;
+    });
+    toneSlider.addEventListener('focus', () => {
+      toneFreqUserEditing = true;
+    });
+    toneSlider.addEventListener('blur', () => {
+      toneFreqUserEditing = false;
+      scheduleToneFreqUpdate();
+    });
+
+    toneVolume.addEventListener('input', () => {
+      toneVolumeValue.textContent = `${Math.round(toneVolume.value)}%`;
+      toneVolumePending = Math.round(Number(toneVolume.value));
+      scheduleToneVolumeUpdate();
+    });
+
+    toneVolume.addEventListener('change', async () => {
+      toneVolumeUserEditing = false;
+      scheduleToneVolumeUpdate();
+    });
+
+    toneVolume.addEventListener('pointerdown', () => {
+      toneVolumeUserEditing = true;
+    });
+    toneVolume.addEventListener('pointerup', () => {
+      toneVolumeUserEditing = false;
+      scheduleToneVolumeUpdate();
+    });
+    toneVolume.addEventListener('pointercancel', () => {
+      toneVolumeUserEditing = false;
+    });
+
+    toneToggle.addEventListener('click', async () => {
+      if (toneDisabled || toneBusy) {
+        if (toneDisabled) {
+          alert('Audio test controls are disabled while playback or sweep is active.');
+        }
+        return;
+      }
+      toneBusy = true;
+      toneToggle.disabled = true;
+      toneSweep.disabled = true;
+      try {
+        const action = toneStatusDot.dataset.state === 'on' ? 'stop' : 'start';
+        await sendTone(action, Number(toneSlider.value), Number(toneVolume.value));
+      } catch (e) {
+        alert(e.message || 'Audio test failed');
+      }
+      toneBusy = false;
+      toneToggle.disabled = toneDisabled;
+      toneSweep.disabled = !!toneSweepBlockedReason;
+      toneSweep.title = toneSweepBlockedReason;
+    });
+
+    toneSweep.addEventListener('click', async () => {
+      if (toneDisabled || toneBusy || toneSweepBlockedReason) {
+        if (toneSweepBlockedReason) {
+          alert(toneSweepBlockedReason);
+        } else if (toneDisabled) {
+          alert('Audio test controls are disabled while playback or sweep is active.');
+        }
+        return;
+      }
+      toneBusy = true;
+      toneToggle.disabled = true;
+      toneSweep.disabled = true;
+      try {
+        await sendTone('sweep', Number(toneSlider.value), Number(toneVolume.value));
+      } catch (e) {
+        alert(e.message || 'Audio sweep failed');
+      }
+      toneBusy = false;
+      toneToggle.disabled = toneDisabled;
+      toneSweep.disabled = !!toneSweepBlockedReason;
+      toneSweep.title = toneSweepBlockedReason;
+    });
+
+    if (downloadLaserBtn) downloadLaserBtn.addEventListener('click', () => exportCsvFor('laser', laserEvents));
+    if (downloadHallBtn) downloadHallBtn.addEventListener('click', () => exportCsvFor('hall', hallEvents));
+
+    document.getElementById('download-log').addEventListener('click', downloadLog);
+    document.getElementById('restart-device').addEventListener('click', async () => {
+      if (!confirm('Restart the device?')) return;
+      try {
+        const res = await fetch('/restart', { method: 'POST' });
+        if (!res.ok) throw new Error('Restart failed');
+        alert('Device restarting...');
+        setTimeout(() => location.replace('/'), 800);
+      } catch (e) {
+        alert(e.message || 'Restart failed');
+      }
+    });
+    document.getElementById('format-storage').addEventListener('click', async () => {
+      if (!confirm('Format storage? This will delete all files.')) return;
+      try {
+        const res = await fetch('/format', { method: 'POST' });
+        if (!res.ok) throw new Error('Format failed');
+        alert('Storage formatted');
+        location.reload();
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+    if (networkSaveBtn) {
+      networkSaveBtn.addEventListener('click', () => {
+        saveNetworkConfig();
+      });
+    }
+    bindMaskedNetworkPasswordInput(apPasswordInput, apPasswordState);
+    bindMaskedNetworkPasswordInput(staPasswordInput, staPasswordState);
+    if (securitySaveBtn) {
+      securitySaveBtn.addEventListener('click', () => {
+        saveSecurityPassword();
+      });
+    }
+    if (securityRemoveBtn) {
+      securityRemoveBtn.addEventListener('click', () => {
+        removeSecurityPassword();
+      });
+    }
+    function startLogAutoRefresh() {
+      if (logIntervalId) clearInterval(logIntervalId);
+      logIntervalId = setInterval(() => {
+        if (!document.hidden) fetchLog();
+      }, LOG_POLL_MS);
+    }
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        fetchLog();
+        fetchGpioState();
+        fetchNetworkIps();
+        fetchNetworkConfig();
+        fetchSecurityConfig();
+        fetchToneStatus();
+      }
+    });
+    function startToneAutoRefresh() {
+      if (toneIntervalId) clearInterval(toneIntervalId);
+      toneIntervalId = setInterval(() => {
+        if (!document.hidden) fetchToneStatus();
+      }, TONE_POLL_MS);
+    }
+    renderEventChart(laserChart, laserEvents, '#2563eb');
+    renderEventChart(hallChart, hallEvents, '#f97316');
+    fetchLog();
+    fetchGpioState();
+    fetchNetworkIps();
+    fetchNetworkConfig();
+    fetchSecurityConfig();
+    startLogAutoRefresh();
+    startGpioAutoRefresh();
+    startIpAutoRefresh();
+    fetchToneStatus();
+    startToneAutoRefresh();
+  </script>
+</body>
+</html>

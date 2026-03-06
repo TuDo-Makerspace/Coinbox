@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>File Server</title>
+  <title>Coinbox Sounds</title>
+  <link rel="stylesheet" href="/glyphs.css">
   <style>
     :root {
       --card-bg: #fff;
@@ -17,8 +18,10 @@
       background: #f5f7fb;
       color: var(--text);
       line-height: 1.5;
+      position: relative;
+      overflow-x: hidden;
+      isolation: isolate;
     }
-
     .content {
       padding: clamp(1rem, 2vw + 0.5rem, 2.5rem);
       max-width: 1100px;
@@ -46,15 +49,19 @@
       text-align: center;
       color: #1f2937;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s, transform 0.15s;
       order: 2;
       min-height: 120px;
       font-size: clamp(1rem, 1vw + 0.35rem, 1.15rem);
       display: grid;
       place-items: center;
       box-shadow: 0 10px 30px rgba(17, 24, 39, 0.05);
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
     }
-    .dropzone:hover { transform: translateY(-1px); }
+    .dropzone:hover {
+      border-color: #64748b;
+      background: #f8fafc;
+      box-shadow: 0 12px 34px rgba(17, 24, 39, 0.08);
+    }
     .dropzone.dragover {
       border-color: #2563eb;
       background: #eef2ff;
@@ -70,12 +77,26 @@
       border: 1px solid var(--border);
       box-shadow: 0 6px 20px rgba(0,0,0,0.05);
     }
+    .file-list:has(.file-empty) {
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      overflow: visible;
+      box-shadow: none;
+    }
 
     .file-item {
       padding: 1em 1.1em;
       border-bottom: 1px solid #e0e0e0;
     }
     .file-item:last-child { border-bottom: none; }
+    .file-empty {
+      padding: 1em 0.15em 0.1em;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.98rem;
+      background: transparent;
+    }
 
     .mobile-upload {
       display: none;
@@ -91,7 +112,6 @@
       box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
       min-width: 48px;
       min-height: 48px;
-      display: none;
       align-items: center;
       justify-content: center;
     }
@@ -174,6 +194,33 @@
       transition: background 0.15s, color 0.15s, transform 0.1s;
     }
     .play-btn svg { width: 18px; height: 18px; }
+    .play-btn:disabled {
+      background: #e2e8f0;
+      color: #94a3b8;
+      border-color: #cbd5e1;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+    .play-btn:disabled:hover,
+    .play-btn:disabled:active {
+      background: #e2e8f0;
+      transform: none;
+    }
+
+    .playback-lock-note {
+      display: block;
+      margin-top: 0.25rem;
+      margin-bottom: 0.25rem;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
+      color: #475569;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .playback-lock-note[hidden] { display: none !important; }
 
     .chev {
       width: 38px;
@@ -228,6 +275,30 @@
       grid-template-columns: auto 1fr auto;
       gap: 0.45em;
       align-items: center;
+    }
+
+    .range-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+
+    .range-wrap input[type="range"] {
+      width: 100%;
+    }
+
+    .volume-slider .volume-overdrive-marker {
+      position: absolute;
+      left: var(--volume-overdrive-marker-left, 50%);
+      top: 50%;
+      width: 1px;
+      height: 14px;
+      transform: translate(-50%, -50%);
+      background: #94a3b8;
+      border-radius: 999px;
+      opacity: 0.8;
+      pointer-events: none;
     }
 
     .nudge {
@@ -392,25 +463,152 @@
     }
     .switch input:checked + .slider { background: #81c784; }
     .switch input:checked + .slider:before { transform: translateX(20px); }
+
+    .upload-overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background: rgba(15, 23, 42, 0.42);
+      z-index: 2000;
+    }
+    .upload-overlay.hidden {
+      display: none;
+    }
+    .upload-card {
+      min-width: min(420px, 92vw);
+      max-width: 92vw;
+      background: #ffffff;
+      border: 1px solid #dbe4ee;
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      box-shadow: 0 16px 36px rgba(15, 23, 42, 0.2);
+    }
+    .upload-spinner {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      border: 2px solid #bfdbfe;
+      border-top-color: #2563eb;
+      animation: upload-spin 0.8s linear infinite;
+      flex: 0 0 auto;
+    }
+    .upload-text {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #0f172a;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    @keyframes upload-spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 
+  <script defer src="/glyphs.js"></script>
   <script defer>
     document.addEventListener('DOMContentLoaded', () => {
+      if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
+        window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
+      }
+
       const dropzone = document.getElementById('dropzone');
       const fileInput = document.getElementById('newfile');
-      const basePath = (window.CURRENT_PATH || '/file-server/').trim();
+      const basePath = (window.CURRENT_PATH || '/sounds/').trim();
       const safeBase = basePath.endsWith('/') ? basePath : basePath + '/';
-      const allowedAudioExts = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'];
+      const FILE_PROBABILITY_MAX = 100;
+      const FILE_VOLUME_MAX = 125;
+      const markerPct = FILE_VOLUME_MAX > 0 ? (100 / FILE_VOLUME_MAX) * 100 : 50;
+      document.documentElement.style.setProperty('--volume-overdrive-marker-left', `${markerPct}%`);
+
+      const allowedAudioExts = ['.mp3'];
       const allowedAudioText = allowedAudioExts.join(', ');
       let playingRowId = null;
+      let uploadInFlight = false;
+      let playbackBlockedReason = '';
+      const playbackLockNote = document.getElementById('playback-lock-note');
+
+      const uploadOverlay = (() => {
+        const overlay = document.createElement('div');
+        overlay.id = 'upload-overlay';
+        overlay.className = 'upload-overlay glyph-overlay-exempt hidden';
+        overlay.setAttribute('aria-hidden', 'true');
+        overlay.innerHTML = `
+          <div class="upload-card" role="status" aria-live="polite" aria-atomic="true">
+            <span class="upload-spinner" aria-hidden="true"></span>
+            <span class="upload-text" data-k="upload-message">Uploading...</span>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        return overlay;
+      })();
+
+      function setUploadOverlay(active, message) {
+        const msg = uploadOverlay.querySelector('[data-k="upload-message"]');
+        if (msg) {
+          msg.textContent = message || 'Uploading...';
+        }
+        uploadOverlay.classList.toggle('hidden', !active);
+        uploadOverlay.setAttribute('aria-hidden', active ? 'false' : 'true');
+      }
 
       function hasAllowedAudioExt(name) {
         const lower = (name || '').toLowerCase();
         return allowedAudioExts.some((ext) => lower.endsWith(ext));
       }
 
+      function splitNameExt(name) {
+        const text = String(name || '').trim();
+        const dot = text.lastIndexOf('.');
+        if (dot <= 0 || dot === text.length - 1) {
+          return { base: text, ext: '' };
+        }
+        return { base: text.slice(0, dot), ext: text.slice(dot) };
+      }
+
       function markPlaying(row) {
         playingRowId = row ? row.id : null;
+      }
+
+      function setPlaybackBlockedReason(reason) {
+        playbackBlockedReason = String(reason || '').trim();
+        const blocked = playbackBlockedReason.length > 0;
+        const hasFiles = document.querySelector('.file-item') !== null;
+        const showLockNote = blocked && hasFiles;
+        document.querySelectorAll('button[data-k="play"]').forEach((btn) => {
+          btn.disabled = blocked;
+          btn.title = blocked ? playbackBlockedReason : 'Play';
+          btn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+        });
+        if (playbackLockNote) {
+          playbackLockNote.hidden = !showLockNote;
+          playbackLockNote.textContent = showLockNote
+            ? `Playback unavailable: ${playbackBlockedReason}.`
+            : '';
+        }
+      }
+
+      async function refreshPlaybackGateState() {
+        try {
+          const res = await fetch('/audio/test', { cache: 'no-store' });
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          const data = await res.json();
+          let reason = '';
+          if (data && data.sweep_running) {
+            reason = 'Sweep is currently running';
+          } else if (data && data.running) {
+            reason = 'Audio test tone is currently running';
+          }
+          setPlaybackBlockedReason(reason);
+        } catch (e) {
+          console.warn('Failed to refresh audio playback gate state', e);
+        }
       }
 
       async function stopRemotePlayback() {
@@ -425,6 +623,10 @@
 
       async function startPlayback(row) {
         if (!row) return;
+        if (playbackBlockedReason) {
+          alert(`Playback unavailable: ${playbackBlockedReason}`);
+          return;
+        }
         const name = row.dataset.fileName;
         if (!name) return;
         if (!name.toLowerCase().endsWith('.mp3')) {
@@ -452,20 +654,23 @@
 
       async function uploadFile(file) {
         if (!file) return;
+        if (uploadInFlight) return;
         if (!hasAllowedAudioExt(file.name || '')) {
           alert(`Only audio files are allowed (${allowedAudioText})`);
           return;
         }
+
+        // server expects raw filename (not encodeURIComponent) because it treats URI as-is;
+        // keep it consistent with how links are rendered by the server.
         const uploadPath = safeBase + file.name;
+        uploadInFlight = true;
+        setUploadOverlay(true, `Uploading ${file.name}...`);
+
         try {
           const res = await fetch(uploadPath, { method: 'POST', body: file });
           if (!res.ok) {
             let reason = '';
-            try {
-              reason = (await res.text()).trim();
-            } catch (_) {
-              reason = '';
-            }
+            try { reason = (await res.text()).trim(); } catch (_) { reason = ''; }
             const status = res.status ? `${res.status} ` : '';
             const statusText = res.statusText || '';
             const message = reason || (statusText ? `${status}${statusText}` : `${status}Upload failed`);
@@ -474,41 +679,37 @@
           window.location.reload();
         } catch (err) {
           alert(err.message || 'Upload failed');
+        } finally {
+          uploadInFlight = false;
+          setUploadOverlay(false);
+          if (fileInput) {
+            fileInput.value = '';
+          }
         }
       }
 
-      dropzone.addEventListener('click', () => fileInput.click());
-      dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('dragover');
-      });
-      dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
-      dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dragover');
-        const file = e.dataTransfer.files && e.dataTransfer.files[0];
-        uploadFile(file);
-      });
+      if (dropzone && fileInput) {
+        dropzone.addEventListener('click', () => fileInput.click());
+        dropzone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          dropzone.classList.add('dragover');
+        });
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+        dropzone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dropzone.classList.remove('dragover');
+          const file = e.dataTransfer.files && e.dataTransfer.files[0];
+          uploadFile(file);
+        });
+      }
 
-      // decode percent-encoded names for display only
-      document.querySelectorAll('.file-name').forEach((link) => {
-        const raw = link.textContent || '';
-        try {
-          const decoded = decodeURIComponent(raw);
-          link.textContent = decoded;
-        } catch (_) {
-          // ignore bad encodings
-        }
-      });
-
-      fileInput.addEventListener('change', () => {
+      fileInput?.addEventListener('change', () => {
         const file = fileInput.files && fileInput.files[0];
         uploadFile(file);
       });
+
       const mobileUpload = document.getElementById('mobile-upload');
-      if (mobileUpload) {
-        mobileUpload.addEventListener('click', () => fileInput.click());
-      }
+      mobileUpload?.addEventListener('click', () => fileInput?.click());
 
       // -------- dropdown logic --------
       function closeAll(exceptId) {
@@ -527,9 +728,8 @@
       }
 
       async function persistMeta(fileUri, meta) {
-        // fileUri is like "/file-server/dir/file.bin"
-        // meta endpoint mirrors it: "/file-meta/dir/file.bin"
-        const metaUri = fileUri.replace(/^\/file-server\//, '/file-meta/');
+        // fileUri is like "/sounds/foo.mp3"
+        const metaUri = '/sounds/file-meta' + fileUri.slice('/sounds'.length);
         const res = await fetch(metaUri, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -538,7 +738,6 @@
         if (!res.ok) throw new Error('Meta update failed: ' + res.status);
       }
 
-      // small debounce per row
       const debounceTimers = new Map();
       function schedulePersist(rowId, fileUri, getMetaFn) {
         const key = rowId;
@@ -561,20 +760,21 @@
           closeAll(rowId);
           if (!isOpen) {
             btn.dataset.open = "1";
-            details.classList.add('open');
+            details?.classList.add('open');
             if (row) {
               row.classList.add('open');
               row.classList.add('editing');
               const nameInput = row.querySelector('input[data-k="name-edit"]');
               if (nameInput) {
-                nameInput.value = (row.querySelector('.file-name')?.textContent || '').trim();
+                const currentName = (row.querySelector('.file-name')?.textContent || '').trim();
+                nameInput.value = splitNameExt(currentName).base || currentName;
                 nameInput.focus();
                 nameInput.select();
               }
             }
           } else {
             btn.dataset.open = "0";
-            details.classList.remove('open');
+            details?.classList.remove('open');
             if (row) {
               row.classList.remove('open');
               row.classList.remove('editing');
@@ -595,7 +795,7 @@
         const row = document.getElementById(rowId);
         if (!row) return;
 
-        let fileUri = row.dataset.fileUri; // full /file-server/... uri
+        let fileUri = row.dataset.fileUri; // "/sounds/<name>"
         const toggle = row.querySelector('input[data-k="enabled-toggle"]');
         const prob = details.querySelector('input[data-k="probability"]');
         const probNum = details.querySelector('input[data-k="probability-num"]');
@@ -608,18 +808,22 @@
         const deleteBtn = details.querySelector('button.delete-btn');
         const nameInput = row.querySelector('input[data-k="name-edit"]');
         const nameLink = row.querySelector('.file-name');
+        let nameExt = splitNameExt(row.dataset.fileName || nameLink?.textContent || '').ext || '.mp3';
+        let renameInFlight = false;
+        let pendingRenameRaw = null;
 
-        const clamp = (v) => Math.min(100, Math.max(0, parseInt(v || 0, 10)));
+        const clampProbability = (v) => Math.min(FILE_PROBABILITY_MAX, Math.max(0, parseInt(v || 0, 10)));
+        const clampVolume = (v) => Math.min(FILE_VOLUME_MAX, Math.max(0, parseInt(v || 0, 10)));
 
         function setProb(val) {
-          const v = clamp(val);
-          prob.value = v;
-          probNum.value = v;
+          const v = clampProbability(val);
+          if (prob) prob.value = v;
+          if (probNum) probNum.value = v;
         }
         function setVol(val) {
-          const v = clamp(val);
-          vol.value = v;
-          volNum.value = v;
+          const v = clampVolume(val);
+          if (vol) vol.value = v;
+          if (volNum) volNum.value = v;
         }
 
         // init from server-rendered dataset
@@ -629,36 +833,110 @@
 
         function currentMeta() {
           return {
-            probability: clamp(prob.value),
-            volume: clamp(vol.value),
+            probability: clampProbability(prob?.value),
+            volume: clampVolume(vol?.value),
             enabled: !!(toggle && toggle.checked)
           };
         }
 
-        function handleChange(kind, setter, delta) {
+        function handleSliderOrNudgeChange(kind, setter, delta) {
           return () => {
-            const cur = kind === 'prob' ? clamp(prob.value) : clamp(vol.value);
+            const cur = kind === 'prob'
+              ? clampProbability(prob?.value)
+              : clampVolume(vol?.value);
             const next = delta ? cur + delta : cur;
             setter(next);
             schedulePersist(rowId, fileUri, currentMeta);
           };
         }
 
-        prob.addEventListener('input', handleChange('prob', setProb));
-        probNum.addEventListener('input', handleChange('prob', setProb));
-        probMinus.addEventListener('click', handleChange('prob', setProb, -1));
-        probPlus.addEventListener('click', handleChange('prob', setProb, 1));
-
-        vol.addEventListener('input', handleChange('vol', setVol));
-        volNum.addEventListener('input', handleChange('vol', setVol));
-        volMinus.addEventListener('click', handleChange('vol', setVol, -1));
-        volPlus.addEventListener('click', handleChange('vol', setVol, 1));
-
-        if (toggle) {
-          toggle.addEventListener('change', () => {
-            schedulePersist(rowId, fileUri, currentMeta);
-          });
+        function commitProbFromNumber() {
+          if (!probNum) return;
+          const raw = String(probNum.value ?? '').trim();
+          if (raw === '') {
+            // Revert blank/invalid edit to current slider value; no persist.
+            setProb(prob?.value);
+            return;
+          }
+          const parsed = Number.parseInt(raw, 10);
+          if (Number.isNaN(parsed)) {
+            setProb(prob?.value);
+            return;
+          }
+          const clamped = clampProbability(parsed);
+          setProb(clamped);
+          // Commit on blur/change/enter even if slider was already mirrored during typing.
+          schedulePersist(rowId, fileUri, currentMeta);
         }
+
+        function commitVolFromNumber() {
+          if (!volNum) return;
+          const raw = String(volNum.value ?? '').trim();
+          if (raw === '') {
+            // Revert blank/invalid edit to current slider value; no persist.
+            setVol(vol?.value);
+            return;
+          }
+          const parsed = Number.parseInt(raw, 10);
+          if (Number.isNaN(parsed)) {
+            setVol(vol?.value);
+            return;
+          }
+          const clamped = clampVolume(parsed);
+          setVol(clamped);
+          // Commit on blur/change/enter even if slider was already mirrored during typing.
+          schedulePersist(rowId, fileUri, currentMeta);
+        }
+
+        prob?.addEventListener('input', handleSliderOrNudgeChange('prob', setProb));
+        probMinus?.addEventListener('click', handleSliderOrNudgeChange('prob', setProb, -1));
+        probPlus?.addEventListener('click', handleSliderOrNudgeChange('prob', setProb, 1));
+
+        vol?.addEventListener('input', handleSliderOrNudgeChange('vol', setVol));
+        volMinus?.addEventListener('click', handleSliderOrNudgeChange('vol', setVol, -1));
+        volPlus?.addEventListener('click', handleSliderOrNudgeChange('vol', setVol, 1));
+
+        probNum?.addEventListener('input', () => {
+          const raw = String(probNum.value ?? '').trim();
+          if (raw === '') return;
+          const parsed = Number.parseInt(raw, 10);
+          if (Number.isNaN(parsed)) return;
+          if (parsed >= 0 && parsed <= FILE_PROBABILITY_MAX && prob) {
+            prob.value = parsed;
+          }
+        });
+        probNum?.addEventListener('blur', commitProbFromNumber);
+        probNum?.addEventListener('change', commitProbFromNumber);
+        probNum?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commitProbFromNumber();
+            probNum.blur();
+          }
+        });
+
+        volNum?.addEventListener('input', () => {
+          const raw = String(volNum.value ?? '').trim();
+          if (raw === '') return;
+          const parsed = Number.parseInt(raw, 10);
+          if (Number.isNaN(parsed)) return;
+          if (parsed >= 0 && parsed <= FILE_VOLUME_MAX && vol) {
+            vol.value = parsed;
+          }
+        });
+        volNum?.addEventListener('blur', commitVolFromNumber);
+        volNum?.addEventListener('change', commitVolFromNumber);
+        volNum?.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commitVolFromNumber();
+            volNum.blur();
+          }
+        });
+
+        toggle?.addEventListener('change', () => {
+          schedulePersist(rowId, fileUri, currentMeta);
+        });
 
         if (deleteBtn) {
           deleteBtn.addEventListener('click', async () => {
@@ -677,12 +955,11 @@
         }
 
         function updateFileUri(newName) {
-          const lastSlash = fileUri.lastIndexOf('/');
-          const base = lastSlash >= 0 ? fileUri.slice(0, lastSlash + 1) : '/file-server/';
-          const encoded = encodeURIComponent(newName);
-          fileUri = base + encoded;
+          // keep URLs consistent with server-side behavior: no encodeURIComponent here
+          fileUri = safeBase + newName;
           row.dataset.fileUri = fileUri;
           row.dataset.fileName = newName;
+          nameExt = splitNameExt(newName).ext || nameExt;
           if (nameLink) {
             nameLink.href = fileUri;
             nameLink.textContent = newName;
@@ -690,26 +967,60 @@
           }
         }
 
-        async function renameFile(newName) {
-          const trimmed = (newName || '').trim();
-          if (!trimmed) return;
-          if (trimmed === (nameLink?.textContent || '').trim()) return;
-          if (trimmed.includes('/') || trimmed.includes('\\')) {
+        async function renameFile(newBaseName) {
+          const raw = (newBaseName || '').trim();
+          if (!raw) return;
+
+          const baseOnly = raw;
+          if (!baseOnly) return;
+
+          const targetName = baseOnly + nameExt;
+          const currentName = String(row.dataset.fileName || nameLink?.textContent || '').trim();
+          if (targetName === currentName) return;
+          if (targetName.includes('/') || targetName.includes('\\')) {
             alert('File name cannot contain slashes.');
             return;
           }
+          if (!hasAllowedAudioExt(targetName)) {
+            alert(`Only audio files are allowed (${allowedAudioText})`);
+            return;
+          }
+
+          if (renameInFlight) {
+            pendingRenameRaw = raw;
+            return;
+          }
+
+          renameInFlight = true;
+          if (nameInput) {
+            nameInput.disabled = true;
+          }
           try {
-            const res = await fetch(fileUri + '?rename=' + encodeURIComponent(trimmed), { method: 'GET' });
+            const res = await fetch(fileUri + '?rename=' + encodeURIComponent(targetName), { method: 'GET' });
             if (!res.ok) throw new Error('Rename failed: ' + res.status);
-            updateFileUri(trimmed);
+            updateFileUri(targetName);
+            if (nameInput) {
+              nameInput.value = baseOnly;
+            }
           } catch (err) {
             alert(err.message || String(err));
+          } finally {
+            renameInFlight = false;
+            if (nameInput) {
+              nameInput.disabled = false;
+            }
+            const queued = pendingRenameRaw;
+            pendingRenameRaw = null;
+            if (queued && queued !== raw) {
+              renameFile(queued);
+            }
           }
         }
 
         if (nameInput) {
           nameInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
+              if (e.repeat) return;
               e.preventDefault();
               renameFile(nameInput.value);
             } else if (e.key === 'Escape') {
@@ -721,6 +1032,9 @@
           });
         }
       });
+
+      refreshPlaybackGateState();
+      window.setInterval(refreshPlaybackGateState, 1000);
     });
   </script>
 </head>
@@ -731,17 +1045,20 @@
 
   <div class="content">
     <div class="title-row">
-      <h1>File Server</h1>
+      <h1>Coinbox Sounds</h1>
       <button id="mobile-upload" class="mobile-upload" aria-label="Upload a file">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 4a1 1 0 0 1 .7.3l3.5 3.6a.7.7 0 0 1-.5 1.2H13v6.9a1 1 0 0 1-2 0V9.1H8.3a.7.7 0 0 1-.5-1.2l3.5-3.6A1 1 0 0 1 12 4Zm-7 12.5a1 1 0 0 1 1 1v1h12v-1a1 1 0 1 1 2 0v1.5c0 .83-.67 1.5-1.5 1.5h-13c-.83 0-1.5-.67-1.5-1.5v-1.5a1 1 0 0 1 1-1Z"/>
         </svg>
       </button>
     </div>
+
     <div id="dropzone" class="dropzone">
-      Drag & drop an audio file here or click to upload
+      Drag &amp; drop an audio file here or click to upload
     </div>
-    <input id="newfile" type="file" hidden accept="audio/*">
+
+    <input id="newfile" type="file" hidden accept=".mp3,audio/mpeg">
+    <p id="playback-lock-note" class="playback-lock-note" hidden></p>
 
     <div id="file-list" class="file-list">
-      <!-- rows injected by server (ws_server.c) -->
+      <!-- rows injected by server (mainapp.c) -->
