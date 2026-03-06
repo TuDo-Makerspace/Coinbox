@@ -19,6 +19,7 @@
 #include "audio.h"
 #include "gpio.h"
 #include "board.h"
+#include "mdns_service.h"
 #include "network.h"
 #include "sdkconfig.h"
 
@@ -1591,6 +1592,14 @@ static void restart_timer_cb(TimerHandle_t timer)
 
 static void schedule_restart_timer(const char *timer_name)
 {
+    esp_err_t mdns_err = mdns_stop_service();
+    if (mdns_err != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "Failed to stop mDNS before %s: %s",
+                 timer_name ? timer_name : "restart",
+                 esp_err_to_name(mdns_err));
+    }
+
     TimerHandle_t timer = xTimerCreate(timer_name, pdMS_TO_TICKS(500), pdFALSE, NULL, restart_timer_cb);
     if (!timer) {
         ESP_LOGE(TAG, "Failed to create %s timer; restarting immediately", timer_name ? timer_name : "restart");
