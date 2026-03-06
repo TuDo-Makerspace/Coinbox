@@ -138,6 +138,17 @@ def _audio_playback_stop(base_url: str, timeout_s: float = 3.0):
     )
 
 
+def _set_sound_meta(base_url: str, filename: str, payload: dict):
+    return _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/sounds/file-meta/{filename}",
+        timeout_s=4.0,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+
+
 def _get_boot_config(base_url: str) -> dict:
     status, _, body = _http_get(base_url, "/boot/config")
     assert status == 200, f"GET /boot/config failed. status={status}, body={body}"
@@ -481,6 +492,71 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
 
     muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=3.0, poll_s=0.1)
     assert muted, f"DAC/AMP did not return to muted after playback.\nLog tail:\n{_tail_log(log_path)}"
+
+
+# Test: A track with volume 0% keeps DAC + AMP muted for the full playback duration.
+# 1. Start from main app mode and wait for any startup sound playback to finish.
+# 2. Upload the `test6165ms.mp3` fixture and set its track volume to `0`.
+# 3. Start playback and assert playback becomes active.
+# 4. Poll mute GPIOs throughout playback and assert they remain muted the whole time.
+# 5. Assert playback lasts for a meaningful duration.
+def test_playback_with_zero_track_volume_keeps_outputs_muted(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_until(
+        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert idle, f"Startup playback did not clear before zero-volume test.\nLog tail:\n{_tail_log(log_path)}"
+
+    filename = f"{_unique_name('zero-volume-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    status, _, body = _set_sound_meta(base_url, filename, {"volume": 0})
+    assert status == 200, f"Failed to set track volume to 0. body={body}"
+    assert body == "OK"
+
+    t_start = time.monotonic()
+    status, _, body = _audio_playback_start(base_url, filename)
+    assert status == 200, f"Failed to start zero-volume playback. body={body}"
+
+    playing = _wait_until(
+        lambda: bool(_audio_test_state(base_url).get("playback_active")),
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert playing, f"Zero-volume playback did not become active.\nLog tail:\n{_tail_log(log_path)}"
+
+    initially_muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=1.0, poll_s=0.05)
+    assert initially_muted, f"DAC/AMP did not stay muted at zero track volume.\nLog tail:\n{_tail_log(log_path)}"
+
+    playback_done = False
+    deadline = time.monotonic() + 12.0
+    while time.monotonic() < deadline:
+        assert _outputs_are_muted(base_url), (
+            "DAC/AMP unexpectedly unmuted during zero-volume playback.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+        if not bool(_audio_test_state(base_url).get("playback_active")):
+            playback_done = True
+            break
+        time.sleep(0.1)
+
+    if not playback_done:
+        status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
+        assert status == 200, f"Failed to stop stalled zero-volume playback. body={body}"
+        playback_done = _wait_until(
+            lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert playback_done, f"Zero-volume playback did not clear after stop fallback.\nLog tail:\n{_tail_log(log_path)}"
+
+    elapsed_s = time.monotonic() - t_start
+    assert elapsed_s >= 5.0, f"Zero-volume playback ended too quickly: {elapsed_s:.2f}s"
+    assert _outputs_are_muted(base_url), f"DAC/AMP should remain muted after zero-volume playback.\nLog tail:\n{_tail_log(log_path)}"
 
 
 # Test: Rapid repeated playback-start requests keep the control plane responsive.

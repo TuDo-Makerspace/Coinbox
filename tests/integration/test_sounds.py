@@ -13,9 +13,12 @@ try:
         _http_get,
         _http_get_bytes,
         _http_request,
+        _log_contains_any_since,
         _restart_into_bootstrap,
         _skip_to_main_app,
+        _tail_log,
         _test_mp3_bytes,
+        _wait_until,
         qemu_bootstrap_instance,
     )
 except ModuleNotFoundError:
@@ -24,9 +27,12 @@ except ModuleNotFoundError:
         _http_get,
         _http_get_bytes,
         _http_request,
+        _log_contains_any_since,
         _restart_into_bootstrap,
         _skip_to_main_app,
+        _tail_log,
         _test_mp3_bytes,
+        _wait_until,
         qemu_bootstrap_instance,
     )
 
@@ -164,6 +170,38 @@ def _set_sound_meta(base_url: str, filename: str, payload: dict):
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
+
+
+def _set_test_gpio_level(base_url: str, name: str, level: int):
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/test/gpio/{name}?level={level}",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 200, (
+        f"Failed to set /test/gpio/{name}?level={level}. "
+        f"status={status}, body={body}"
+    )
+    payload = json.loads(body)
+    assert payload.get("level") == level
+
+
+def _trigger_laser_playback(base_url: str):
+    _set_test_gpio_level(base_url, "laser", 0)
+    _set_test_gpio_level(base_url, "laser", 1)
+
+
+def _stop_audio_playback(base_url: str):
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/audio/playback?action=stop",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 200, f"Failed to stop playback. status={status}, body={body}"
 
 
 def _sized_mp3_payload(target_size: int) -> bytes:
@@ -728,6 +766,148 @@ def test_reject_invalid_sound_volume(qemu_mainapp_instance):
 
     after = _get_sound_meta(base_url, filename)
     assert after == before
+
+
+# Test: Laser playback honors deterministic weight updates.
+# 1. Start from main app mode, format storage, and upload two extra MP3 files.
+# 2. Set default + second extra file to weight `0`, and first extra file to weight `100`.
+# 3. Trigger laser playback and assert only the weighted file is selected.
+# 4. Flip the weights so the second extra file is `100` and repeat.
+def test_laser_playback_honors_weighted_enabled_sound_selection(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=4.0,
+        data=b"",
+    )
+    assert status == 200, f"/format failed before weighted playback test. status={status}, body={body}"
+
+    weighted_a = f"{_unique_name('weight-a')}.mp3"
+    weighted_b = f"{_unique_name('weight-b')}.mp3"
+    upload_status, _, upload_body = _upload_sound(base_url, weighted_a, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for weighted file A. body={upload_body}"
+    upload_status, _, upload_body = _upload_sound(base_url, weighted_b, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for weighted file B. body={upload_body}"
+
+    scenarios = [
+        (weighted_a, weighted_b),
+        (weighted_b, weighted_a),
+    ]
+    for expected_name, muted_name in scenarios:
+        status, _, body = _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"probability": 0, "enabled": True})
+        assert status == 200, f"Failed to zero default sound weight. body={body}"
+        status, _, body = _set_sound_meta(base_url, expected_name, {"probability": 100, "enabled": True})
+        assert status == 200, f"Failed to set winner weight for {expected_name}. body={body}"
+        status, _, body = _set_sound_meta(base_url, muted_name, {"probability": 0, "enabled": True})
+        assert status == 200, f"Failed to zero loser weight for {muted_name}. body={body}"
+
+        log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+        _trigger_laser_playback(base_url)
+
+        picked_expected = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                [f"Coin detected! Starting playback of {expected_name} (candidates=1, total_weight=100)"],
+            ),
+            timeout_s=5.0,
+            poll_s=0.2,
+        )
+        assert picked_expected, (
+            f"Laser playback did not deterministically choose {expected_name}.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        played_expected = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                [f"Playback started for file: {expected_name}"],
+            ),
+            timeout_s=5.0,
+            poll_s=0.2,
+        )
+        assert played_expected, (
+            f"Playback path did not start for the weighted file {expected_name}.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        assert not _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Coin detected! Starting playback of {muted_name}",
+             f"Playback started for file: {muted_name}",
+             f"Coin detected! Starting playback of {DEFAULT_SOUND_FILENAME}",
+             f"Playback started for file: {DEFAULT_SOUND_FILENAME}"],
+        ), (
+            "A file with zero weight was selected unexpectedly.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        _stop_audio_playback(base_url)
+
+
+# Test: Laser playback is skipped when every sound is disabled.
+# 1. Start from main app mode, format storage, and upload one extra MP3 file.
+# 2. Disable both the built-in default sound and the uploaded file.
+# 3. Trigger laser playback.
+# 4. Assert the logs report no enabled weighted sounds and no playback start is attempted.
+def test_laser_playback_is_not_attempted_when_all_sounds_are_disabled(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=4.0,
+        data=b"",
+    )
+    assert status == 200, f"/format failed before all-disabled test. status={status}, body={body}"
+
+    disabled_name = f"{_unique_name('all-disabled')}.mp3"
+    upload_status, _, upload_body = _upload_sound(base_url, disabled_name, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for all-disabled test. body={upload_body}"
+
+    status, _, body = _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"enabled": False})
+    assert status == 200, f"Failed to disable default sound. body={body}"
+    status, _, body = _set_sound_meta(base_url, disabled_name, {"enabled": False})
+    assert status == 200, f"Failed to disable uploaded sound. body={body}"
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_laser_playback(base_url)
+
+    no_candidates_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Coin detected, but no enabled weighted sounds found (candidates=0, total_weight=0)"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.2,
+    )
+    assert no_candidates_seen, (
+        "Expected the laser path to report that all sounds were disabled.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    playback_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Starting playback:", "Playback started for file:"],
+        ),
+        timeout_s=1.0,
+        poll_s=0.1,
+    )
+    assert not playback_seen, (
+        "Playback was attempted even though every sound was disabled.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
 
 # Test: Rename + probability + volume survive reboot.
