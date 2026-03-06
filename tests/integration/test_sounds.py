@@ -583,6 +583,33 @@ def test_reject_rename_to_empty_name(qemu_mainapp_instance):
     _assert_sound_download_status(base_url, old_name, 200)
 
 
+# Test: Rename rejects a target filename that already exists.
+# 1. Start from main app mode.
+# 2. Upload source and target files.
+# 3. Attempt to rename source to the existing target base name.
+# 4. Assert conflict response.
+# 5. Verify both original files still exist unchanged.
+def test_reject_rename_to_existing_file_name(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    source_name = f"{_unique_name('rename-exists-src')}.mp3"
+    target_base = _unique_name("rename-exists-dst")
+    target_name = f"{target_base}.mp3"
+
+    upload_status, _, upload_body = _upload_sound(base_url, source_name, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for existing-target source file. body={upload_body}"
+
+    upload_status, _, upload_body = _upload_sound(base_url, target_name, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for existing-target destination file. body={upload_body}"
+
+    status, _, body = _http_get(base_url, f"/sounds/{source_name}?rename={target_base}")
+    assert status == 409
+    assert "Target exists" in body
+
+    _assert_sound_download_status(base_url, source_name, 200)
+    _assert_sound_download_status(base_url, target_name, 200)
+
+
 # Test: Built-in default sound cannot be renamed.
 # 1. Start from main app mode and locate the default sound row.
 # 2. Assert the rename input is rendered disabled in the menu.
