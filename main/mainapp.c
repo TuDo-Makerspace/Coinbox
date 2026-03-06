@@ -512,11 +512,11 @@ static bool security_is_ui_entry_uri(const char *uri)
     return false;
 }
 
-static esp_err_t security_redirect_to_login(httpd_req_t *req)
+static esp_err_t security_redirect_to_login_for_path(httpd_req_t *req, const char *next_candidate)
 {
     char next_path[96];
     char location[160];
-    security_sanitize_next_path(req ? req->uri : NULL, next_path, sizeof(next_path));
+    security_sanitize_next_path(next_candidate, next_path, sizeof(next_path));
     int n = snprintf(location, sizeof(location), "/login?next=%s", next_path);
     if (n <= 0 || n >= (int)sizeof(location)) {
         strlcpy(location, "/login", sizeof(location));
@@ -527,6 +527,11 @@ static esp_err_t security_redirect_to_login(httpd_req_t *req)
     httpd_resp_set_hdr(req, "Location", location);
     httpd_resp_sendstr(req, "Authentication required");
     return ESP_FAIL;
+}
+
+static esp_err_t security_redirect_to_login(httpd_req_t *req)
+{
+    return security_redirect_to_login_for_path(req, req ? req->uri : NULL);
 }
 
 static esp_err_t security_send_unauthorized(httpd_req_t *req)
@@ -2567,9 +2572,8 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
 
 static esp_err_t redirect_to_sounds_handler(httpd_req_t *req)
 {
-    esp_err_t auth_err = security_require_auth(req);
-    if (auth_err != ESP_OK) {
-        return auth_err;
+    if (s_ui_password_set && !security_is_authenticated_request(req)) {
+        return security_redirect_to_login_for_path(req, "/sounds/");
     }
 
     httpd_resp_set_status(req, "302 Found");

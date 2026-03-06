@@ -290,7 +290,7 @@ def test_auth_blocks_skip_and_recovery_shortcuts(qemu_mainapp_instance):
             f"{path} redirected directly to /sounds/ while auth is enabled."
         )
 
-        blocked_by_login = _is_login_redirect(status, headers, path)
+        blocked_by_login = _is_login_redirect(status, headers, "/sounds/")
         blocked_by_401 = (status == 401 and "Unauthorized" in body)
         assert blocked_by_login or blocked_by_401, (
             f"Expected {path} to be blocked by auth, got status={status}, "

@@ -378,10 +378,9 @@
     const cardTools = cardEl ? cardEl.querySelector('.card-tools') : null;
     let resetting = false;
     let formatting = false;
-    let handoffProbeInFlight = false;
-    let handoffProbeIntervalId = null;
+    let handoffRetryTimerId = null;
     let skipRequestSent = false;
-    const handoffTarget = '/sounds/';
+    const handoffRoute = '/skip';
     const LASER_EXTENDED_NOTE = 'Laser beam interrupted three times. Countdown extended.';
     function markLaserExtensionSeen() {
       laserExtensionSeen = true;
@@ -474,30 +473,19 @@
       } catch (_) { }
     }
 
-    function probeMainAppReady() {
-      if (handoffProbeInFlight) return;
-      handoffProbeInFlight = true;
-
-      fetch(handoffTarget, { cache: 'no-store', redirect: 'manual' })
-        .then(r => {
-          const locationHeader = r.headers.get('location');
-          const redirectedAwayFromBootstrapRoot =
-            r.status >= 300 && r.status < 400 && locationHeader && locationHeader !== '/';
-
-          if (r.ok || redirectedAwayFromBootstrapRoot) {
-            location.replace(handoffTarget);
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          handoffProbeInFlight = false;
-        });
+    function buildHandoffUrl() {
+      const url = new URL(handoffRoute, window.location.origin);
+      url.searchParams.set('_cb', `${Date.now()}`);
+      return url.toString();
     }
 
-    function startHandoffProbeLoop() {
-      if (handoffProbeIntervalId !== null) return;
-      probeMainAppReady();
-      handoffProbeIntervalId = setInterval(probeMainAppReady, 800);
+    function scheduleHandoffNavigation(delayMs = 700) {
+      if (handoffRetryTimerId !== null) {
+        clearTimeout(handoffRetryTimerId);
+      }
+      handoffRetryTimerId = setTimeout(() => {
+        location.replace(buildHandoffUrl());
+      }, delayMs);
     }
 
     function renderRecovery() {
@@ -585,7 +573,7 @@
       if (note) {
         note.textContent = 'Getting things ready...';
       }
-      startHandoffProbeLoop();
+      scheduleHandoffNavigation();
     }
 
     function requestSkipHandoff() {
@@ -594,16 +582,7 @@
       }
 
       skipRequestSent = true;
-      forceHandoff = 1;
-      renderStartingCard();
-
-      fetch('/skip', { cache: 'no-store' })
-        .catch(() => {
-          // Fallback for rare request races: try classic navigation once.
-          setTimeout(() => {
-            location.replace('/skip');
-          }, 350);
-        });
+      location.assign(handoffRoute);
     }
 
     function tick() {
