@@ -743,6 +743,17 @@ static esp_err_t http_resp_navbar_js(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t http_resp_connection_monitor_js(httpd_req_t *req)
+{
+    extern const unsigned char connection_monitor_js_start[] asm("_binary_connection_monitor_js_start");
+    extern const unsigned char connection_monitor_js_end[] asm("_binary_connection_monitor_js_end");
+    const size_t connection_monitor_js_size = (connection_monitor_js_end - connection_monitor_js_start);
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, (const char *)connection_monitor_js_start, connection_monitor_js_size);
+    return ESP_OK;
+}
+
 static esp_err_t http_resp_glyphs_js(httpd_req_t *req)
 {
     extern const unsigned char glyphs_js_start[] asm("_binary_glyphs_js_start");
@@ -2680,6 +2691,14 @@ esp_err_t start_mainapp(void)
         .user_ctx  = NULL
     };
     httpd_register_uri_handler(server, &navbar_js);
+
+    httpd_uri_t connection_monitor_js = {
+        .uri       = "/connection_monitor.js",
+        .method    = HTTP_GET,
+        .handler   = http_resp_connection_monitor_js,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &connection_monitor_js);
 
     httpd_uri_t glyphs_js = {
         .uri       = "/glyphs.js",

@@ -301,6 +301,18 @@ static esp_err_t bootstrap_glyphs_js_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t bootstrap_connection_monitor_js_handler(httpd_req_t *req)
+{
+    extern const unsigned char connection_monitor_js_start[] asm("_binary_connection_monitor_js_start");
+    extern const unsigned char connection_monitor_js_end[] asm("_binary_connection_monitor_js_end");
+    const size_t connection_monitor_js_size = (size_t)(connection_monitor_js_end - connection_monitor_js_start);
+
+    httpd_resp_set_type(req, "application/javascript");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, (const char *)connection_monitor_js_start, connection_monitor_js_size);
+    return ESP_OK;
+}
+
 static esp_err_t bootstrap_glyphs_css_handler(httpd_req_t *req)
 {
     extern const unsigned char glyphs_css_start[] asm("_binary_glyphs_css_start");
@@ -705,6 +717,12 @@ esp_err_t bootstrap(void)
         .handler = bootstrap_glyphs_js_handler,
         .user_ctx = NULL
     };
+    httpd_uri_t connection_monitor_js = {
+        .uri = "/connection_monitor.js",
+        .method = HTTP_GET,
+        .handler = bootstrap_connection_monitor_js_handler,
+        .user_ctx = NULL
+    };
     httpd_uri_t glyphs_css = {
         .uri = "/glyphs.css",
         .method = HTTP_GET,
@@ -733,6 +751,7 @@ esp_err_t bootstrap(void)
         httpd_register_uri_handler(s_bootstrap_server, &format_storage) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &reset_settings) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &network_ips) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &connection_monitor_js) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &glyphs_js) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &glyphs_css) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register bootstrap handlers");

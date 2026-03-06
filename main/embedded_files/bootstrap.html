@@ -197,50 +197,6 @@
       font-size: 0.95rem;
     }
 
-    .connection-lost-overlay {
-      position: absolute;
-      position: fixed;
-      top: 0;
-      right: 0;
-      bottom: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 1rem;
-      background: rgba(15, 23, 42, 0.45);
-      z-index: 9999;
-    }
-
-    .connection-lost-overlay[data-visible="1"] {
-      display: flex;
-    }
-
-    .connection-lost-card {
-      width: min(560px, 100%);
-      background: #ffffff;
-      border: 1px solid #fecaca;
-      border-radius: 12px;
-      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.2);
-      padding: 1.1rem 1.15rem;
-      text-align: left;
-    }
-
-    .connection-lost-card h2 {
-      margin: 0 0 0.45rem;
-      color: #991b1b;
-      font-size: clamp(1.05rem, 1vw + 0.9rem, 1.35rem);
-    }
-
-    .connection-lost-card p {
-      margin: 0;
-      color: #1f2937;
-      line-height: 1.45;
-      font-size: 0.98rem;
-    }
-
     @media (max-width:640px) {
       .card {
         padding: 1.25rem;
@@ -303,59 +259,11 @@
       <p class="note" id="extend-note">{{ EXTEND_NOTE }}</p>
     </div>
   </div>
-  <div class="connection-lost-overlay glyph-overlay-exempt" id="connection-lost-overlay" data-visible="0" aria-live="assertive">
-    <div class="connection-lost-card" role="alert" aria-atomic="true">
-      <h2>Connection lost!</h2>
-      <p>Please make sure the coinbox is powered on and that you are connected to the correct AP or STA network, especially if you recently changed or reset the network settings or were previously connected to the recovery AP.</p>
-    </div>
-  </div>
+  <script src="/connection_monitor.js"></script>
   <script src="/glyphs.js"></script>
   <script>
     if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
       window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
-    }
-
-    const connectionLostOverlay = document.getElementById('connection-lost-overlay');
-    const CONNECTION_FAILURE_THRESHOLD = 2;
-    let connectionFailures = 0;
-
-    function showConnectionLostPopup() {
-      if (!connectionLostOverlay) return;
-      connectionLostOverlay.dataset.visible = '1';
-    }
-
-    function hideConnectionLostPopup() {
-      if (!connectionLostOverlay) return;
-      connectionLostOverlay.dataset.visible = '0';
-    }
-
-    function recordConnectionSuccess() {
-      connectionFailures = 0;
-      hideConnectionLostPopup();
-    }
-
-    function recordConnectionFailure() {
-      connectionFailures += 1;
-      if (connectionFailures >= CONNECTION_FAILURE_THRESHOLD) {
-        showConnectionLostPopup();
-      }
-    }
-
-    if (typeof window.fetch === 'function') {
-      const nativeFetch = window.fetch.bind(window);
-      window.fetch = (...args) => {
-        return nativeFetch(...args)
-          .then((response) => {
-            recordConnectionSuccess();
-            return response;
-          })
-          .catch((error) => {
-            if (!error || error.name !== 'AbortError') {
-              recordConnectionFailure();
-            }
-            throw error;
-          });
-      };
     }
 
     let remaining = {{ SECONDS }};
