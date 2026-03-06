@@ -472,6 +472,70 @@
 
     <div class="card">
       <div class="card-header">
+        <h2>Network</h2>
+      </div>
+      <p class="note network-note">Changes will be applied after reboot</p>
+      <div class="network-grid">
+        <div class="net-field">
+          <div class="net-top-line">
+            <div class="sensor-label">Access Point</div>
+            <div class="net-state" id="network-ap-state" data-state="reboot-required" hidden>Reboot required</div>
+          </div>
+          <div class="net-ip" id="network-ap-ip">IP: --</div>
+          <label for="network-ap-ssid">AP SSID</label>
+          <input id="network-ap-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+          <label for="network-ap-password">AP Password</label>
+          <input id="network-ap-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
+        </div>
+        <div class="net-field">
+          <div class="net-top-line">
+            <div class="sensor-label">Station</div>
+            <div class="net-state" id="network-sta-state" data-state="disconnected">Disconnected</div>
+          </div>
+          <div class="net-ip" id="network-sta-ip">IP: --</div>
+          <label for="network-sta-ssid">STA SSID</label>
+          <input id="network-sta-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+          <label for="network-sta-password">STA Password</label>
+          <input id="network-sta-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
+        </div>
+      </div>
+      <div class="network-actions">
+        <button id="network-save">Save network settings</button>
+      </div>
+    </div>
+
+    <div class="card security-card">
+      <div class="card-header">
+        <div class="security-head">
+          <h2>Security</h2>
+          <span id="security-status-pill" class="security-pill" data-state="off">
+            <svg class="security-pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 1 1 4 0v2h-4V7Z"/>
+            </svg>
+            <span id="security-status-pill-text">Disabled</span>
+          </span>
+        </div>
+      </div>
+      <p class="note" id="security-status">Configure a password to access this website.</p>
+      <div class="security-grid">
+        <div class="security-field">
+          <label for="security-password">New Password</label>
+          <input id="security-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Set a password to lock the UI">
+        </div>
+        <div class="security-field">
+          <label for="security-password-confirm">Confirm Password</label>
+          <input id="security-password-confirm" type="password" maxlength="64" autocomplete="new-password" placeholder="Repeat password">
+        </div>
+      </div>
+      <p class="note security-note">Leave empty to keep current password.</p>
+      <div class="security-actions">
+        <button id="security-remove" class="danger-btn">Remove password</button>
+        <button id="security-save">Save password</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
         <h2>Sensors</h2>
       </div>
       <div class="sensor-grid">
@@ -544,70 +608,6 @@
       </div>
       <p class="note">Logs are kept in memory and are cleared automatically when the buffer is full.</p>
       <div id="log-box" class="log-box">Loading log...</div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <h2>Network</h2>
-      </div>
-      <p class="note network-note">Changes will be applied after reboot</p>
-      <div class="network-grid">
-        <div class="net-field">
-          <div class="net-top-line">
-            <div class="sensor-label">Access Point</div>
-            <div class="net-state" id="network-ap-state" data-state="reboot-required" hidden>Reboot required</div>
-          </div>
-          <div class="net-ip" id="network-ap-ip">IP: --</div>
-          <label for="network-ap-ssid">AP SSID</label>
-          <input id="network-ap-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
-          <label for="network-ap-password">AP Password</label>
-          <input id="network-ap-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
-        </div>
-        <div class="net-field">
-          <div class="net-top-line">
-            <div class="sensor-label">Station</div>
-            <div class="net-state" id="network-sta-state" data-state="disconnected">Disconnected</div>
-          </div>
-          <div class="net-ip" id="network-sta-ip">IP: --</div>
-          <label for="network-sta-ssid">STA SSID</label>
-          <input id="network-sta-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
-          <label for="network-sta-password">STA Password</label>
-          <input id="network-sta-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
-        </div>
-      </div>
-      <div class="network-actions">
-        <button id="network-save">Save network settings</button>
-      </div>
-    </div>
-
-    <div class="card security-card">
-      <div class="card-header">
-        <div class="security-head">
-          <h2>Security</h2>
-          <span id="security-status-pill" class="security-pill" data-state="off">
-            <svg class="security-pill-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2Zm-7-2a2 2 0 1 1 4 0v2h-4V7Z"/>
-            </svg>
-            <span id="security-status-pill-text">Disabled</span>
-          </span>
-        </div>
-      </div>
-      <p class="note" id="security-status">Configure a password to access this website.</p>
-      <div class="security-grid">
-        <div class="security-field">
-          <label for="security-password">New Password</label>
-          <input id="security-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Set a password to lock the UI">
-        </div>
-        <div class="security-field">
-          <label for="security-password-confirm">Confirm Password</label>
-          <input id="security-password-confirm" type="password" maxlength="64" autocomplete="new-password" placeholder="Repeat password">
-        </div>
-      </div>
-      <p class="note security-note">Leave empty to keep current password.</p>
-      <div class="security-actions">
-        <button id="security-remove" class="danger-btn">Remove password</button>
-        <button id="security-save">Save password</button>
-      </div>
     </div>
 
     <div class="card">
