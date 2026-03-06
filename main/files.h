@@ -14,6 +14,8 @@
 #define FILE_ENTRY_NAME_MAX 256
 #define FILE_PROBABILITY_MAX 100
 #define FILE_VOLUME_MAX 125
+#define FILES_DEFAULT_SOUND_NAME "default.mp3"
+#define FILES_DEFAULT_SOUND_LABEL "Coin (Default)"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Structs
@@ -43,6 +45,7 @@ void files_props_set(file_properties_t *props, const char *name, uint8_t probabi
 
 esp_err_t files_init(void);
 esp_err_t files_format_storage(void);
+bool files_is_default_sound_name(const char *name);
 
 //-------------------------------------------------------------------------
 // Files Listing

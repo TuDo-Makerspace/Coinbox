@@ -626,6 +626,40 @@ static bool is_audio_filename(const char *name)
     return false;
 }
 
+static const char *sound_display_name(const char *name)
+{
+    return files_is_default_sound_name(name) ? FILES_DEFAULT_SOUND_LABEL : name;
+}
+
+static void build_default_sound_reserved_message(char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return;
+    }
+    int n = snprintf(out,
+                     out_size,
+                     "%s is reserved for the built-in default sound.",
+                     FILES_DEFAULT_SOUND_NAME);
+    if (n < 0 || n >= (int)out_size) {
+        strlcpy(out, "Reserved default sound name.", out_size);
+    }
+}
+
+static void build_default_sound_protected_message(char *out, size_t out_size, const char *action)
+{
+    if (!out || out_size == 0) {
+        return;
+    }
+    int n = snprintf(out,
+                     out_size,
+                     "%s is reserved for the built-in default sound and cannot be %s.",
+                     FILES_DEFAULT_SOUND_NAME,
+                     action ? action : "modified");
+    if (n < 0 || n >= (int)out_size) {
+        strlcpy(out, "Protected default sound.", out_size);
+    }
+}
+
 static const char* get_path_from_uri(char *dest, const char *base_path, const char *uri, size_t destsize)
 {
     const size_t base_pathlen = strlen(base_path);
@@ -1241,6 +1275,8 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
             ESP_LOGW(TAG, "Skipping non-entry file: %s", entrypath);
             continue;
         }
+        bool is_protected_sound = files_is_default_sound_name(entry->d_name);
+        const char *display_name = sound_display_name(entry->d_name);
 
         char row_id[32];
         snprintf(row_id, sizeof(row_id), "row-%d", row_idx++);
@@ -1260,17 +1296,25 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
         httpd_resp_sendstr_chunk(req, numbuf);
         httpd_resp_sendstr_chunk(req, "\" data-enabled=\"");
         httpd_resp_sendstr_chunk(req, meta.enabled ? "1" : "0");
+        httpd_resp_sendstr_chunk(req, "\" data-protected=\"");
+        httpd_resp_sendstr_chunk(req, is_protected_sound ? "1" : "0");
         httpd_resp_sendstr_chunk(req, "\">");
 
         httpd_resp_sendstr_chunk(req, "<div class=\"file-row-main\">");
         httpd_resp_sendstr_chunk(req, "<div class=\"file-name-wrap\"><a class=\"file-name\" href=\"/sounds/");
         httpd_resp_sendstr_chunk(req, entry->d_name);
         httpd_resp_sendstr_chunk(req, "\" title=\"");
-        httpd_resp_sendstr_chunk(req, entry->d_name);
+        httpd_resp_sendstr_chunk(req, display_name);
         httpd_resp_sendstr_chunk(req, "\">");
-        httpd_resp_sendstr_chunk(req, entry->d_name);
+        httpd_resp_sendstr_chunk(req, display_name);
         httpd_resp_sendstr_chunk(req, "</a>");
-        httpd_resp_sendstr_chunk(req, "<input class=\"file-name-edit\" data-k=\"name-edit\" type=\"text\" autocomplete=\"off\" spellcheck=\"false\">");
+        httpd_resp_sendstr_chunk(req,
+                                 "<input class=\"file-name-edit\" data-k=\"name-edit\" type=\"text\" "
+                                 "autocomplete=\"off\" spellcheck=\"false\"");
+        if (is_protected_sound) {
+            httpd_resp_sendstr_chunk(req, " disabled");
+        }
+        httpd_resp_sendstr_chunk(req, ">");
         httpd_resp_sendstr_chunk(req, "</div>");
         httpd_resp_sendstr_chunk(req, "<div class=\"row-actions\">");
         httpd_resp_sendstr_chunk(req, "<label class=\"switch\"><input type=\"checkbox\" data-k=\"enabled-toggle\"><span class=\"slider\"></span></label>");
@@ -1308,7 +1352,11 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
         httpd_resp_sendstr_chunk(req, "</div>");
 
         httpd_resp_sendstr_chunk(req, "<div class=\"action-row\">");
-        httpd_resp_sendstr_chunk(req, "<button class=\"delete-btn\" type=\"button\">"
+        httpd_resp_sendstr_chunk(req, "<button class=\"delete-btn\" type=\"button\"");
+        if (is_protected_sound) {
+            httpd_resp_sendstr_chunk(req, " disabled");
+        }
+        httpd_resp_sendstr_chunk(req, ">"
                                     "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\">"
                                     "<path d=\"M9 3a1 1 0 0 0-1 1v1H5.5a1 1 0 1 0 0 2H6v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7h0.5a1 1 0 1 0 0-2H16V4a1 1 0 0 0-1-1H9Zm1 2h4V5h-4V5Zm-1 4a1 1 0 1 1 2 0v8a1 1 0 1 1-2 0V9Zm6-1a1 1 0 0 1 1 1v8a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Z\"/>"
                                     "</svg>Delete file</button>");
@@ -1338,6 +1386,13 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
 
 static esp_err_t sounds_handle_delete(httpd_req_t *req, const char *filepath, const char *base_name)
 {
+    if (files_is_default_sound_name(base_name)) {
+        char msg[160];
+        build_default_sound_protected_message(msg, sizeof(msg), "deleted");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        return ESP_FAIL;
+    }
+
     struct stat file_stat;
     if (stat(filepath, &file_stat) == -1) {
         httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File does not exist");
@@ -1359,6 +1414,13 @@ static esp_err_t sounds_handle_delete(httpd_req_t *req, const char *filepath, co
 static esp_err_t sounds_handle_rename(httpd_req_t *req, const char *filepath, const char *base_name,
                                       const char *rename_val)
 {
+    if (files_is_default_sound_name(base_name)) {
+        char msg[160];
+        build_default_sound_protected_message(msg, sizeof(msg), "renamed");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        return ESP_FAIL;
+    }
+
     if (!rename_val || rename_val[0] == '\0') {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Rename target missing");
         return ESP_FAIL;
@@ -1393,6 +1455,13 @@ static esp_err_t sounds_handle_rename(httpd_req_t *req, const char *filepath, co
     if (strcmp(rename_target, base_name) == 0) {
         httpd_resp_sendstr(req, "Unchanged");
         return ESP_OK;
+    }
+
+    if (files_is_default_sound_name(rename_target)) {
+        char msg[160];
+        build_default_sound_reserved_message(msg, sizeof(msg));
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        return ESP_FAIL;
     }
 
     if (is_meta_file(rename_target) || !is_audio_filename(rename_target)) {
@@ -2336,6 +2405,13 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
         ESP_LOGE(TAG, "Rejected non-audio upload : %s", base_name);
         return send_upload_error(req, HTTPD_400_BAD_REQUEST,
                                  "Only audio files are allowed (" ALLOWED_AUDIO_EXTS_LIST ")", true);
+    }
+
+    if (files_is_default_sound_name(base_name)) {
+        char msg[160];
+        build_default_sound_reserved_message(msg, sizeof(msg));
+        ESP_LOGE(TAG, "Rejected reserved upload filename : %s", base_name);
+        return send_upload_error(req, HTTPD_400_BAD_REQUEST, msg, true);
     }
 
     if (stat(filepath, &file_stat) == 0) {

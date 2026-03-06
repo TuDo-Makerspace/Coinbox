@@ -51,3 +51,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Default Coin Sound / Boot sound
+default.mp3

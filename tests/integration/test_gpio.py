@@ -31,6 +31,9 @@ except ModuleNotFoundError:
     )
 
 
+DEFAULT_SOUND_FILENAME = "default.mp3"
+
+
 @pytest.fixture
 def qemu_mainapp_instance(qemu_bootstrap_instance):
     base_url = qemu_bootstrap_instance["base_url"]
@@ -105,6 +108,18 @@ def _assert_system_responsive(base_url: str):
 
     status, _, body = _http_get(base_url, "/logs")
     assert status == 200, f"/logs is not healthy after spam. status={status}, body={body}"
+
+
+def _format_storage(base_url: str):
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=4.0,
+        data=b"",
+    )
+    assert status == 200, f"/format failed in main app. status={status}, body={body}"
+    assert "Formatted" in body
 
 
 # Test: Output mute endpoints reflect and update AMP/DAC mute GPIO levels.
@@ -200,6 +215,50 @@ def test_laser_injection_reaches_audio_playback_path(qemu_mainapp_instance):
     )
     assert audio_playback_seen, (
         "Audio playback marker not found after laser injection.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: With only the built-in default sound enabled, laser ISR playback picks `default.mp3`.
+# 1. Start from main app mode and format storage to remove any previously uploaded sounds.
+# 2. Inject a laser clear->blocked transition.
+# 3. Assert logs show `default.mp3` selected with a single 100-weight candidate.
+# 4. Assert the audio playback path starts for that file.
+def test_laser_injection_plays_default_sound_when_it_is_only_enabled_file(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    _format_storage(base_url)
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+
+    _set_test_gpio_level(base_url, "laser", 0)
+    _set_test_gpio_level(base_url, "laser", 1)
+
+    selected_default = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Coin detected! Starting playback of {DEFAULT_SOUND_FILENAME} (candidates=1, total_weight=100)"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.2,
+    )
+    assert selected_default, (
+        "Laser ISR did not select the built-in default sound as the only enabled candidate.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    audio_playback_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Starting playback:", f"Playback started for file: {DEFAULT_SOUND_FILENAME}"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.2,
+    )
+    assert audio_playback_seen, (
+        "Audio playback marker not found after default-sound laser injection.\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
 

@@ -160,6 +160,12 @@
       color: #111827;
       background: #fff;
     }
+    .file-name-edit:disabled {
+      color: #94a3b8;
+      background: #e5e7eb;
+      border-color: #cbd5e1;
+      cursor: not-allowed;
+    }
     .file-item.editing .file-name { display: none; }
     .file-item.editing .file-name-edit { display: block; }
 
@@ -369,8 +375,22 @@
       height: 18px;
       fill: currentColor;
     }
+    .delete-btn:disabled {
+      background: #cbd5e1;
+      border-color: #cbd5e1;
+      color: #64748b;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
     .delete-btn:hover { background: #dc2626; }
     .delete-btn:active { transform: scale(0.98); box-shadow: inset 0 1px 2px rgba(0,0,0,0.1); }
+    .delete-btn:disabled:hover,
+    .delete-btn:disabled:active {
+      background: #cbd5e1;
+      transform: none;
+      box-shadow: none;
+    }
 
     /* responsive tweaks */
     @media (max-width: 960px) {
@@ -756,6 +776,7 @@
           const rowId = btn.dataset.rowId;
           const details = document.querySelector(`.details[data-for-row="${rowId}"]`);
           const row = document.getElementById(rowId);
+          const isProtected = row?.dataset.protected === '1';
           const isOpen = btn.dataset.open === "1";
           closeAll(rowId);
           if (!isOpen) {
@@ -763,13 +784,15 @@
             details?.classList.add('open');
             if (row) {
               row.classList.add('open');
-              row.classList.add('editing');
-              const nameInput = row.querySelector('input[data-k="name-edit"]');
-              if (nameInput) {
-                const currentName = (row.querySelector('.file-name')?.textContent || '').trim();
-                nameInput.value = splitNameExt(currentName).base || currentName;
-                nameInput.focus();
-                nameInput.select();
+              if (!isProtected) {
+                row.classList.add('editing');
+                const nameInput = row.querySelector('input[data-k="name-edit"]');
+                if (nameInput) {
+                  const currentName = (row.querySelector('.file-name')?.textContent || '').trim();
+                  nameInput.value = splitNameExt(currentName).base || currentName;
+                  nameInput.focus();
+                  nameInput.select();
+                }
               }
             }
           } else {
@@ -796,6 +819,7 @@
         if (!row) return;
 
         let fileUri = row.dataset.fileUri; // "/sounds/<name>"
+        const isProtected = row.dataset.protected === '1';
         const toggle = row.querySelector('input[data-k="enabled-toggle"]');
         const prob = details.querySelector('input[data-k="probability"]');
         const probNum = details.querySelector('input[data-k="probability-num"]');
@@ -811,6 +835,15 @@
         let nameExt = splitNameExt(row.dataset.fileName || nameLink?.textContent || '').ext || '.mp3';
         let renameInFlight = false;
         let pendingRenameRaw = null;
+
+        if (isProtected) {
+          if (nameInput) {
+            nameInput.disabled = true;
+          }
+          if (deleteBtn) {
+            deleteBtn.disabled = true;
+          }
+        }
 
         const clampProbability = (v) => Math.min(FILE_PROBABILITY_MAX, Math.max(0, parseInt(v || 0, 10)));
         const clampVolume = (v) => Math.min(FILE_VOLUME_MAX, Math.max(0, parseInt(v || 0, 10)));
@@ -940,6 +973,7 @@
 
         if (deleteBtn) {
           deleteBtn.addEventListener('click', async () => {
+            if (isProtected || deleteBtn.disabled) return;
             if (!confirm('Delete this file?')) return;
             if (playingRowId === rowId) {
               await stopRemotePlayback();
@@ -968,6 +1002,9 @@
         }
 
         async function renameFile(newBaseName) {
+          if (isProtected || (nameInput && nameInput.disabled)) {
+            return;
+          }
           const raw = (newBaseName || '').trim();
           if (!raw) return;
 
@@ -996,7 +1033,7 @@
             nameInput.disabled = true;
           }
           try {
-            const res = await fetch(fileUri + '?rename=' + encodeURIComponent(targetName), { method: 'GET' });
+            const res = await fetch(fileUri + '?rename=' + encodeURIComponent(baseOnly), { method: 'GET' });
             if (!res.ok) throw new Error('Rename failed: ' + res.status);
             updateFileUri(targetName);
             if (nameInput) {

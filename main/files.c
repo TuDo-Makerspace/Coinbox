@@ -2,6 +2,7 @@
 
 #include <dirent.h>
 #include <stdio.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <string.h>
@@ -18,10 +19,22 @@
 #define FILES_PATH_MAX 512
 #define FILE_ENTRY_MAGIC 0x46454E54u /* 'FENT' */
 #define FILE_ENTRY_VERSION 2
+#define DEFAULT_SOUND_PROBABILITY 100
+#define DEFAULT_SOUND_VOLUME 100
 
 static const char *TAG = "files";
 static const char *MOUNT_TAG = "mount";
 static const char *BASE_PATH = CONFIG_BASE_PATH;
+
+#if defined(COINBOX_HAS_EMBEDDED_DEFAULT_MP3)
+extern const unsigned char default_mp3_start[] asm("_binary_default_mp3_start");
+extern const unsigned char default_mp3_end[] asm("_binary_default_mp3_end");
+#elif defined(COINBOX_HAS_EMBEDDED_FALLBACK_MP3)
+extern const unsigned char fallback_mp3_start[] asm("_binary_fallback_mp3_start");
+extern const unsigned char fallback_mp3_end[] asm("_binary_fallback_mp3_end");
+#else
+#error "A built-in default audio asset must be embedded."
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Structs
@@ -45,6 +58,8 @@ static char s_base_path[FILES_PATH_MAX] = {0};
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Private Helpers
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static esp_err_t full_path_for_name(const char *name, char *out, size_t out_size);
 
 //-------------------------------------------------------------------------
 // Common
@@ -84,6 +99,113 @@ static void set_name(file_properties_t *props, const char *name)
     } else {
         props->name[0] = '\0';
     }
+}
+
+bool files_is_default_sound_name(const char *name)
+{
+    if (!name || !*name) {
+        return false;
+    }
+    return strcasecmp(basename_from_path(name), FILES_DEFAULT_SOUND_NAME) == 0;
+}
+
+static void default_sound_props_init(file_properties_t *props)
+{
+    files_props_init(props, FILES_DEFAULT_SOUND_NAME);
+    files_props_set(props,
+                    FILES_DEFAULT_SOUND_NAME,
+                    DEFAULT_SOUND_PROBABILITY,
+                    DEFAULT_SOUND_VOLUME,
+                    true);
+}
+
+static const unsigned char *default_sound_payload(size_t *out_size, const char **out_source_name)
+{
+#if defined(COINBOX_HAS_EMBEDDED_DEFAULT_MP3)
+    if (out_size) {
+        *out_size = (size_t)(default_mp3_end - default_mp3_start);
+    }
+    if (out_source_name) {
+        *out_source_name = "default.mp3";
+    }
+    return default_mp3_start;
+#else
+    if (out_size) {
+        *out_size = (size_t)(fallback_mp3_end - fallback_mp3_start);
+    }
+    if (out_source_name) {
+        *out_source_name = "fallback.mp3";
+    }
+    return fallback_mp3_start;
+#endif
+}
+
+static esp_err_t write_default_sound_audio_file(void)
+{
+    char audio_path[FILES_PATH_MAX];
+    esp_err_t err = full_path_for_name(FILES_DEFAULT_SOUND_NAME, audio_path, sizeof(audio_path));
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    size_t payload_size = 0;
+    const char *source_name = NULL;
+    const unsigned char *payload = default_sound_payload(&payload_size, &source_name);
+    if (!payload || payload_size == 0) {
+        ESP_LOGE(TAG, "Built-in default sound asset is empty");
+        return ESP_FAIL;
+    }
+
+    FILE *f = fopen(audio_path, "wb");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to create built-in default sound file: %s", audio_path);
+        return ESP_FAIL;
+    }
+
+    size_t written = fwrite(payload, 1, payload_size, f);
+    fclose(f);
+    if (written != payload_size) {
+        ESP_LOGE(TAG,
+                 "Failed to write built-in default sound file completely (%u/%u bytes)",
+                 (unsigned)written,
+                 (unsigned)payload_size);
+        unlink(audio_path);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG,
+             "Provisioned built-in default sound as %s from embedded %s (%u bytes)",
+             FILES_DEFAULT_SOUND_NAME,
+             source_name ? source_name : "asset",
+             (unsigned)payload_size);
+    return ESP_OK;
+}
+
+static esp_err_t ensure_default_sound(const file_properties_t *preserved_meta)
+{
+    file_properties_t effective_meta;
+    default_sound_props_init(&effective_meta);
+    if (preserved_meta) {
+        effective_meta.probability = clamp_probability(preserved_meta->probability);
+        effective_meta.volume = clamp_volume(preserved_meta->volume);
+        effective_meta.enabled = preserved_meta->enabled;
+    }
+
+    esp_err_t err = write_default_sound_audio_file();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = files_write_meta(FILES_DEFAULT_SOUND_NAME, &effective_meta);
+    if (err != ESP_OK) {
+        char audio_path[FILES_PATH_MAX];
+        if (full_path_for_name(FILES_DEFAULT_SOUND_NAME, audio_path, sizeof(audio_path)) == ESP_OK) {
+            unlink(audio_path);
+        }
+        return err;
+    }
+
+    return ESP_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -292,11 +414,23 @@ esp_err_t files_init(void)
         return ESP_FAIL;
     }
     closedir(dir);
+
+    file_properties_t default_meta;
+    bool have_default_meta = (files_read_meta(FILES_DEFAULT_SOUND_NAME, &default_meta) == ESP_OK);
+    esp_err_t ensure_err = ensure_default_sound(have_default_meta ? &default_meta : NULL);
+    if (ensure_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to ensure built-in default sound: %s", esp_err_to_name(ensure_err));
+        return ensure_err;
+    }
+
     return ESP_OK;
 }
 
 esp_err_t files_format_storage(void)
 {
+    file_properties_t preserved_default_meta;
+    bool have_preserved_default_meta = (files_read_meta(FILES_DEFAULT_SOUND_NAME, &preserved_default_meta) == ESP_OK);
+
     ESP_LOGW(MOUNT_TAG, "Formatting LittleFS partition");
     esp_err_t err = esp_vfs_littlefs_unregister("storage");
     if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
@@ -310,7 +444,18 @@ esp_err_t files_format_storage(void)
         return err;
     }
 
-    return mount_storage();
+    err = mount_storage();
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = ensure_default_sound(have_preserved_default_meta ? &preserved_default_meta : NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to restore built-in default sound after format: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    return ESP_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -515,6 +660,7 @@ esp_err_t files_write_meta(const char *name, const file_properties_t *props)
 esp_err_t files_delete_with_meta(const char *name)
 {
     if (!name) return ESP_ERR_INVALID_ARG;
+    if (files_is_default_sound_name(name)) return ESP_ERR_INVALID_STATE;
     char audio_path[FILES_PATH_MAX];
     char meta_path[FILES_PATH_MAX];
     esp_err_t err = full_path_for_name(name, audio_path, sizeof(audio_path));
@@ -529,6 +675,9 @@ esp_err_t files_delete_with_meta(const char *name)
 esp_err_t files_rename_with_meta(const char *old_name, const char *new_name)
 {
     if (!old_name || !new_name) return ESP_ERR_INVALID_ARG;
+    if (files_is_default_sound_name(old_name) || files_is_default_sound_name(new_name)) {
+        return ESP_ERR_INVALID_STATE;
+    }
     if (strchr(new_name, '/') || strchr(old_name, '/')) {
         return ESP_ERR_INVALID_ARG;
     }
