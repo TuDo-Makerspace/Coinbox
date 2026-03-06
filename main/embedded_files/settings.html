@@ -133,7 +133,8 @@
       justify-content: space-between;
       align-items: center;
       gap: 0.6rem;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
+      min-height: 1.65rem;
     }
     .net-ip {
       font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
@@ -204,6 +205,54 @@
     .network-actions {
       display: flex;
       justify-content: flex-end;
+      margin-top: 0.85rem;
+    }
+    .network-toggle {
+      margin-top: 0.85rem;
+      padding: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+    .network-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      cursor: pointer;
+    }
+    .network-toggle-row input[type="checkbox"] {
+      order: 2;
+      margin-top: 0;
+      margin-left: 1rem;
+      margin-right: 1rem;
+      width: 1.25rem;
+      height: 1.25rem;
+      accent-color: #2563eb;
+      flex: 0 0 auto;
+    }
+    .network-toggle-copy {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      gap: 0.2rem;
+      min-width: 0;
+    }
+    .network-toggle-heading {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: nowrap;
+      min-width: 0;
+      min-height: 1.65rem;
+    }
+    .network-toggle-heading .sensor-label {
+      color: var(--text);
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .network-toggle-note {
+      margin: 0;
     }
     .network-actions button {
       padding: 0.7em 1.1em;
@@ -459,6 +508,41 @@
       .log-box { height: 55vh; }
       .card { padding: 1rem; }
       .dual-slider { grid-template-columns: 1fr; }
+      .network-toggle-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "title checkbox"
+          "note note";
+        align-items: center;
+        column-gap: 0.75rem;
+        row-gap: 0.2rem;
+      }
+      .network-toggle-row input[type="checkbox"] {
+        grid-area: checkbox;
+      }
+      .network-toggle-copy {
+        display: contents;
+      }
+      .network-toggle-heading {
+        grid-area: title;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.35rem;
+        min-height: 0;
+      }
+      .network-toggle-heading .sensor-label {
+        display: block;
+      }
+      .network-toggle-heading .net-state {
+        display: inline-flex;
+        margin-left: 0;
+        margin-bottom: 0.3rem;
+      }
+      .network-toggle-note {
+        grid-area: note;
+      }
     }
   </style>
 </head>
@@ -482,22 +566,34 @@
             <div class="net-state" id="network-ap-state" data-state="reboot-required" hidden>Reboot required</div>
           </div>
           <div class="net-ip" id="network-ap-ip">IP: --</div>
-          <label for="network-ap-ssid">AP SSID</label>
+          <label for="network-ap-ssid">SSID</label>
           <input id="network-ap-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
-          <label for="network-ap-password">AP Password</label>
+          <label for="network-ap-password">Password</label>
           <input id="network-ap-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
         </div>
         <div class="net-field">
           <div class="net-top-line">
-            <div class="sensor-label">Station</div>
+            <div class="sensor-label">Wi-Fi</div>
             <div class="net-state" id="network-sta-state" data-state="disconnected">Disconnected</div>
           </div>
           <div class="net-ip" id="network-sta-ip">IP: --</div>
-          <label for="network-sta-ssid">STA SSID</label>
+          <label for="network-sta-ssid">SSID</label>
           <input id="network-sta-ssid" type="text" maxlength="32" autocomplete="off" spellcheck="false">
-          <label for="network-sta-password">STA Password</label>
+          <label for="network-sta-password">Password</label>
           <input id="network-sta-password" type="password" maxlength="64" autocomplete="new-password" placeholder="Leave blank for open network">
         </div>
+      </div>
+      <div class="network-toggle">
+        <label class="network-toggle-row" for="network-disable-ap-when-sta-connected">
+          <input id="network-disable-ap-when-sta-connected" type="checkbox">
+          <div class="network-toggle-copy">
+            <div class="network-toggle-heading">
+              <div class="sensor-label">Disable Access Point when connected to Wi-Fi</div>
+              <div class="net-state" id="network-toggle-state" data-state="reboot-required" hidden>Reboot required</div>
+            </div>
+            <p class="note network-toggle-note">If enabled, the Access Point stays off whenever the device has an active Wi-Fi connection.</p>
+          </div>
+        </label>
       </div>
       <div class="network-actions">
         <button id="network-save">Save network settings</button>
@@ -645,6 +741,8 @@
     const apPasswordInput = document.getElementById('network-ap-password');
     const staSsidInput = document.getElementById('network-sta-ssid');
     const staPasswordInput = document.getElementById('network-sta-password');
+    const toggleState = document.getElementById('network-toggle-state');
+    const disableApWhenStaConnectedInput = document.getElementById('network-disable-ap-when-sta-connected');
     const networkSaveBtn = document.getElementById('network-save');
     const securityStatus = document.getElementById('security-status');
     const securityStatusPill = document.getElementById('security-status-pill');
@@ -670,6 +768,8 @@
     const networkConfigSnapshot = {
       loaded: false,
       ap_ssid: '',
+      disable_ap_when_sta_connected: false,
+      disable_ap_when_sta_connected_reboot_required: false,
       sta_ssid: '',
       ap_reboot_required: false,
       sta_reboot_required: false,
@@ -715,6 +815,17 @@
       if (staIpText) {
         staIpText.textContent = `IP: ${data?.sta || 'not assigned'}`;
       }
+      if (apState) {
+        if (networkConfigSnapshot.ap_reboot_required) {
+          apState.hidden = false;
+          apState.dataset.state = 'reboot-required';
+          apState.textContent = 'Reboot required';
+        } else {
+          apState.hidden = true;
+          apState.dataset.state = 'reboot-required';
+          apState.textContent = 'Reboot required';
+        }
+      }
       if (staState) {
         if (networkConfigSnapshot.sta_reboot_required) {
           staState.dataset.state = 'reboot-required';
@@ -745,6 +856,9 @@
     function updateNetworkConfigSnapshot(data) {
       networkConfigSnapshot.loaded = true;
       networkConfigSnapshot.ap_ssid = data?.ap_ssid || '';
+      networkConfigSnapshot.disable_ap_when_sta_connected = !!data?.disable_ap_when_sta_connected;
+      networkConfigSnapshot.disable_ap_when_sta_connected_reboot_required =
+        !!data?.disable_ap_when_sta_connected_reboot_required;
       networkConfigSnapshot.sta_ssid = data?.sta_ssid || '';
       networkConfigSnapshot.ap_reboot_required = !!data?.ap_reboot_required;
       networkConfigSnapshot.sta_reboot_required = !!data?.sta_reboot_required;
@@ -753,7 +867,7 @@
     function renderNetworkConfig(data) {
       const apSupported = !!data?.ap_supported;
       const staSupported = !!data?.sta_supported;
-      const apRebootRequired = !!data?.ap_reboot_required;
+      const disableApWhenStaConnectedSupported = !!data?.disable_ap_when_sta_connected_supported;
 
       if (apSsidInput) {
         apSsidInput.value = data?.ap_ssid || '';
@@ -805,8 +919,12 @@
         }
       }
 
-      if (apState) {
-        apState.hidden = !apRebootRequired;
+      if (disableApWhenStaConnectedInput) {
+        disableApWhenStaConnectedInput.checked = !!data?.disable_ap_when_sta_connected;
+        disableApWhenStaConnectedInput.disabled = !disableApWhenStaConnectedSupported;
+      }
+      if (toggleState) {
+        toggleState.hidden = !data?.disable_ap_when_sta_connected_reboot_required;
       }
 
       if (networkSaveBtn) {
@@ -827,6 +945,9 @@
         renderNetworkConfig({
           ap_supported: false,
           sta_supported: false,
+          disable_ap_when_sta_connected_supported: false,
+          disable_ap_when_sta_connected: false,
+          disable_ap_when_sta_connected_reboot_required: false,
           ap_reboot_required: false,
           sta_reboot_required: false,
         });
@@ -846,6 +967,7 @@
       if (!networkSaveBtn || networkSaving) return;
       const apSupported = !apSsidInput?.disabled;
       const staSupported = !staSsidInput?.disabled;
+      const disableApWhenStaConnectedSupported = !disableApWhenStaConnectedInput?.disabled;
       if (!networkConfigSnapshot.loaded) {
         alert('Network settings are still loading. Please try again.');
         return;
@@ -866,6 +988,12 @@
         const ssid = staSsidInput.value;
         if (!networkConfigSnapshot.loaded || ssid !== networkConfigSnapshot.sta_ssid) {
           payload.sta_ssid = ssid;
+        }
+      }
+      if (disableApWhenStaConnectedSupported && disableApWhenStaConnectedInput) {
+        const enabled = !!disableApWhenStaConnectedInput.checked;
+        if (!networkConfigSnapshot.loaded || enabled !== networkConfigSnapshot.disable_ap_when_sta_connected) {
+          payload.disable_ap_when_sta_connected = enabled;
         }
       }
       if (apSupported && apPasswordInput && !apPasswordState.masked && apPasswordState.edited) {

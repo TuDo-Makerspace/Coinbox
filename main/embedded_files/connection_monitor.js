@@ -77,7 +77,7 @@
     overlay.innerHTML = `
       <div id="coinbox-connection-lost-card" role="alert" aria-atomic="true">
         <h2>Connection lost!</h2>
-        <p>Please make sure the coinbox is powered on and that you are connected to the correct AP or STA network, especially if you recently changed or reset the network settings or were previously connected to the recovery AP.</p>
+        <p>Make sure the coinbox is powered on and that your device is connected to the correct Wi-Fi network or Access Point. If you recently changed or reset the network settings, or were connected to the recovery Access Point, switch to the correct network instead.</p>
       </div>
     `;
     document.body.appendChild(overlay);

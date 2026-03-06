@@ -54,6 +54,7 @@
 #define NETWORK_NVS_NAMESPACE "network_cfg"
 #define NETWORK_NVS_KEY_AP_SSID "ap_ssid"
 #define NETWORK_NVS_KEY_AP_PSK  "ap_psk"
+#define NETWORK_NVS_KEY_AP_OFF_ON_STA "ap_off_sta"
 #define NETWORK_NVS_KEY_STA_SSID "sta_ssid"
 #define NETWORK_NVS_KEY_STA_PSK  "sta_psk"
 #define RECOVERY_AP_SSID "coinboxrecovery"
@@ -95,19 +96,29 @@ static esp_eth_netif_glue_handle_t s_eth_glue = NULL;
 typedef struct {
     char ap_ssid[NETWORK_WIFI_SSID_MAX_LEN + 1];
     char ap_password[NETWORK_WIFI_PSK_MAX_LEN + 1];
+    bool disable_ap_when_sta_connected;
     char sta_ssid[NETWORK_WIFI_SSID_MAX_LEN + 1];
     char sta_password[NETWORK_WIFI_PSK_MAX_LEN + 1];
 } network_runtime_config_t;
 
 static network_runtime_config_t s_runtime_config;
 static bool s_runtime_config_loaded = false;
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+static bool s_ap_shutdown_on_sta_connected_active = false;
+static bool s_ap_runtime_disabled_for_sta = false;
+static bool s_ap_recovery_mode = false;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Forward Declarations
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+#if CONFIG_NETWORK_WIFI_AP
+static esp_err_t configure_softap_ipv4(esp_netif_t *esp_netif_ap);
+#endif
 #if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
 static esp_err_t softap_set_dns_addr(esp_netif_t *esp_netif_ap, esp_netif_t *esp_netif_sta);
+static esp_err_t sync_ap_runtime_with_sta_policy(bool force_reapply_ap);
 #endif
 #if CONFIG_NETWORK_ETH_OPENETH
 static esp_err_t ethernet_init_openeth(esp_netif_t **out_esp_netif_eth);
@@ -157,6 +168,7 @@ static void set_runtime_defaults(network_runtime_config_t *cfg)
     }
     copy_or_empty(cfg->ap_ssid, sizeof(cfg->ap_ssid), DEFAULT_WIFI_AP_SSID);
     copy_or_empty(cfg->ap_password, sizeof(cfg->ap_password), DEFAULT_WIFI_AP_PASSWD);
+    cfg->disable_ap_when_sta_connected = false;
     copy_or_empty(cfg->sta_ssid, sizeof(cfg->sta_ssid), DEFAULT_WIFI_STA_SSID);
     copy_or_empty(cfg->sta_password, sizeof(cfg->sta_password), DEFAULT_WIFI_STA_PASSWD);
 }
@@ -173,6 +185,10 @@ static void sanitize_loaded_config(network_runtime_config_t *cfg)
     if (!is_valid_password_len(cfg->ap_password)) {
         copy_or_empty(cfg->ap_password, sizeof(cfg->ap_password), DEFAULT_WIFI_AP_PASSWD);
     }
+
+#if !(CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA)
+    cfg->disable_ap_when_sta_connected = false;
+#endif
 
 #if CONFIG_NETWORK_WIFI_STA
     if (cfg->sta_ssid[0] != '\0' && !is_valid_ssid(cfg->sta_ssid)) {
@@ -203,6 +219,24 @@ static void load_nvs_string_or_default(nvs_handle_t nvs, const char *key, char *
     copy_or_empty(out, out_size, fallback);
 }
 
+static void load_nvs_bool_or_default(nvs_handle_t nvs, const char *key, bool *out, bool fallback)
+{
+    if (!out) {
+        return;
+    }
+
+    uint8_t value = fallback ? 1 : 0;
+    esp_err_t err = nvs_get_u8(nvs, key, &value);
+    if (err == ESP_OK) {
+        *out = (value != 0);
+        return;
+    }
+    if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG_STA, "NVS read failed for %s: %s", key, esp_err_to_name(err));
+    }
+    *out = fallback;
+}
+
 //-------------------------------------------------------------------------
 // Runtime Config Persistence
 //-------------------------------------------------------------------------
@@ -224,6 +258,8 @@ static esp_err_t ensure_runtime_config_loaded(void)
         load_nvs_string_or_default(nvs, NETWORK_NVS_KEY_AP_PSK,
                                    s_runtime_config.ap_password, sizeof(s_runtime_config.ap_password),
                                    DEFAULT_WIFI_AP_PASSWD);
+        load_nvs_bool_or_default(nvs, NETWORK_NVS_KEY_AP_OFF_ON_STA,
+                                 &s_runtime_config.disable_ap_when_sta_connected, false);
         load_nvs_string_or_default(nvs, NETWORK_NVS_KEY_STA_SSID,
                                    s_runtime_config.sta_ssid, sizeof(s_runtime_config.sta_ssid),
                                    DEFAULT_WIFI_STA_SSID);
@@ -255,6 +291,10 @@ static esp_err_t persist_runtime_config(const network_runtime_config_t *cfg)
     err = nvs_set_str(nvs, NETWORK_NVS_KEY_AP_SSID, cfg->ap_ssid);
     if (err == ESP_OK) {
         err = nvs_set_str(nvs, NETWORK_NVS_KEY_AP_PSK, cfg->ap_password);
+    }
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs, NETWORK_NVS_KEY_AP_OFF_ON_STA,
+                         cfg->disable_ap_when_sta_connected ? 1 : 0);
     }
     if (err == ESP_OK) {
         err = nvs_set_str(nvs, NETWORK_NVS_KEY_STA_SSID, cfg->sta_ssid);
@@ -341,6 +381,88 @@ static esp_err_t apply_sta_config(const char *ssid, const char *password)
 }
 #endif
 
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+static bool is_sta_connected_for_policy(void)
+{
+    if (!s_wifi_event_group) {
+        return false;
+    }
+    return (xEventGroupGetBits(s_wifi_event_group) & WIFI_CONNECTED_BIT) != 0;
+}
+
+static const char *current_ap_ssid(void)
+{
+    return s_ap_recovery_mode ? RECOVERY_AP_SSID : s_runtime_config.ap_ssid;
+}
+
+static const char *current_ap_password(void)
+{
+    return s_ap_recovery_mode ? "" : s_runtime_config.ap_password;
+}
+
+static esp_err_t set_wifi_mode_if_needed(wifi_mode_t desired_mode)
+{
+    wifi_mode_t current_mode = WIFI_MODE_NULL;
+    esp_err_t err = esp_wifi_get_mode(&current_mode);
+    if (err != ESP_OK) {
+        return err;
+    }
+    if (current_mode == desired_mode) {
+        return ESP_OK;
+    }
+    return esp_wifi_set_mode(desired_mode);
+}
+
+static esp_err_t ensure_ap_runtime_enabled(bool force_reapply_ap)
+{
+    esp_err_t err = set_wifi_mode_if_needed(WIFI_MODE_APSTA);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    if (force_reapply_ap || s_ap_runtime_disabled_for_sta) {
+        err = configure_softap_ipv4(s_esp_netif_ap);
+        if (err != ESP_OK) {
+            return err;
+        }
+
+        err = apply_ap_config(current_ap_ssid(), current_ap_password());
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    s_ap_runtime_disabled_for_sta = false;
+    return ESP_OK;
+}
+
+static esp_err_t ensure_ap_runtime_disabled(void)
+{
+    esp_err_t err = set_wifi_mode_if_needed(WIFI_MODE_STA);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_ap_runtime_disabled_for_sta = true;
+    return ESP_OK;
+}
+
+static esp_err_t sync_ap_runtime_with_sta_policy(bool force_reapply_ap)
+{
+    if (!s_esp_netif_ap) {
+        return ESP_OK;
+    }
+
+    if (s_ap_shutdown_on_sta_connected_active &&
+        !s_ap_recovery_mode &&
+        is_sta_connected_for_policy()) {
+        return ensure_ap_runtime_disabled();
+    }
+
+    return ensure_ap_runtime_enabled(force_reapply_ap);
+}
+#endif
+
 #if CONFIG_NETWORK_WIFI_AP || CONFIG_NETWORK_WIFI_STA || CONFIG_NETWORK_ETH_OPENETH
 //-------------------------------------------------------------------------
 // IP Queries
@@ -387,7 +509,13 @@ esp_err_t network_get_ipv4_strings(char *ap_out, size_t ap_out_size,
     if (ap_out && ap_out_size > 0) {
         ap_out[0] = '\0';
 #if CONFIG_NETWORK_WIFI_AP
+#if CONFIG_NETWORK_WIFI_STA
+        if (!s_ap_runtime_disabled_for_sta) {
+            found_any |= fetch_ipv4_for_ifkey("WIFI_AP_DEF", ap_out, ap_out_size);
+        }
+#else
         found_any |= fetch_ipv4_for_ifkey("WIFI_AP_DEF", ap_out, ap_out_size);
+#endif
 #endif
 #if CONFIG_NETWORK_ETH_OPENETH
         if (ap_out[0] == '\0') {
@@ -441,6 +569,21 @@ esp_err_t network_get_connected_sta_ssid(char *out, size_t out_size)
 #endif
 }
 
+esp_err_t network_get_ap_runtime_disabled_for_sta(bool *out)
+{
+    if (!out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    *out = s_ap_runtime_disabled_for_sta;
+    return ESP_OK;
+#else
+    *out = false;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
 #if CONFIG_NETWORK_WIFI_AP
 static bool has_pending_ap_reboot_requirement(void)
 {
@@ -468,6 +611,13 @@ static bool has_pending_ap_reboot_requirement(void)
 
     return strcmp(s_runtime_config.ap_ssid, applied_ssid) != 0 ||
            strcmp(s_runtime_config.ap_password, applied_password) != 0;
+}
+#endif
+
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+static bool has_pending_ap_shutdown_policy_reboot_requirement(void)
+{
+    return s_runtime_config.disable_ap_when_sta_connected != s_ap_shutdown_on_sta_connected_active;
 }
 #endif
 
@@ -520,6 +670,11 @@ esp_err_t network_get_public_config(network_public_config_t *out)
     copy_or_empty(out->ap_ssid, sizeof(out->ap_ssid), s_runtime_config.ap_ssid);
     copy_or_empty(out->sta_ssid, sizeof(out->sta_ssid), s_runtime_config.sta_ssid);
     out->ap_password_set = (s_runtime_config.ap_password[0] != '\0');
+    out->disable_ap_when_sta_connected = s_runtime_config.disable_ap_when_sta_connected;
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    out->disable_ap_when_sta_connected_reboot_required =
+        has_pending_ap_shutdown_policy_reboot_requirement();
+#endif
     out->sta_password_set = (s_runtime_config.sta_password[0] != '\0');
 #if CONFIG_NETWORK_WIFI_AP
     out->ap_reboot_required = has_pending_ap_reboot_requirement();
@@ -537,6 +692,8 @@ esp_err_t network_get_public_config(network_public_config_t *out)
 esp_err_t network_update_config(const char *ap_ssid,
                                 const char *ap_password,
                                 bool ap_password_provided,
+                                bool disable_ap_when_sta_connected,
+                                bool disable_ap_when_sta_connected_provided,
                                 const char *sta_ssid,
                                 const char *sta_password,
                                 bool sta_password_provided)
@@ -565,6 +722,16 @@ esp_err_t network_update_config(const char *ap_ssid,
     }
 #endif
 
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    if (disable_ap_when_sta_connected_provided) {
+        next.disable_ap_when_sta_connected = disable_ap_when_sta_connected;
+    }
+#else
+    if (disable_ap_when_sta_connected_provided) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#endif
+
 #if CONFIG_NETWORK_WIFI_STA
     if (!sta_ssid || strlen(sta_ssid) > NETWORK_WIFI_SSID_MAX_LEN) {
         return ESP_ERR_INVALID_ARG;
@@ -585,18 +752,23 @@ esp_err_t network_update_config(const char *ap_ssid,
     sanitize_loaded_config(&next);
 
     bool ap_changed = false;
+    bool ap_policy_changed = false;
     bool sta_changed = false;
 
 #if CONFIG_NETWORK_WIFI_AP
     ap_changed = (strcmp(next.ap_ssid, s_runtime_config.ap_ssid) != 0) ||
                  (strcmp(next.ap_password, s_runtime_config.ap_password) != 0);
 #endif
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    ap_policy_changed = (next.disable_ap_when_sta_connected !=
+                         s_runtime_config.disable_ap_when_sta_connected);
+#endif
 #if CONFIG_NETWORK_WIFI_STA
     sta_changed = (strcmp(next.sta_ssid, s_runtime_config.sta_ssid) != 0) ||
                   (strcmp(next.sta_password, s_runtime_config.sta_password) != 0);
 #endif
 
-    if (!ap_changed && !sta_changed) {
+    if (!ap_changed && !ap_policy_changed && !sta_changed) {
         return ESP_OK;
     }
 
@@ -623,10 +795,17 @@ esp_err_t network_reset_config_to_defaults(bool apply_runtime_now)
 
     s_runtime_config = defaults;
     s_runtime_config_loaded = true;
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    s_ap_recovery_mode = false;
+#endif
 
     if (!apply_runtime_now) {
         return ESP_OK;
     }
+
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    s_ap_shutdown_on_sta_connected_active = s_runtime_config.disable_ap_when_sta_connected;
+#endif
 
 #if CONFIG_NETWORK_WIFI_AP
     err = apply_ap_config(s_runtime_config.ap_ssid, s_runtime_config.ap_password);
@@ -642,6 +821,13 @@ esp_err_t network_reset_config_to_defaults(bool apply_runtime_now)
     }
 #endif
 
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    err = sync_ap_runtime_with_sta_policy(true);
+    if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED && err != ESP_ERR_WIFI_NOT_INIT) {
+        ESP_LOGW(TAG_AP, "Failed to sync AP/STA policy after reset: %s", esp_err_to_name(err));
+    }
+#endif
+
     return ESP_OK;
 }
 
@@ -650,7 +836,14 @@ esp_err_t network_enable_recovery_ap(void)
     ESP_LOGI(TAG_AP, "Creating AP: %s", RECOVERY_AP_SSID);
 
 #if CONFIG_NETWORK_WIFI_AP
-    esp_err_t err = apply_ap_config(RECOVERY_AP_SSID, "");
+    esp_err_t err = ESP_OK;
+
+#if CONFIG_NETWORK_WIFI_STA
+    s_ap_recovery_mode = true;
+    err = sync_ap_runtime_with_sta_policy(true);
+#else
+    err = apply_ap_config(RECOVERY_AP_SSID, "");
+#endif
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED && err != ESP_ERR_WIFI_NOT_INIT) {
         ESP_LOGE(TAG_AP, "Failed to switch AP into recovery mode: %s", esp_err_to_name(err));
         return err;
@@ -671,15 +864,27 @@ esp_err_t network_restore_configured_ap(void)
         return err;
     }
 
+#if CONFIG_NETWORK_WIFI_STA
+    s_ap_recovery_mode = false;
+    err = sync_ap_runtime_with_sta_policy(true);
+#else
     err = apply_ap_config(s_runtime_config.ap_ssid, s_runtime_config.ap_password);
+#endif
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_STARTED && err != ESP_ERR_WIFI_NOT_INIT) {
         ESP_LOGE(TAG_AP, "Failed to restore configured AP: %s", esp_err_to_name(err));
         return err;
     }
 
-    ESP_LOGI(TAG_AP, "Configured AP restored. SSID:%s auth:%s",
-             s_runtime_config.ap_ssid,
-             s_runtime_config.ap_password[0] ? "wpa2-psk" : "open");
+  #if CONFIG_NETWORK_WIFI_STA
+    if (s_ap_runtime_disabled_for_sta) {
+        ESP_LOGI(TAG_AP, "Configured AP kept disabled because STA is connected");
+    } else
+  #endif
+    {
+        ESP_LOGI(TAG_AP, "Configured AP restored. SSID:%s auth:%s",
+                 s_runtime_config.ap_ssid,
+                 s_runtime_config.ap_password[0] ? "wpa2-psk" : "open");
+    }
     return ESP_OK;
 #else
     return ESP_ERR_NOT_SUPPORTED;
@@ -771,19 +976,29 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 ESP_LOGW(TAG_AP, "Failed to update SoftAP DNS from STA uplink: %s", esp_err_to_name(err));
             }
         }
+        esp_err_t err = sync_ap_runtime_with_sta_policy(false);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG_AP, "Failed to sync SoftAP state after STA connect: %s", esp_err_to_name(err));
+        }
       #endif
   #endif
 
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
   #if CONFIG_NETWORK_WIFI_STA
         wifi_event_sta_disconnected_t *event = event_data;
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+
+      #if CONFIG_NETWORK_WIFI_AP
+        esp_err_t policy_err = sync_ap_runtime_with_sta_policy(false);
+        if (policy_err != ESP_OK) {
+            ESP_LOGW(TAG_AP, "Failed to sync SoftAP state after STA disconnect: %s", esp_err_to_name(policy_err));
+        }
+      #endif
 
         if (s_runtime_config.sta_ssid[0] == '\0') {
             ESP_LOGI(TAG_STA, "STA disconnected and SSID is empty; not retrying");
             return;
         }
-
-        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
 
         if (s_retry_num < ESP_MAXIMUM_RETRY) {
             ESP_LOGW(TAG_STA, "Disconnected (reason %d). Retrying %d/%d",
@@ -1060,6 +1275,12 @@ esp_err_t init_wifi(void)
     if (err != ESP_OK) {
         return err;
     }
+
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+    s_ap_shutdown_on_sta_connected_active = s_runtime_config.disable_ap_when_sta_connected;
+    s_ap_runtime_disabled_for_sta = false;
+    s_ap_recovery_mode = false;
+#endif
 
 #if !CONFIG_NETWORK_WIFI_AP && !CONFIG_NETWORK_WIFI_STA && !CONFIG_NETWORK_ETH_OPENETH
     ESP_LOGW(TAG_STA, "No network interfaces enabled (Wi-Fi AP/STA + OpenETH disabled)");

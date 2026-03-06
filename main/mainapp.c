@@ -982,21 +982,25 @@ static esp_err_t network_ips_handler(httpd_req_t *req)
     char ap_ip[16] = {0};
     char sta_ip[16] = {0};
     char sta_ssid[33] = {0};
+    bool ap_disabled_for_sta = false;
     char ap_ip_esc[32] = {0};
     char sta_ip_esc[32] = {0};
     char sta_ssid_esc[80] = {0};
     (void)network_get_ipv4_strings(ap_ip, sizeof(ap_ip), sta_ip, sizeof(sta_ip));
     (void)network_get_connected_sta_ssid(sta_ssid, sizeof(sta_ssid));
+    (void)network_get_ap_runtime_disabled_for_sta(&ap_disabled_for_sta);
     json_escape_copy(ap_ip, ap_ip_esc, sizeof(ap_ip_esc));
     json_escape_copy(sta_ip, sta_ip_esc, sizeof(sta_ip_esc));
     json_escape_copy(sta_ssid, sta_ssid_esc, sizeof(sta_ssid_esc));
 
-    char resp[256];
+    char resp[320];
     int len = snprintf(resp, sizeof(resp),
-                       "{\"ap\":\"%s\",\"sta\":\"%s\",\"sta_ssid\":\"%s\"}",
+                       "{\"ap\":\"%s\",\"sta\":\"%s\",\"sta_ssid\":\"%s\","
+                       "\"ap_disabled_for_sta\":%s}",
                        ap_ip_esc,
                        sta_ip_esc,
-                       sta_ssid_esc);
+                       sta_ssid_esc,
+                       ap_disabled_for_sta ? "true" : "false");
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -1022,10 +1026,13 @@ static esp_err_t send_network_config_json(httpd_req_t *req)
     json_escape_copy(cfg.ap_ssid, ap_ssid_esc, sizeof(ap_ssid_esc));
     json_escape_copy(cfg.sta_ssid, sta_ssid_esc, sizeof(sta_ssid_esc));
 
-    char resp[420];
+    char resp[640];
     int len = snprintf(resp, sizeof(resp),
                        "{\"ap_supported\":%s,\"sta_supported\":%s,"
+                       "\"disable_ap_when_sta_connected_supported\":%s,"
                        "\"ap_ssid\":\"%s\",\"ap_password_set\":%s,\"ap_reboot_required\":%s,"
+                       "\"disable_ap_when_sta_connected\":%s,"
+                       "\"disable_ap_when_sta_connected_reboot_required\":%s,"
                        "\"sta_ssid\":\"%s\",\"sta_password_set\":%s,\"sta_reboot_required\":%s}",
 #if CONFIG_NETWORK_WIFI_AP
                        "true",
@@ -1037,9 +1044,16 @@ static esp_err_t send_network_config_json(httpd_req_t *req)
 #else
                        "false",
 #endif
+#if CONFIG_NETWORK_WIFI_AP && CONFIG_NETWORK_WIFI_STA
+                       "true",
+#else
+                       "false",
+#endif
                        ap_ssid_esc,
                        cfg.ap_password_set ? "true" : "false",
                        cfg.ap_reboot_required ? "true" : "false",
+                       cfg.disable_ap_when_sta_connected ? "true" : "false",
+                       cfg.disable_ap_when_sta_connected_reboot_required ? "true" : "false",
                        sta_ssid_esc,
                        cfg.sta_password_set ? "true" : "false",
                        cfg.sta_reboot_required ? "true" : "false");
@@ -1098,11 +1112,13 @@ static esp_err_t network_config_post_handler(httpd_req_t *req)
     char sta_ssid[NETWORK_WIFI_SSID_MAX_LEN + 1];
     char ap_password[NETWORK_WIFI_PSK_MAX_LEN + 1];
     char sta_password[NETWORK_WIFI_PSK_MAX_LEN + 1];
+    bool disable_ap_when_sta_connected = current.disable_ap_when_sta_connected;
     strlcpy(ap_ssid, current.ap_ssid, sizeof(ap_ssid));
     strlcpy(sta_ssid, current.sta_ssid, sizeof(sta_ssid));
     ap_password[0] = '\0';
     sta_password[0] = '\0';
     bool ap_password_provided = false;
+    bool disable_ap_when_sta_connected_provided = false;
     bool sta_password_provided = false;
 
     if (json_has_key(body, "ap_ssid") &&
@@ -1122,6 +1138,13 @@ static esp_err_t network_config_post_handler(httpd_req_t *req)
         }
         ap_password_provided = true;
     }
+    if (json_has_key(body, "disable_ap_when_sta_connected")) {
+        if (!json_get_bool(body, "disable_ap_when_sta_connected", &disable_ap_when_sta_connected)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid AP auto-disable setting");
+            return ESP_FAIL;
+        }
+        disable_ap_when_sta_connected_provided = true;
+    }
     if (json_has_key(body, "sta_password")) {
         if (!json_get_string(body, "sta_password", sta_password, sizeof(sta_password))) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid STA password");
@@ -1131,6 +1154,7 @@ static esp_err_t network_config_post_handler(httpd_req_t *req)
     }
 
     err = network_update_config(ap_ssid, ap_password, ap_password_provided,
+                                disable_ap_when_sta_connected, disable_ap_when_sta_connected_provided,
                                 sta_ssid, sta_password, sta_password_provided);
     if (err != ESP_OK) {
         if (err == ESP_ERR_INVALID_ARG) {
