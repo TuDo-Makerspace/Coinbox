@@ -3089,6 +3089,7 @@ esp_err_t start_mainapp(void)
      * payloads and metadata are separate; give the HTTPD task extra room. */
     config.stack_size = 8192;
     config.max_uri_handlers = 48;
+    config.lru_purge_enable = true;
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
