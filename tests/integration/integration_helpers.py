@@ -45,6 +45,8 @@ CUSTOM_AP_PASSWORD = "coinbox-reset-pass"
 CUSTOM_STA_SSID = "coinbox-reset-sta"
 CUSTOM_STA_PASSWORD = "coinbox-reset-pass"
 CUSTOM_UI_PASSWORD = "coinbox-reset-password"
+OTA_AUTH_PASSWORD_HEADER = "X-Coinbox-OTA-Password"
+OTA_AUTH_RECOVERY_CODE_HEADER = "X-Coinbox-OTA-Recovery-Code"
 RACE_SKIP_COUNTDOWN_THRESHOLD_S = 1
 RACE_RECOVERY_COUNTDOWN_THRESHOLD_S = 1
 TEST_MP3_PATH = REPO_ROOT / "tests" / "integration" / "assets" / "test6165ms.mp3"
@@ -255,7 +257,7 @@ def _ensure_auth_enabled(base_url: str):
             return
 
         # Transient states during handoff/handler registration.
-        if status in (401, 404, 503):
+        if status in (307, 401, 404, 503):
             time.sleep(0.2)
             continue
 
@@ -396,6 +398,20 @@ def _authenticate_recovery(
     return {"X-Recovery-Auth": token}
 
 
+def _ota_auth_headers(
+    *,
+    password: str | None = None,
+    recovery_code: int | None = None,
+) -> dict[str, str]:
+    assert (password is None) != (recovery_code is None), (
+        "Provide exactly one of password or recovery_code when building OTA auth headers."
+    )
+
+    if password is not None:
+        return {OTA_AUTH_PASSWORD_HEADER: password}
+    return {OTA_AUTH_RECOVERY_CODE_HEADER: f"{int(recovery_code):04d}"}
+
+
 def _wait_for_json_200(
     base_url: str,
     path: str,
@@ -420,7 +436,7 @@ def _wait_for_json_200(
         if status == 200:
             return _json_load_object(body, path)
 
-        if status in (401, 404, 503):
+        if status in (307, 401, 404, 503):
             time.sleep(0.2)
             continue
 
@@ -439,6 +455,47 @@ def _get_network_config(base_url: str, headers: dict[str, str] | None = None) ->
 
 def _get_security_config(base_url: str, headers: dict[str, str] | None = None) -> dict:
     return _wait_for_json_200(base_url, "/security/config", headers=headers)
+
+
+def _get_security_status_flag(
+    base_url: str,
+    headers: dict[str, str] | None = None,
+    timeout_s: float = 8.0,
+) -> str:
+    deadline = time.time() + timeout_s
+    last_status = None
+    last_body = ""
+
+    while time.time() < deadline:
+        status, _, body = _http_request(
+            base_url=base_url,
+            method="GET",
+            path="/security/status",
+            timeout_s=2.0,
+            headers=headers,
+        )
+        last_status = status
+        last_body = body
+
+        if status == 200:
+            flag = body.strip()
+            assert flag in ("0", "1"), (
+                "Expected /security/status to return plain-text '0' or '1'.\n"
+                f"Got: {body!r}"
+            )
+            return flag
+
+        if status in (307, 401, 404, 503):
+            time.sleep(0.2)
+            continue
+
+        pytest.fail(f"Unexpected status from /security/status: {status}\nBody:\n{body}")
+
+    pytest.fail(
+        "Timed out waiting for 200 from /security/status.\n"
+        f"Last status: {last_status}\n"
+        f"Last body: {last_body}"
+    )
 
 
 def _set_network_config(

@@ -29,6 +29,7 @@ try:
         _format_storage_from_recovery,
         _get_network_config,
         _get_security_config,
+        _get_security_status_flag,
         _http_get,
         _http_post_json,
         _http_request,
@@ -37,6 +38,7 @@ try:
         _is_main_app_ready,
         _is_recovery_bootstrap_page,
         _log_contains_any_since,
+        _ota_auth_headers,
         _reset_settings_from_recovery,
         _restart_into_bootstrap,
         _set_network_config,
@@ -72,6 +74,7 @@ except ModuleNotFoundError:
         _format_storage_from_recovery,
         _get_network_config,
         _get_security_config,
+        _get_security_status_flag,
         _http_get,
         _http_post_json,
         _http_request,
@@ -80,6 +83,7 @@ except ModuleNotFoundError:
         _is_main_app_ready,
         _is_recovery_bootstrap_page,
         _log_contains_any_since,
+        _ota_auth_headers,
         _reset_settings_from_recovery,
         _restart_into_bootstrap,
         _set_network_config,
@@ -568,7 +572,7 @@ def test_recovery_race_near_expiry(qemu_bootstrap_instance):
 
 # Test: Recovery mode OTA endpoint accepts requests (safe probe).
 # 1. Enter recovery mode and confirm recovery page state.
-# 2. Send an intentionally invalid firmware OTA upload to `/update?partition=firmware`.
+# 2. Send an intentionally invalid firmware OTA upload to `/update`.
 # 3. Verify OTA handler activity appears in logs (without requiring successful flash).
 # 4. Confirm we still remain in recovery mode afterwards.
 def test_recovery_ota_endpoint_probe(qemu_bootstrap_instance):
@@ -593,7 +597,7 @@ def test_recovery_ota_endpoint_probe(qemu_bootstrap_instance):
         response_status, _, response_body = _http_request(
             base_url=base_url,
             method="POST",
-            path="/update?partition=firmware",
+            path="/update",
             timeout_s=3.0,
             data=b"bad",
             headers={"Content-Type": "application/octet-stream"},
@@ -603,7 +607,7 @@ def test_recovery_ota_endpoint_probe(qemu_bootstrap_instance):
         request_error = repr(exc)
 
     ota_log_markers = [
-        "Starting OTA OS",
+        "Starting OTA firmware update",
         "OTA update failed",
         "received package is not fit len",
     ]
@@ -621,6 +625,105 @@ def test_recovery_ota_endpoint_probe(qemu_bootstrap_instance):
     )
 
     # Regardless of probe response shape, device should still remain in recovery mode.
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_recovery_bootstrap_page(status, headers, body)
+
+
+# Test: Bootstrap security status endpoint reports auth disabled without requiring auth.
+# 1. Confirm bootstrap mode is active with default security config.
+# 2. Call `GET /security/status` without auth headers.
+# 3. Assert the endpoint returns plain-text `0`.
+def test_security_status_reports_disabled_in_bootstrap(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_bootstrap_root_page(status, headers, body)
+
+    flag = _get_security_status_flag(base_url)
+    assert flag == "0", f"Expected /security/status to report disabled auth in bootstrap, got: {flag!r}"
+
+
+# Test: Bootstrap security status endpoint reports auth enabled without requiring auth.
+# 1. Start from bootstrap mode, switch to main app, and enable UI auth.
+# 2. Restart back into bootstrap.
+# 3. Call `GET /security/status` without auth headers.
+# 4. Assert the endpoint returns plain-text `1`.
+def test_security_status_reports_enabled_in_bootstrap(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _skip_to_main_app(base_url, log_path)
+    auth_cookie = _set_security_password(base_url, CUSTOM_UI_PASSWORD)
+    _restart_into_bootstrap(base_url, log_path, headers={"Cookie": auth_cookie})
+
+    flag = _get_security_status_flag(base_url)
+    assert flag == "1", f"Expected /security/status to report enabled auth in bootstrap, got: {flag!r}"
+
+
+# Test: Recovery OTA endpoint requires auth when main-app auth is enabled.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Call `POST /update` without OTA auth headers.
+# 4. Assert `401 Unauthorized`, then retry with recovery-code auth and confirm the OTA handler runs.
+def test_recovery_ota_requires_auth_when_enabled(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/update",
+        timeout_s=3.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected recovery OTA endpoint to reject unauthenticated clients when auth is enabled.\n"
+        f"status={status}, body={body}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert "unauthorized" in body.lower(), (
+        "Expected unauthorized response body for unauthenticated recovery OTA.\n"
+        f"body={body}"
+    )
+
+    start_pos = log_path.stat().st_size if log_path.exists() else 0
+    response_status = None
+    response_body = ""
+    request_error = None
+    try:
+        response_status, _, response_body = _http_request(
+            base_url=base_url,
+            method="POST",
+            path="/update",
+            timeout_s=3.0,
+            data=b"bad",
+            headers={
+                "Content-Type": "application/octet-stream",
+                **_ota_auth_headers(recovery_code=_expected_recovery_code()),
+            },
+        )
+    except Exception as exc:
+        request_error = repr(exc)
+
+    ota_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            start_pos,
+            ["Starting OTA firmware update", "OTA update failed", "received package is not fit len"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.2,
+    )
+    assert ota_seen, (
+        "Did not observe OTA handler activity after authenticated recovery OTA probe.\n"
+        f"HTTP status: {response_status}\n"
+        f"HTTP body: {response_body}\n"
+        f"Request error: {request_error}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
     status, headers, body = _http_get(base_url, "/")
     assert _is_recovery_bootstrap_page(status, headers, body)
 

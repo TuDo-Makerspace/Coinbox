@@ -1064,6 +1064,14 @@ static esp_err_t send_security_config_json(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t send_security_status_text(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_sendstr(req, s_ui_password_set ? "1" : "0");
+    return ESP_OK;
+}
+
 static esp_err_t send_boot_config_json(httpd_req_t *req)
 {
     char resp[56];
@@ -1197,6 +1205,11 @@ static esp_err_t security_config_get_handler(httpd_req_t *req)
         return auth_err;
     }
     return send_security_config_json(req);
+}
+
+static esp_err_t security_status_get_handler(httpd_req_t *req)
+{
+    return send_security_status_text(req);
 }
 
 static esp_err_t security_config_post_handler(httpd_req_t *req)
@@ -3253,6 +3266,14 @@ esp_err_t start_mainapp(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &security_config_post_uri);
+
+    httpd_uri_t security_status_get_uri = {
+        .uri = "/security/status",
+        .method = HTTP_GET,
+        .handler = security_status_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &security_status_get_uri);
 
     httpd_uri_t boot_config_get_uri = {
         .uri = "/boot/config",

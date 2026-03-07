@@ -12,9 +12,11 @@ try:
         CUSTOM_STA_PASSWORD,
         CUSTOM_STA_SSID,
         CUSTOM_UI_PASSWORD,
+        _ota_auth_headers,
         _assert_sound_download_status,
         _get_network_config,
         _get_security_config,
+        _get_security_status_flag,
         _http_get,
         _http_request,
         _is_bootstrap_root_page,
@@ -37,9 +39,11 @@ except ModuleNotFoundError:
         CUSTOM_STA_PASSWORD,
         CUSTOM_STA_SSID,
         CUSTOM_UI_PASSWORD,
+        _ota_auth_headers,
         _assert_sound_download_status,
         _get_network_config,
         _get_security_config,
+        _get_security_status_flag,
         _http_get,
         _http_request,
         _is_bootstrap_root_page,
@@ -262,7 +266,7 @@ def test_logs_endpoint_returns_text_logs(qemu_mainapp_instance):
 
 # Test: OTA endpoint is reachable and handles invalid payload safely.
 # 1. Start from main app mode and confirm `/sounds/` is reachable.
-# 2. Send an intentionally invalid OTA payload to `POST /update?partition=firmware`.
+# 2. Send an intentionally invalid OTA payload to `POST /update`.
 # 3. Verify OTA handler activity appears in logs.
 # 4. Confirm the device remains in main app mode and `/sounds/` is still reachable.
 def test_ota_endpoint_probe_in_main_app(qemu_mainapp_instance):
@@ -281,7 +285,7 @@ def test_ota_endpoint_probe_in_main_app(qemu_mainapp_instance):
         response_status, _, response_body = _http_request(
             base_url=base_url,
             method="POST",
-            path="/update?partition=firmware",
+            path="/update",
             timeout_s=3.0,
             data=b"bad",
             headers={"Content-Type": "application/octet-stream"},
@@ -294,7 +298,7 @@ def test_ota_endpoint_probe_in_main_app(qemu_mainapp_instance):
         lambda: _log_contains_any_since(
             log_path,
             log_start_pos,
-            ["Starting OTA OS", "OTA update failed", "received package is not fit len"],
+            ["Starting OTA firmware update", "OTA update failed", "received package is not fit len"],
         ),
         timeout_s=5.0,
         poll_s=0.2,
@@ -309,3 +313,85 @@ def test_ota_endpoint_probe_in_main_app(qemu_mainapp_instance):
 
     status, _, _ = _http_get(base_url, "/sounds/")
     assert status == 200
+
+
+# Test: Main-app security status endpoint reports auth disabled without requiring auth.
+# 1. Start from main app mode with default security config.
+# 2. Call `GET /security/status` without auth headers.
+# 3. Assert the endpoint returns plain-text `0`.
+def test_security_status_reports_disabled_in_main_app(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    flag = _get_security_status_flag(base_url)
+    assert flag == "0", f"Expected /security/status to report disabled auth in main app, got: {flag!r}"
+
+
+# Test: Main-app security status endpoint reports auth enabled without requiring auth.
+# 1. Start from main app mode and enable UI auth.
+# 2. Call `GET /security/status` without auth headers.
+# 3. Assert the endpoint returns plain-text `1`.
+def test_security_status_reports_enabled_in_main_app(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    _set_security_password(base_url, CUSTOM_UI_PASSWORD)
+
+    flag = _get_security_status_flag(base_url)
+    assert flag == "1", f"Expected /security/status to report enabled auth in main app, got: {flag!r}"
+
+
+# Test: OTA endpoint requires auth in main app mode once UI auth is enabled.
+# 1. Start from main app mode and enable UI auth.
+# 2. Call `POST /update` without OTA auth headers.
+# 3. Assert `401 Unauthorized`.
+# 4. Retry with OTA password header and confirm request reaches the OTA handler.
+def test_auth_blocks_ota_endpoint_in_main_app(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    _set_security_password(base_url, CUSTOM_UI_PASSWORD)
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/update",
+        timeout_s=3.0,
+        data=b"",
+    )
+    assert status == 401, f"Expected 401 for unauthenticated POST /update, got {status}. body={body}"
+    assert "Unauthorized" in body
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    response_status = None
+    response_body = ""
+    request_error = None
+    try:
+        response_status, _, response_body = _http_request(
+            base_url=base_url,
+            method="POST",
+            path="/update",
+            timeout_s=3.0,
+            data=b"bad",
+            headers={
+                "Content-Type": "application/octet-stream",
+                **_ota_auth_headers(password=CUSTOM_UI_PASSWORD),
+            },
+        )
+    except Exception as exc:
+        request_error = repr(exc)
+
+    ota_seen = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Starting OTA firmware update", "OTA update failed", "received package is not fit len"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.2,
+    )
+    assert ota_seen, (
+        "Did not observe OTA handler activity after authenticated probe request.\n"
+        f"HTTP status: {response_status}\n"
+        f"HTTP body: {response_body}\n"
+        f"Request error: {request_error}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )

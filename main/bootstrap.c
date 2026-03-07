@@ -515,6 +515,14 @@ static esp_err_t send_device_info_json(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t send_security_status_text(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_sendstr(req, mainapp_security_is_password_set() ? "1" : "0");
+    return ESP_OK;
+}
+
 static esp_err_t bootstrap_recovery_auth_handler(httpd_req_t *req)
 {
     if (!s_recovery_requested) {
@@ -584,6 +592,11 @@ static esp_err_t bootstrap_recovery_auth_handler(httpd_req_t *req)
 static esp_err_t bootstrap_device_info_handler(httpd_req_t *req)
 {
     return send_device_info_json(req);
+}
+
+static esp_err_t bootstrap_security_status_handler(httpd_req_t *req)
+{
+    return send_security_status_text(req);
 }
 
 static esp_err_t bootstrap_network_ips_handler(httpd_req_t *req)
@@ -1060,6 +1073,12 @@ esp_err_t bootstrap(void)
         .handler = bootstrap_device_info_handler,
         .user_ctx = NULL
     };
+    httpd_uri_t security_status = {
+        .uri = "/security/status",
+        .method = HTTP_GET,
+        .handler = bootstrap_security_status_handler,
+        .user_ctx = NULL
+    };
     httpd_uri_t runtime_status = {
         .uri = "/runtime/status",
         .method = HTTP_GET,
@@ -1111,6 +1130,7 @@ esp_err_t bootstrap(void)
         httpd_register_uri_handler(s_bootstrap_server, &network_ips) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &recovery_auth) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &device_info) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &security_status) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &runtime_status) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register bootstrap handlers");
         cancel_recovery_timer();
