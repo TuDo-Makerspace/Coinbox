@@ -22,6 +22,7 @@
 #include "ota.h"
 #include "gpio.h"
 #include "recovery_code.h"
+#include "runtime_status.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -79,6 +80,7 @@ static bool bootstrap_is_recovery_authenticated_request(httpd_req_t *req);
 static esp_err_t bootstrap_require_recovery_auth(httpd_req_t *req);
 static esp_err_t bootstrap_require_recovery_access(httpd_req_t *req, const char *conflict_message);
 static esp_err_t send_device_info_json(httpd_req_t *req);
+static esp_err_t bootstrap_runtime_status_handler(httpd_req_t *req);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // JSON and Auth Helpers
@@ -289,6 +291,11 @@ static esp_err_t bootstrap_root_handler(httpd_req_t *req)
     return render_bootstrap_page(req);
 }
 
+static esp_err_t bootstrap_runtime_status_handler(httpd_req_t *req)
+{
+    return runtime_status_send_json(req, "bootstrap");
+}
+
 static esp_err_t render_bootstrap_page(httpd_req_t *req)
 {
     // Get remaining seconds on recovery timer.
@@ -334,7 +341,8 @@ static esp_err_t render_bootstrap_page(httpd_req_t *req)
     laser_extended_buf[0] = laser_extended ? '1' : '0';
     laser_extended_buf[1] = '\0';
 
-    if (!replace_placeholder_any(page, page_capacity, "{{SECONDS}}", "{{ SECONDS }}", seconds_buf) ||
+    if (!replace_placeholder(page, page_capacity, "{{BOOT_ID}}", runtime_status_boot_id()) ||
+        !replace_placeholder_any(page, page_capacity, "{{SECONDS}}", "{{ SECONDS }}", seconds_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{AUTO_REFRESH}}", "{{ AUTO_REFRESH }}", refresh_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{IS_RECOVERY}}", "{{ IS_RECOVERY }}", recovery_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{LASER_EXTENSION_SEEN}}", "{{ LASER_EXTENSION_SEEN }}", laser_extended_buf) ||
@@ -979,7 +987,7 @@ esp_err_t bootstrap(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 14;
+    config.max_uri_handlers = 16;
 
     esp_err_t err = httpd_start(&s_bootstrap_server, &config);
     if (err != ESP_OK) {
@@ -1051,6 +1059,12 @@ esp_err_t bootstrap(void)
         .handler = bootstrap_device_info_handler,
         .user_ctx = NULL
     };
+    httpd_uri_t runtime_status = {
+        .uri = "/runtime/status",
+        .method = HTTP_GET,
+        .handler = bootstrap_runtime_status_handler,
+        .user_ctx = NULL
+    };
     httpd_uri_t glyphs_js = {
         .uri = "/glyphs.js",
         .method = HTTP_GET,
@@ -1095,7 +1109,8 @@ esp_err_t bootstrap(void)
         httpd_register_uri_handler(s_bootstrap_server, &reset_settings) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &network_ips) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &recovery_auth) != ESP_OK ||
-        httpd_register_uri_handler(s_bootstrap_server, &device_info) != ESP_OK) {
+        httpd_register_uri_handler(s_bootstrap_server, &device_info) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &runtime_status) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register bootstrap handlers");
         cancel_recovery_timer();
         cancel_start_task();

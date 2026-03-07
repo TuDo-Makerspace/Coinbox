@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-boot-id="{{BOOT_ID}}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -2113,8 +2113,8 @@
     if (downloadLaserBtn) downloadLaserBtn.addEventListener('click', () => exportCsvFor('laser', laserEvents));
     if (downloadHallBtn) downloadHallBtn.addEventListener('click', () => exportCsvFor('hall', hallEvents));
 
-    async function postSystemAction(path, fallbackErrorMessage) {
-      const res = await fetch(path, { method: 'POST' });
+    async function postSystemAction(path, fallbackErrorMessage, init = {}) {
+      const res = await fetch(path, { method: 'POST', ...init });
       if (!res.ok) {
         const body = await res.text().catch(() => '');
         throw new Error(body || fallbackErrorMessage);
@@ -2122,24 +2122,38 @@
       return res;
     }
 
+    function showRestartPendingOverlay() {
+      const monitor = window.COINBOX_CONNECTION_MONITOR;
+      if (monitor && typeof monitor.expectDisconnect === 'function') {
+        monitor.expectDisconnect();
+      }
+    }
+
+    function clearRestartPendingOverlay() {
+      const monitor = window.COINBOX_CONNECTION_MONITOR;
+      if (monitor && typeof monitor.clearExpectedDisconnect === 'function') {
+        monitor.clearExpectedDisconnect();
+      }
+    }
+
     document.getElementById('download-log').addEventListener('click', downloadLog);
     document.getElementById('restart-device').addEventListener('click', async () => {
       if (!confirm('Restart the device?')) return;
+      showRestartPendingOverlay();
       try {
-        await postSystemAction('/restart', 'Restart failed');
-        alert('Device restarting...');
-        setTimeout(() => location.replace('/'), 800);
+        await postSystemAction('/restart', 'Restart failed', { coinboxAllowDuringExpectedDisconnect: true });
       } catch (e) {
+        clearRestartPendingOverlay();
         alert(e.message || 'Restart failed');
       }
     });
     document.getElementById('reset-settings').addEventListener('click', async () => {
       if (!confirm('Reset all settings to defaults? This will remove the UI password, restore network settings, and restart the device.')) return;
+      showRestartPendingOverlay();
       try {
-        await postSystemAction('/settings/reset', 'Reset settings failed');
-        alert('Settings reset to defaults. Device restarting...');
-        setTimeout(() => location.replace('/'), 800);
+        await postSystemAction('/settings/reset', 'Reset settings failed', { coinboxAllowDuringExpectedDisconnect: true });
       } catch (e) {
+        clearRestartPendingOverlay();
         alert(e.message || 'Reset settings failed');
       }
     });

@@ -53,6 +53,7 @@ idf_component_register(
         "mdns_service.c"
         "recovery_code.c"
         "device_info.c"
+        "runtime_status.c"
     INCLUDE_DIRS
         "."
     EMBED_FILES

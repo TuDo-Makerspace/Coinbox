@@ -25,6 +25,7 @@ try:
         _get_qemu_factory_mac,
         _http_get,
         _is_bootstrap_root_page,
+        _log_contains_any_since,
         _restart_into_bootstrap,
         _set_security_password,
         _skip_to_main_app,
@@ -43,6 +44,7 @@ except ModuleNotFoundError:
         _get_qemu_factory_mac,
         _http_get,
         _is_bootstrap_root_page,
+        _log_contains_any_since,
         _restart_into_bootstrap,
         _set_security_password,
         _skip_to_main_app,
@@ -122,6 +124,7 @@ def _capture_browser_state_in_headless_chrome(
                     "title": "",
                     "body_text": "",
                     "page_source": "",
+                    "page_boot_id": "",
                     "has_connection_lost_overlay": False,
                     "connection_lost_visible": False,
                     "error": "",
@@ -160,6 +163,7 @@ def _browser_state_details(browser_state: dict, log_path) -> str:
     return (
         f"Browser URL: {browser_state.get('current_url')}\n"
         f"Browser title: {browser_state.get('title')}\n"
+        f"Browser boot id: {browser_state.get('page_boot_id')}\n"
         f"Browser error: {browser_state.get('error')}\n"
         f"Body text:\n{browser_state.get('body_text', '')[:1200]}\n"
         f"DOM snippet:\n{browser_state.get('page_source', '')[:1200]}\n"
@@ -216,6 +220,46 @@ def _assert_connection_lost_popup_visible(
 
 def _body_text_matches(browser_state: dict, pattern: str) -> bool:
     return re.search(pattern, browser_state.get("body_text", ""), flags=re.IGNORECASE) is not None
+
+
+def _get_runtime_status(base_url: str, timeout_s: float = 2.0) -> dict:
+    status, headers, body = _http_get(base_url, "/runtime/status", timeout_s=timeout_s)
+    assert status == 200, (
+        f"Expected 200 from /runtime/status, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+    assert "application/json" in headers.get("Content-Type", ""), (
+        f"/runtime/status did not return JSON. content-type={headers.get('Content-Type', '')}"
+    )
+    payload = json.loads(body)
+    assert isinstance(payload, dict), f"/runtime/status did not return a JSON object: {payload!r}"
+    boot_id = payload.get("boot_id")
+    assert isinstance(boot_id, str) and boot_id, f"/runtime/status did not return a non-empty boot_id: {payload!r}"
+    return payload
+
+
+def _try_get_runtime_status(base_url: str, timeout_s: float = 0.5) -> dict | None:
+    try:
+        status, headers, body = _http_get(base_url, "/runtime/status", timeout_s=timeout_s)
+    except Exception:
+        return None
+
+    if status != 200 or "application/json" not in headers.get("Content-Type", ""):
+        return None
+
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    boot_id = payload.get("boot_id")
+    if not isinstance(boot_id, str) or not boot_id:
+        return None
+
+    return payload
 
 
 def _capture_recovery_exit_transition_states(base_url: str) -> list[dict]:
@@ -437,12 +481,332 @@ def _capture_start_now_transition_states(base_url: str) -> list[dict]:
                     browser.kill()
 
 
+def _capture_handoff_disconnect_states(base_url: str, proc: subprocess.Popen, recovery_mode: bool) -> list[dict]:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/"
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + 8.0
+                last_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    last_state = state
+                    if recovery_mode:
+                        if (
+                            state.get("current_path") == "/"
+                            and state.get("page_ready") == "1"
+                            and "Recovery Mode" in state.get("body_text", "")
+                            and "Exit recovery mode" in state.get("body_text", "")
+                        ):
+                            break
+                    else:
+                        if (
+                            state.get("current_path") == "/"
+                            and state.get("page_ready") == "1"
+                            and "Coinbox is starting" in state.get("body_text", "")
+                            and "Start now" in state.get("body_text", "")
+                        ):
+                            break
+                    time.sleep(0.05)
+                else:
+                    mode_label = "recovery page" if recovery_mode else "bootstrap page"
+                    raise AssertionError(
+                        f"The {mode_label} did not become interactive before the handoff click.\n"
+                        f"Last state: {last_state}"
+                    )
+
+                click_response = _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  const btn = document.getElementById('start-now');"
+                            "  if (!btn) return 'missing-button';"
+                            "  btn.click();"
+                            "  return btn.textContent || '';"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+                click_value = click_response.get("result", {}).get("result", {}).get("value")
+                assert click_value != "missing-button", "Handoff button was not present in the browser DOM."
+
+                captured_states: list[dict] = []
+                disconnect_triggered = False
+                started_at = time.time()
+                deadline = started_at + 10.0
+                while time.time() < deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    state["elapsed_s"] = time.time() - started_at
+                    captured_states.append(state)
+
+                    if not disconnect_triggered:
+                        if (
+                            state.get("current_path") == "/"
+                            and "Starting main application" in state.get("body_text", "")
+                            and "Getting things ready..." in state.get("body_text", "")
+                        ):
+                            _stop_process_group(proc)
+                            disconnect_triggered = True
+                    elif state.get("connection_lost_visible") is True:
+                        break
+
+                    time.sleep(0.05)
+
+                return captured_states
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
+def _capture_settings_restart_action_states(base_url: str, action_button_id: str, log_path) -> list[dict]:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/settings"
+    initial_runtime_status = _get_runtime_status(base_url)
+    initial_boot_id = str(initial_runtime_status.get("boot_id", ""))
+    log_start_pos = log_path.stat().st_size if log_path and log_path.exists() else 0
+    reboot_markers = [
+        "rst:0x1 (POWERON_RESET)",
+        "rst:0x3 (SW_RESET)",
+        "rst:0xc (SW_CPU_RESET)",
+        "main_task: Calling app_main()",
+        "bootstrap: Bootstrap server started",
+    ]
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + 8.0
+                last_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    last_state = state
+                    if (
+                        state.get("current_path") == "/settings"
+                        and state.get("page_ready") == "1"
+                        and state.get("page_boot_id") == initial_boot_id
+                        and "Settings" in state.get("body_text", "")
+                    ):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(
+                        "Settings page did not become interactive before restart-action click.\n"
+                        f"Last state: {last_state}"
+                    )
+
+                _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  window.confirm = () => true;"
+                            "  window.alert = () => {};"
+                            "  return true;"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+
+                click_response = _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "((buttonId) => {"
+                            "  const btn = document.getElementById(buttonId);"
+                            "  if (!btn) return 'missing-button';"
+                            "  btn.click();"
+                            "  return btn.textContent || buttonId;"
+                            f"}})({json.dumps(action_button_id)})"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+                click_value = click_response.get("result", {}).get("result", {}).get("value")
+                assert click_value != "missing-button", (
+                    f"Settings restart action button {action_button_id!r} was not present in the browser DOM."
+                )
+
+                captured_states: list[dict] = []
+                started_at = time.time()
+                deadline = started_at + 20.0
+                while time.time() < deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    runtime_status = _try_get_runtime_status(base_url)
+                    runtime_boot_id = ""
+                    if runtime_status is not None:
+                        runtime_boot_id = str(runtime_status.get("boot_id", ""))
+                    state["elapsed_s"] = time.time() - started_at
+                    state["initial_boot_id"] = initial_boot_id
+                    state["runtime_boot_id"] = runtime_boot_id
+                    state["new_boot_id_seen"] = bool(runtime_boot_id) and runtime_boot_id != initial_boot_id
+                    state["reboot_seen"] = _log_contains_any_since(log_path, log_start_pos, reboot_markers)
+                    state["site_reconnected"] = (
+                        state.get("new_boot_id_seen") is True
+                        and state.get("page_boot_id") == runtime_boot_id
+                        and state.get("connection_lost_visible") is not True
+                    )
+                    state["site_ready"] = (
+                        state.get("site_reconnected") is True
+                        and state.get("page_ready") == "1"
+                    )
+                    captured_states.append(state)
+                    if state.get("site_ready") is True:
+                        break
+                    time.sleep(0.05)
+
+                return captured_states
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
 def _transition_states_details(states: list[dict], log_path) -> str:
     lines = []
     for index, state in enumerate(states[:20], start=1):
         body = state.get("body_text", "").replace("\n", " | ")
         lines.append(
             f"{index}. path={state.get('current_path')} title={state.get('title')} body={body[:220]}"
+        )
+    return "Captured states:\n" + "\n".join(lines) + f"\nLog tail:\n{_tail_log(log_path)}"
+
+
+def _timed_transition_states_details(states: list[dict], log_path) -> str:
+    lines = []
+    for index, state in enumerate(states[:30], start=1):
+        body = state.get("body_text", "").replace("\n", " | ")
+        lines.append(
+            f"{index}. t={float(state.get('elapsed_s', 0.0)):.2f}s"
+            f" path={state.get('current_path')}"
+            f" overlay={state.get('connection_lost_visible')}"
+            f" reboot_seen={state.get('reboot_seen')}"
+            f" page_boot_id={state.get('page_boot_id')}"
+            f" runtime_boot_id={state.get('runtime_boot_id')}"
+            f" new_boot_id={state.get('new_boot_id_seen')}"
+            f" reconnected={state.get('site_reconnected')}"
+            f" ready={state.get('site_ready')}"
+            f" body={body[:220]}"
         )
     return "Captured states:\n" + "\n".join(lines) + f"\nLog tail:\n{_tail_log(log_path)}"
 
@@ -623,6 +987,9 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "title: document.title || '',"
         "html: document.documentElement ? document.documentElement.outerHTML.slice(0, 12000) : '',"
         "bodyText: document.body ? document.body.innerText.slice(0, 4000) : '',"
+        "pageBootId: document.documentElement && document.documentElement.dataset"
+        "  ? document.documentElement.dataset.bootId || ''"
+        "  : '',"
         "pageReady: document.documentElement && document.documentElement.dataset"
         "  ? document.documentElement.dataset.pageReady || ''"
         "  : '',"
@@ -656,6 +1023,7 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "title": str(value.get("title", "")),
         "body_text": str(value.get("bodyText", "")),
         "page_source": str(value.get("html", "")),
+        "page_boot_id": str(value.get("pageBootId", "")),
         "page_ready": str(value.get("pageReady", "")),
         "has_connection_lost_overlay": bool(value.get("hasConnectionLostOverlay", False)),
         "connection_lost_visible": bool(value.get("connectionLostVisible", False)),
@@ -1400,6 +1768,252 @@ def test_settings_browser_shows_network_mac(qemu_mainapp_instance):
         message="Settings page did not render the expected Network card MAC address.",
     )
     assert _body_text_matches(browser_state, rf"\b{re.escape(expected_mac)}\b"), details
+
+
+# Test: The shared runtime-status boot ID and page-root boot ID should track the active boot instance.
+# 1. Read `/runtime/status` in the running main app and capture its boot ID.
+# 2. Open `/settings` in a browser and assert the page root exposes the same boot ID.
+# 3. Restart the device and wait until bootstrap is back.
+# 4. Assert `/runtime/status` now reports a different boot ID.
+# 5. Open `/` again in a browser and assert the page root exposes that new boot ID.
+def test_runtime_status_and_page_root_boot_id_change_after_restart(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    initial_status = _get_runtime_status(base_url)
+    initial_boot_id = str(initial_status.get("boot_id", ""))
+    assert initial_boot_id, f"Missing initial boot_id from /runtime/status: {initial_status!r}"
+
+    initial_browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/settings",
+        wait_condition=lambda state: (
+            state.get("current_path") == "/settings"
+            and state.get("page_ready") == "1"
+            and state.get("page_boot_id") == initial_boot_id
+        ),
+    )
+    initial_details = _browser_state_details(initial_browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=initial_browser_state,
+        expected_path="/settings",
+        expected_title_fragment="settings",
+        log_path=log_path,
+        message="Settings page did not load before validating the initial page-root boot ID.",
+    )
+    assert initial_browser_state.get("page_boot_id") == initial_boot_id, (
+        "The settings page root boot ID did not match /runtime/status before restart.\n"
+        f"{initial_details}"
+    )
+
+    _restart_into_bootstrap(base_url, log_path)
+
+    rebooted_status = _get_runtime_status(base_url)
+    rebooted_boot_id = str(rebooted_status.get("boot_id", ""))
+    assert rebooted_boot_id, f"Missing rebooted boot_id from /runtime/status: {rebooted_status!r}"
+    assert rebooted_boot_id != initial_boot_id, (
+        "Expected /runtime/status boot_id to change after restart.\n"
+        f"before={initial_boot_id!r} after={rebooted_boot_id!r}"
+    )
+
+    rebooted_browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/",
+        wait_condition=lambda state: (
+            state.get("current_path") == "/"
+            and state.get("page_ready") == "1"
+            and state.get("page_boot_id") == rebooted_boot_id
+        ),
+    )
+    rebooted_details = _browser_state_details(rebooted_browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=rebooted_browser_state,
+        expected_path="/",
+        expected_title_fragment="starting",
+        log_path=log_path,
+        message="Bootstrap root page did not load before validating the rebooted page-root boot ID.",
+    )
+    assert rebooted_browser_state.get("page_boot_id") == rebooted_boot_id, (
+        "The bootstrap root page boot ID did not match /runtime/status after restart.\n"
+        f"{rebooted_details}"
+    )
+
+
+# Test: Settings actions that reboot the device should immediately show the connection-lost popup.
+# 1. Start in the main app on `/settings`.
+# 2. Trigger one of the settings-page reboot actions.
+# 3. Assert the browser shows the built-in "Connection lost!" overlay on `/settings`
+#    without waiting for a manual refresh or a different page.
+@pytest.mark.parametrize(
+    ("action_button_id", "action_label"),
+    [
+        ("restart-device", "restart device"),
+        ("reset-settings", "reset settings"),
+    ],
+)
+def test_settings_restart_actions_browser_immediately_show_connection_lost_popup(
+    qemu_mainapp_instance,
+    action_button_id: str,
+    action_label: str,
+):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    states = _capture_settings_restart_action_states(base_url, action_button_id, log_path)
+    details = _timed_transition_states_details(states, log_path)
+    assert states, f"No browser states were captured after triggering {action_label} from settings.\n{details}"
+
+    overlay_state = next((state for state in states if state.get("connection_lost_visible") is True), None)
+    assert overlay_state is not None, (
+        f"The browser never showed the connection-lost overlay after triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    assert overlay_state.get("current_path") == "/settings", (
+        f"The connection-lost overlay for {action_label} did not appear while still on the settings page.\n"
+        f"{details}"
+    )
+    assert float(overlay_state.get("elapsed_s", 999.0)) <= 2.0, (
+        f"The connection-lost overlay was not shown immediately after triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    assert "Connection lost!" in overlay_state.get("body_text", ""), (
+        f"The expected overlay text was not visible after triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    initial_boot_id = str(states[0].get("initial_boot_id", "")) if states else ""
+    assert initial_boot_id, (
+        f"Did not capture the initial boot_id before triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    boot_id_change_state = next((state for state in states if state.get("new_boot_id_seen") is True), None)
+    assert boot_id_change_state is not None, (
+        f"Did not observe /runtime/status report a new boot_id after triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    reboot_state = next((state for state in states if state.get("reboot_seen") is True), None)
+    assert reboot_state is not None, (
+        f"Did not observe a reboot marker in the QEMU log after triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    assert not any(
+        state.get("current_path") != "/settings" for state in states[: states.index(overlay_state) + 1]
+    ), (
+        f"The browser left /settings before showing the connection-lost overlay for {action_label}.\n"
+        f"{details}"
+    )
+    overlay_index = states.index(overlay_state)
+    boot_id_change_index = states.index(boot_id_change_state)
+    assert not any(
+        state.get("connection_lost_visible") is not True for state in states[overlay_index:boot_id_change_index]
+    ), (
+        f"The connection-lost overlay did not stay visible until a different boot instance became reachable for {action_label}.\n"
+        f"{details}"
+    )
+    reconnect_state = next((state for state in states if state.get("site_reconnected") is True), None)
+    assert reconnect_state is not None, (
+        f"The browser did not automatically reconnect after triggering {action_label} from settings.\n"
+        f"{details}"
+    )
+    reconnect_index = states.index(reconnect_state)
+    reboot_index = states.index(reboot_state)
+    assert reconnect_index >= boot_id_change_index, (
+        f"The browser reported reconnection before /runtime/status exposed a new boot_id for {action_label}.\n"
+        f"{details}"
+    )
+    assert reconnect_index >= reboot_index, (
+        f"The browser reported reconnection before the reboot was observed for {action_label}.\n"
+        f"{details}"
+    )
+    assert reconnect_state.get("page_boot_id") == reconnect_state.get("runtime_boot_id"), (
+        f"The browser reconnected to a page whose root boot_id did not match /runtime/status for {action_label}.\n"
+        f"{details}"
+    )
+    assert reconnect_state.get("page_boot_id") != initial_boot_id, (
+        f"The browser reconnected without ever leaving the old boot instance for {action_label}.\n"
+        f"{details}"
+    )
+    assert float(reconnect_state.get("elapsed_s", 999.0)) - float(boot_id_change_state.get("elapsed_s", 0.0)) <= 1.0, (
+        f"The browser did not reconnect soon after a new boot_id became reachable for {action_label}.\n"
+        f"{details}"
+    )
+    assert reconnect_state.get("connection_lost_visible") is not True, (
+        f"The connection-lost overlay did not clear after the new boot instance became available for {action_label}.\n"
+        f"{details}"
+    )
+    ready_state = next((state for state in states if state.get("site_ready") is True), None)
+    assert ready_state is not None, (
+        f"The browser never settled on a ready page after reconnecting for {action_label}.\n"
+        f"{details}"
+    )
+    assert ready_state.get("page_ready") == "1", (
+        f"The browser did not eventually reach a ready page after reconnecting for {action_label}.\n"
+        f"{details}"
+    )
+
+
+# Test: The handoff card should also show the connection-lost popup if the device disappears mid-handoff.
+# 1. Start either from the normal bootstrap screen or from recovery mode.
+# 2. Click the handoff button so the page shows "Starting main application / Getting things ready...".
+# 3. Stop the emulator while that handoff card is visible.
+# 4. Assert the built-in connection-lost overlay appears on top of that handoff card.
+@pytest.mark.parametrize(
+    ("recovery_mode", "action_label"),
+    [
+        (False, "bootstrap start-now handoff"),
+        (True, "recovery exit handoff"),
+    ],
+)
+def test_handoff_browser_shows_connection_lost_popup_after_disconnect(
+    qemu_bootstrap_instance,
+    recovery_mode: bool,
+    action_label: str,
+):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+    proc = qemu_bootstrap_instance["process"]
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_bootstrap_root_page(status, headers, body)
+    if recovery_mode:
+        _enter_recovery_mode(base_url, log_path)
+
+    states = _capture_handoff_disconnect_states(base_url, proc, recovery_mode)
+    details = _timed_transition_states_details(states, log_path)
+    assert states, f"No browser states were captured while exercising the {action_label}.\n{details}"
+
+    handoff_state = next(
+        (
+            state for state in states
+            if state.get("current_path") == "/"
+            and "Starting main application" in state.get("body_text", "")
+            and "Getting things ready..." in state.get("body_text", "")
+        ),
+        None,
+    )
+    assert handoff_state is not None, (
+        f"Did not observe the intended handoff card before disconnecting during the {action_label}.\n"
+        f"{details}"
+    )
+
+    overlay_state = next((state for state in states if state.get("connection_lost_visible") is True), None)
+    assert overlay_state is not None, (
+        f"The browser never showed the connection-lost overlay during the {action_label}.\n"
+        f"{details}"
+    )
+    assert overlay_state.get("current_path") == "/", (
+        f"The browser left the handoff page before showing the connection-lost overlay during the {action_label}.\n"
+        f"{details}"
+    )
+    assert "Connection lost!" in overlay_state.get("body_text", ""), (
+        f"The expected overlay text was not visible during the {action_label}.\n"
+        f"{details}"
+    )
+    assert "Starting main application" in overlay_state.get("body_text", ""), (
+        f"The underlying handoff title was not still visible when the overlay appeared during the {action_label}.\n"
+        f"{details}"
+    )
+    assert "Getting things ready..." in overlay_state.get("body_text", ""), (
+        f"The underlying handoff body was not still visible when the overlay appeared during the {action_label}.\n"
+        f"{details}"
+    )
 
 
 # Test: Bootstrap root page should show the connection-lost popup after the device disappears.

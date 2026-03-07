@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-boot-id="{{BOOT_ID}}">
 
 <head>
   <meta charset="UTF-8">
@@ -417,6 +417,9 @@
     const MAIN_HANDOFF_POLL_MS = 250;
     const MAIN_HANDOFF_SKIP_RETRY_MS = 750;
     const MAIN_HANDOFF_REQUEST_TIMEOUT_MS = 1500;
+    const MAIN_HANDOFF_CONNECTION_MONITOR_DELAY_MS = 4000;
+    const MAIN_HANDOFF_CONNECTION_MONITOR_POLL_MS = 500;
+    document.documentElement.dataset.pageReady = '1';
     function markLaserExtensionSeen() {
       laserExtensionSeen = true;
       if (extendNote) {
@@ -566,6 +569,27 @@
       }
     }
 
+    function startHandoffDisconnectWatch() {
+      const monitor = window.COINBOX_CONNECTION_MONITOR;
+      if (!monitor || typeof monitor.startDisconnectWatch !== 'function') {
+        return;
+      }
+
+      monitor.startDisconnectWatch({
+        delayMs: MAIN_HANDOFF_CONNECTION_MONITOR_DELAY_MS,
+        pollMs: MAIN_HANDOFF_CONNECTION_MONITOR_POLL_MS,
+      });
+    }
+
+    function clearHandoffDisconnectWatch() {
+      const monitor = window.COINBOX_CONNECTION_MONITOR;
+      if (!monitor || typeof monitor.clearDisconnectWatch !== 'function') {
+        return;
+      }
+
+      monitor.clearDisconnectWatch();
+    }
+
     function tryNavigateToMainApp(finalUrl) {
       if (handoffCompleted) {
         return true;
@@ -579,6 +603,7 @@
 
       handoffCompleted = true;
       clearHandoffTimers();
+      clearHandoffDisconnectWatch();
       location.replace(resolvedUrl.toString());
       return true;
     }
@@ -628,6 +653,7 @@
       isRecovery = 0;
       autoRefresh = 0;
       renderStartingCard();
+      startHandoffDisconnectWatch();
 
       clearHandoffTimers();
       if (triggerSkip) {
@@ -643,6 +669,7 @@
     }
 
     function renderRecovery() {
+      clearHandoffDisconnectWatch();
       if (cardEl) cardEl.classList.add('recovery-active');
       titleEl.textContent = 'Recovery Mode';
       statusRow.style.display = 'flex';
@@ -952,7 +979,6 @@
     setInterval(() => { if (isRecovery && !forceHandoff) { refreshDeviceIps(); } }, 5000);
     setInterval(() => { if (!isRecovery && !forceHandoff) { syncCountdownHint(); } }, 1500);
     tick(); setInterval(tick, 1000);
-    document.documentElement.dataset.pageReady = '1';
   </script>
 </body>
 

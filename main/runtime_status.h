@@ -1,0 +1,19 @@
+#pragma once
+
+#include "esp_err.h"
+#include "esp_http_server.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Interface
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+const char *runtime_status_boot_id(void);
+esp_err_t runtime_status_send_json(httpd_req_t *req, const char *mode);
+
+#ifdef __cplusplus
+}
+#endif

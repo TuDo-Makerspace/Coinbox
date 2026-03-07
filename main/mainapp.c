@@ -22,6 +22,7 @@
 #include "device_info.h"
 #include "mdns_service.h"
 #include "network.h"
+#include "runtime_status.h"
 #include "sdkconfig.h"
 
 #include "esp_vfs.h"
@@ -834,6 +835,38 @@ static bool replace_placeholder(char *buffer, size_t buffer_size, const char *pl
     return replaced;
 }
 
+static esp_err_t render_embedded_html_with_boot_id(const unsigned char *start,
+                                                   const unsigned char *end,
+                                                   size_t extra_headroom,
+                                                   char **out_page)
+{
+    if (!start || !end || !out_page || end < start) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const size_t template_len = (size_t)(end - start);
+    if (template_len >= (SIZE_MAX - (extra_headroom + 1))) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const size_t page_capacity = template_len + extra_headroom + 1;
+    char *page = malloc(page_capacity);
+    if (!page) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(page, start, template_len);
+    page[template_len] = '\0';
+
+    if (!replace_placeholder(page, page_capacity, "{{BOOT_ID}}", runtime_status_boot_id())) {
+        free(page);
+        return ESP_FAIL;
+    }
+
+    *out_page = page;
+    return ESP_OK;
+}
+
 static esp_err_t http_resp_settings_html(httpd_req_t *req)
 {
     esp_err_t auth_err = security_require_auth(req);
@@ -869,7 +902,8 @@ static esp_err_t http_resp_settings_html(httpd_req_t *req)
         strlcpy(recovery_code, "unknown", sizeof(recovery_code));
     }
 
-    if (!replace_placeholder(page, page_capacity, "{{DEVICE_MAC}}", mac) ||
+    if (!replace_placeholder(page, page_capacity, "{{BOOT_ID}}", runtime_status_boot_id()) ||
+        !replace_placeholder(page, page_capacity, "{{DEVICE_MAC}}", mac) ||
         !replace_placeholder(page, page_capacity, "{{RECOVERY_CODE}}", recovery_code) ||
         !replace_placeholder(page, page_capacity, "{{FIRMWARE_VERSION}}", device_info_firmware_version()) ||
         !replace_placeholder(page, page_capacity, "{{HARDWARE_VERSION}}", device_info_hardware_version()) ||
@@ -914,10 +948,17 @@ static esp_err_t http_resp_login_html(httpd_req_t *req)
 
     extern const unsigned char login_html_start[] asm("_binary_login_html_start");
     extern const unsigned char login_html_end[] asm("_binary_login_html_end");
-    const size_t login_html_size = (login_html_end - login_html_start);
+    char *page = NULL;
+    esp_err_t render_err = render_embedded_html_with_boot_id(login_html_start, login_html_end, 64, &page);
+    if (render_err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return render_err == ESP_FAIL ? ESP_FAIL : render_err;
+    }
+
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, (const char *)login_html_start, login_html_size);
+    httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+    free(page);
     return ESP_OK;
 }
 
@@ -1288,6 +1329,11 @@ static esp_err_t device_info_get_handler(httpd_req_t *req)
     return send_device_info_json(req);
 }
 
+static esp_err_t runtime_status_get_handler(httpd_req_t *req)
+{
+    return runtime_status_send_json(req, "mainapp");
+}
+
 static esp_err_t network_ips_handler(httpd_req_t *req)
 {
     esp_err_t auth_err = security_require_auth(req);
@@ -1521,9 +1567,16 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
     /* embedded sounds.html */
     extern const unsigned char upload_script_start[] asm("_binary_sounds_html_start");
     extern const unsigned char upload_script_end[]   asm("_binary_sounds_html_end");
-    const size_t upload_script_size = (upload_script_end - upload_script_start);
+    char *page_head = NULL;
+    esp_err_t render_err = render_embedded_html_with_boot_id(upload_script_start, upload_script_end, 64, &page_head);
+    if (render_err != ESP_OK) {
+        closedir(dir);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return render_err == ESP_FAIL ? ESP_FAIL : render_err;
+    }
 
-    httpd_resp_send_chunk(req, (const char *)upload_script_start, upload_script_size);
+    httpd_resp_send_chunk(req, page_head, HTTPD_RESP_USE_STRLEN);
+    free(page_head);
 
     /* For a flat layout, advertise CURRENT_PATH as "/sounds/" */
     httpd_resp_sendstr_chunk(req, "<script>window.CURRENT_PATH='/sounds/';</script>");
@@ -3035,7 +3088,7 @@ esp_err_t start_mainapp(void)
     /* Directory listings plus metadata lookups use a bit more stack now that
      * payloads and metadata are separate; give the HTTPD task extra room. */
     config.stack_size = 8192;
-    config.max_uri_handlers = 45;
+    config.max_uri_handlers = 48;
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
@@ -3079,6 +3132,14 @@ esp_err_t start_mainapp(void)
         .user_ctx  = NULL
     };
     httpd_register_uri_handler(server, &glyphs_css);
+
+    httpd_uri_t runtime_status = {
+        .uri       = "/runtime/status",
+        .method    = HTTP_GET,
+        .handler   = runtime_status_get_handler,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &runtime_status);
 
     httpd_uri_t login_page = {
         .uri = "/login",
