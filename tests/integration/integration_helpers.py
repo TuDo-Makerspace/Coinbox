@@ -784,11 +784,13 @@ def _ensure_qemu_firmware_built():
             )
 
         if result.returncode != 0:
-            tail = "\n".join(result.stdout.splitlines()[-120:])
+            stdout_tail = "\n".join(result.stdout.splitlines()[-120:])
+            stderr_tail = "\n".join(result.stderr.splitlines()[-120:])
             pytest.fail(
                 "Failed to build firmware for QEMU integration tests.\n"
                 f"Command: {' '.join(build_cmd)}\n"
-                f"Log tail:\n{tail}"
+                f"stdout tail:\n{stdout_tail}\n"
+                f"stderr tail:\n{stderr_tail}"
             )
 
         _QEMU_BUILD_DONE = True

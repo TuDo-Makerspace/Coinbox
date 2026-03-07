@@ -1,0 +1,112 @@
+name: coinbox-integration
+
+x-integration-env: &integration-env
+  ADF_PATH: ${ADF_PATH:?Set ADF_PATH before running docker compose}
+  CLICOLOR_FORCE: ${CLICOLOR_FORCE:-}
+  COINBOX_TEST_RESULTS_ROOT: /results
+  FORCE_COLOR: ${FORCE_COLOR:-}
+  HOME: /root
+  IDF_GIT_SAFE_DIR: /work
+  NO_COLOR: ${NO_COLOR:-}
+  PY_COLORS: ${PY_COLORS:-}
+  PYTHONDONTWRITEBYTECODE: "1"
+
+x-integration-test: &integration-test
+  build:
+    context: ./docker
+    dockerfile: integration-tests.Dockerfile
+  init: true
+  working_dir: /work
+  volumes:
+    - ../..:/work
+    - ${ADF_PATH:?Set ADF_PATH before running docker compose}:${ADF_PATH:?Set ADF_PATH before running docker compose}:ro
+    - ${COINBOX_RESULTS_ROOT:-/tmp/coinbox-integration-results}:/results
+  command:
+    - python
+    - tests/integration/docker/run_containerized_test.py
+
+services:
+  integration-test-audio:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-audio
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-audio
+      TEST_TARGET: tests/integration/test_audio.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_audio
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-audio/qemu.log
+
+  integration-test-auth:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-auth
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-auth
+      TEST_TARGET: tests/integration/test_auth.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_auth
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-auth/qemu.log
+
+  integration-test-bootstrap:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-bootstrap
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-bootstrap
+      TEST_TARGET: tests/integration/test_bootstrap.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_bootstrap
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-bootstrap/qemu.log
+
+  integration-test-browser:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-browser
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-browser
+      TEST_TARGET: tests/integration/test_browser.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_browser
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-browser/qemu.log
+
+  integration-test-gpio:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-gpio
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-gpio
+      TEST_TARGET: tests/integration/test_gpio.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_gpio
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-gpio/qemu.log
+
+  integration-test-sounds:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-sounds
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-sounds
+      TEST_TARGET: tests/integration/test_sounds.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_sounds
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-sounds/qemu.log
+
+  integration-test-system:
+    <<: *integration-test
+    environment:
+      <<: *integration-env
+      COINBOX_SERVICE_NAME: integration-test-system
+      COINBOX_TEST_ARTIFACT_DIR: /results/integration-test-system
+      TEST_TARGET: tests/integration/test_system.py
+      COINBOX_TEST_BUILD_DIR: /work/build_qemu_integration_test_system
+      COINBOX_TEST_QEMU_LOG_PATH: /results/integration-test-system/qemu.log
+
+  fileserver-mock:
+    image: node:18-alpine
+    working_dir: /app
+    command: sh -c "npm install && node mock_server.js"
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    volumes:
+      - ../..:/app
+      - node_modules_cache:/app/node_modules
+
+volumes:
+  node_modules_cache:

@@ -812,6 +812,12 @@ def _timed_transition_states_details(states: list[dict], log_path) -> str:
 
 
 def _find_browser_binary() -> str | None:
+    env_path = os.environ.get("CHROME_BIN", "").strip()
+    if env_path:
+        resolved_env = os.path.realpath(env_path)
+        if os.path.isfile(resolved_env) and os.access(resolved_env, os.X_OK):
+            return resolved_env
+
     for candidate in ("google-chrome", "google-chrome-stable", "chromium-browser", "chromium"):
         path = shutil.which(candidate)
         if not path:
@@ -1095,10 +1101,113 @@ def _cdp_capture_page_diagnostics(sock: socket.socket, command_id: int) -> dict:
     }
 
 
+def _script_paths_present(browser_diagnostics: dict, expected_script_paths: tuple[str, ...]) -> bool:
+    script_paths = {str(path) for path in browser_diagnostics.get("script_paths", [])}
+    return all(path in script_paths for path in expected_script_paths)
+
+
+def _resource_timings_ready(browser_diagnostics: dict, expected_script_paths: tuple[str, ...]) -> bool:
+    for script_path in expected_script_paths:
+        matches = [
+            entry
+            for entry in browser_diagnostics.get("resource_timings", [])
+            if _normalize_resource_path(str(entry.get("name", ""))) == script_path
+        ]
+        if not matches:
+            return False
+        if not any(float(entry.get("responseEnd", 0.0)) > 0.0 for entry in matches):
+            return False
+    return True
+
+
+def _page_load_diagnostics_ready(
+    browser_diagnostics: dict,
+    expected_path: str,
+    expected_script_paths: tuple[str, ...],
+    require_navbar: bool = False,
+) -> bool:
+    if browser_diagnostics.get("current_path") != expected_path:
+        return False
+    if browser_diagnostics.get("page_ready") != "1":
+        return False
+    if _first_contentful_paint_ms(browser_diagnostics) is None:
+        return False
+    if not _script_paths_present(browser_diagnostics, expected_script_paths):
+        return False
+    if not _resource_timings_ready(browser_diagnostics, expected_script_paths):
+        return False
+    if browser_diagnostics.get("has_connection_monitor_installed") is not True:
+        return False
+    if browser_diagnostics.get("has_glyph_api") is not True:
+        return False
+    if browser_diagnostics.get("has_glyph_layer") is not True:
+        return False
+    if require_navbar:
+        if browser_diagnostics.get("has_navbar_style") is not True:
+            return False
+        if browser_diagnostics.get("navbar_links") != ["Sounds", "Settings"]:
+            return False
+    return True
+
+
+def _diagnostics_from_state(state: dict) -> dict:
+    return {
+        "current_url": str(state.get("current_url", "")),
+        "current_path": str(state.get("current_path", "")) or "/",
+        "title": str(state.get("title", "")),
+        "body_text": str(state.get("body_text", "")),
+        "page_source": str(state.get("page_source", "")),
+        "page_ready": str(state.get("page_ready", "")),
+        "script_paths": [],
+        "paint_timings": [],
+        "resource_timings": [],
+        "has_connection_monitor_installed": False,
+        "has_glyph_api": False,
+        "has_glyph_layer": False,
+        "has_navbar_style": False,
+        "navbar_links": [],
+        "error": str(state.get("error", "")),
+    }
+
+
+def _capture_settled_page_diagnostics(
+    sock: socket.socket,
+    next_id: int,
+    last_state: dict,
+    settle_condition=None,
+    wait_s: float = 5.0,
+    poll_s: float = 0.1,
+) -> tuple[dict, int]:
+    last_diagnostics: dict | None = None
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        try:
+            state = _cdp_capture_page_state(sock, next_id)
+            next_id += 1
+            last_state = state
+
+            diagnostics = _cdp_capture_page_diagnostics(sock, next_id)
+            next_id += 1
+            diagnostics["error"] = last_state.get("error", "")
+            last_diagnostics = diagnostics
+
+            if settle_condition is None or settle_condition(diagnostics):
+                return diagnostics, next_id
+        except Exception as exc:
+            last_state["error"] = f"{type(exc).__name__}: {exc}"
+        time.sleep(poll_s)
+
+    if last_diagnostics is None:
+        last_diagnostics = _diagnostics_from_state(last_state)
+    last_diagnostics["error"] = last_state.get("error", "")
+    return last_diagnostics, next_id
+
+
 def _capture_page_load_diagnostics_in_headless_chrome(
     url: str,
     wait_paths: tuple[str, ...] = (),
     wait_condition=None,
+    settle_condition=None,
     wait_s: float = 8.0,
 ) -> dict:
     chrome_binary = _find_browser_binary()
@@ -1172,9 +1281,13 @@ def _capture_page_load_diagnostics_in_headless_chrome(
                         last_state["error"] = f"{type(exc).__name__}: {exc}"
                     time.sleep(0.2)
 
-                diagnostics = _cdp_capture_page_diagnostics(sock, next_id)
-                next_id += 1
-                diagnostics["error"] = last_state.get("error", "")
+                diagnostics, next_id = _capture_settled_page_diagnostics(
+                    sock,
+                    next_id,
+                    last_state,
+                    settle_condition=settle_condition,
+                    wait_s=wait_s,
+                )
                 return diagnostics
             finally:
                 try:
@@ -1272,7 +1385,7 @@ def _capture_start_now_load_diagnostics(base_url: str) -> dict:
                 click_value = click_response.get("result", {}).get("result", {}).get("value")
                 assert click_value != "missing-button", "Bootstrap start-now button was not present in the browser DOM."
 
-                deadline = time.time() + 5.0
+                deadline = time.time() + 8.0
                 last_state = {
                     "current_url": url,
                     "current_path": "/",
@@ -1293,9 +1406,18 @@ def _capture_start_now_load_diagnostics(base_url: str) -> dict:
                         last_state["error"] = f"{type(exc).__name__}: {exc}"
                     time.sleep(0.05)
 
-                diagnostics = _cdp_capture_page_diagnostics(sock, next_id)
-                next_id += 1
-                diagnostics["error"] = last_state.get("error", "")
+                diagnostics, next_id = _capture_settled_page_diagnostics(
+                    sock,
+                    next_id,
+                    last_state,
+                    settle_condition=lambda diagnostics: _page_load_diagnostics_ready(
+                        diagnostics,
+                        expected_path="/sounds/",
+                        expected_script_paths=("/connection_monitor.js", "/navbar.js", "/glyphs.js"),
+                        require_navbar=True,
+                    ),
+                    wait_s=8.0,
+                )
                 return diagnostics
             finally:
                 try:
@@ -1502,9 +1624,17 @@ def test_bootstrap_browser_loads_javascript_dependencies_before_first_paint(qemu
     browser_diagnostics = _capture_page_load_diagnostics_in_headless_chrome(
         f"{base_url}/",
         wait_condition=lambda state: (
-            "Coinbox is starting" in state.get("body_text", "")
+            state.get("page_ready") == "1"
+            and state.get("current_path") == "/"
+            and "Coinbox is starting" in state.get("body_text", "")
             and "Start now" in state.get("body_text", "")
         ),
+        settle_condition=lambda diagnostics: _page_load_diagnostics_ready(
+            diagnostics,
+            expected_path="/",
+            expected_script_paths=("/connection_monitor.js", "/glyphs.js"),
+        ),
+        wait_s=10.0,
     )
     details = _browser_load_diagnostics_details(browser_diagnostics, log_path)
     _assert_browser_lands_on(
