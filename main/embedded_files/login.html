@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coinbox Login</title>
+  <script>document.documentElement.dataset.pageReady = '0';</script>
   <link rel="stylesheet" href="/glyphs.css">
+  <script src="/connection_monitor.js"></script>
+  <script src="/glyphs.js"></script>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -25,6 +28,10 @@
       position: relative;
       overflow-x: hidden;
       isolation: isolate;
+    }
+
+    html[data-page-ready="0"] body {
+      visibility: hidden;
     }
     .card {
       width: min(440px, 100%);
@@ -83,9 +90,6 @@
     <button id="submit" type="button">Unlock</button>
     <div id="error" class="error" aria-live="polite"></div>
   </div>
-
-  <script src="/connection_monitor.js"></script>
-  <script src="/glyphs.js"></script>
   <script>
     if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
       window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
@@ -149,6 +153,7 @@
         submit();
       }
     });
+    document.documentElement.dataset.pageReady = '1';
   </script>
 </body>
 </html>

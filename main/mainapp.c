@@ -3048,6 +3048,38 @@ esp_err_t start_mainapp(void)
         return ESP_FAIL;
     }
 
+    httpd_uri_t navbar_js = {
+        .uri       = "/navbar.js",
+        .method    = HTTP_GET,
+        .handler   = http_resp_navbar_js,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &navbar_js);
+
+    httpd_uri_t connection_monitor_js = {
+        .uri       = "/connection_monitor.js",
+        .method    = HTTP_GET,
+        .handler   = http_resp_connection_monitor_js,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &connection_monitor_js);
+
+    httpd_uri_t glyphs_js = {
+        .uri       = "/glyphs.js",
+        .method    = HTTP_GET,
+        .handler   = http_resp_glyphs_js,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &glyphs_js);
+
+    httpd_uri_t glyphs_css = {
+        .uri       = "/glyphs.css",
+        .method    = HTTP_GET,
+        .handler   = http_resp_glyphs_css,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &glyphs_css);
+
     httpd_uri_t login_page = {
         .uri = "/login",
         .method = HTTP_GET,
@@ -3103,38 +3135,6 @@ esp_err_t start_mainapp(void)
         .user_ctx  = NULL
     };
     httpd_register_uri_handler(server, &sounds_index);
-
-    httpd_uri_t navbar_js = {
-        .uri       = "/navbar.js",
-        .method    = HTTP_GET,
-        .handler   = http_resp_navbar_js,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &navbar_js);
-
-    httpd_uri_t connection_monitor_js = {
-        .uri       = "/connection_monitor.js",
-        .method    = HTTP_GET,
-        .handler   = http_resp_connection_monitor_js,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &connection_monitor_js);
-
-    httpd_uri_t glyphs_js = {
-        .uri       = "/glyphs.js",
-        .method    = HTTP_GET,
-        .handler   = http_resp_glyphs_js,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &glyphs_js);
-
-    httpd_uri_t glyphs_css = {
-        .uri       = "/glyphs.css",
-        .method    = HTTP_GET,
-        .handler   = http_resp_glyphs_css,
-        .user_ctx  = NULL
-    };
-    httpd_register_uri_handler(server, &glyphs_css);
 
     httpd_uri_t ota_update = {
         .uri = "/update",

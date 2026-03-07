@@ -5,7 +5,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Coinbox - Starting</title>
+  <script>document.documentElement.dataset.pageReady = '0';</script>
   <link rel="stylesheet" href="/glyphs.css">
+  <script src="/connection_monitor.js"></script>
+  <script src="/glyphs.js"></script>
   <style>
     :root {
       --text: #0f172a;
@@ -32,6 +35,10 @@
       position: relative;
       overflow-x: hidden;
       isolation: isolate;
+    }
+
+    html[data-page-ready="0"] body {
+      visibility: hidden;
     }
 
     .content {
@@ -363,8 +370,6 @@
       </div>
     </div>
   </div>
-  <script src="/connection_monitor.js"></script>
-  <script src="/glyphs.js"></script>
   <script>
     if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
       window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
@@ -947,6 +952,7 @@
     setInterval(() => { if (isRecovery && !forceHandoff) { refreshDeviceIps(); } }, 5000);
     setInterval(() => { if (!isRecovery && !forceHandoff) { syncCountdownHint(); } }, 1500);
     tick(); setInterval(tick, 1000);
+    document.documentElement.dataset.pageReady = '1';
   </script>
 </body>
 

@@ -1084,7 +1084,10 @@ esp_err_t bootstrap(void)
     };
 #endif
 
-    if (httpd_register_uri_handler(s_bootstrap_server, &ota_update) != ESP_OK ||
+    if (httpd_register_uri_handler(s_bootstrap_server, &connection_monitor_js) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &glyphs_js) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &glyphs_css) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &ota_update) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &root) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &recovery) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &skip) != ESP_OK ||
@@ -1092,10 +1095,7 @@ esp_err_t bootstrap(void)
         httpd_register_uri_handler(s_bootstrap_server, &reset_settings) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &network_ips) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &recovery_auth) != ESP_OK ||
-        httpd_register_uri_handler(s_bootstrap_server, &device_info) != ESP_OK ||
-        httpd_register_uri_handler(s_bootstrap_server, &connection_monitor_js) != ESP_OK ||
-        httpd_register_uri_handler(s_bootstrap_server, &glyphs_js) != ESP_OK ||
-        httpd_register_uri_handler(s_bootstrap_server, &glyphs_css) != ESP_OK) {
+        httpd_register_uri_handler(s_bootstrap_server, &device_info) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register bootstrap handlers");
         cancel_recovery_timer();
         cancel_start_task();

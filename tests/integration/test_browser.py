@@ -268,13 +268,18 @@ def _capture_recovery_exit_transition_states(base_url: str) -> list[dict]:
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 5.0
+                ready_deadline = time.time() + 8.0
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
                     next_id += 1
                     last_state = state
-                    if "Recovery Mode" in state.get("body_text", "") and "Exit recovery mode" in state.get("body_text", ""):
+                    if (
+                        state.get("current_path") == "/"
+                        and state.get("page_ready") == "1"
+                        and "Recovery Mode" in state.get("body_text", "")
+                        and "Exit recovery mode" in state.get("body_text", "")
+                    ):
                         break
                     time.sleep(0.05)
                 else:
@@ -375,13 +380,13 @@ def _capture_start_now_transition_states(base_url: str) -> list[dict]:
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 5.0
+                ready_deadline = time.time() + 8.0
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
                     next_id += 1
                     last_state = state
-                    if "Coinbox is starting" in state.get("body_text", "") and "Start now" in state.get("body_text", ""):
+                    if state.get("current_path") == "/" and state.get("page_ready") == "1":
                         break
                     time.sleep(0.05)
                 else:
@@ -618,6 +623,9 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "title: document.title || '',"
         "html: document.documentElement ? document.documentElement.outerHTML.slice(0, 12000) : '',"
         "bodyText: document.body ? document.body.innerText.slice(0, 4000) : '',"
+        "pageReady: document.documentElement && document.documentElement.dataset"
+        "  ? document.documentElement.dataset.pageReady || ''"
+        "  : '',"
         "hasConnectionLostOverlay: !!document.getElementById('coinbox-connection-lost-overlay')"
         "  || !!document.getElementById('connection-lost-overlay'),"
         "connectionLostVisible: (() => {"
@@ -648,10 +656,390 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "title": str(value.get("title", "")),
         "body_text": str(value.get("bodyText", "")),
         "page_source": str(value.get("html", "")),
+        "page_ready": str(value.get("pageReady", "")),
         "has_connection_lost_overlay": bool(value.get("hasConnectionLostOverlay", False)),
         "connection_lost_visible": bool(value.get("connectionLostVisible", False)),
         "error": "",
     }
+
+
+def _cdp_capture_page_diagnostics(sock: socket.socket, command_id: int) -> dict:
+    expression = (
+        "(() => ({"
+        "href: window.location.href,"
+        "path: window.location.pathname || '/',"
+        "title: document.title || '',"
+        "html: document.documentElement ? document.documentElement.outerHTML.slice(0, 12000) : '',"
+        "bodyText: document.body ? document.body.innerText.slice(0, 4000) : '',"
+        "pageReady: document.documentElement && document.documentElement.dataset"
+        "  ? document.documentElement.dataset.pageReady || ''"
+        "  : '',"
+        "scriptPaths: Array.from(document.scripts || [])"
+        "  .map((script) => script && script.src ? new URL(script.src, window.location.href).pathname : '')"
+        "  .filter(Boolean),"
+        "paintTimings: performance.getEntriesByType('paint').map((entry) => ({"
+        "  name: entry.name || '',"
+        "  startTime: Number(entry.startTime || 0)"
+        "})),"
+        "resourceTimings: performance.getEntriesByType('resource').map((entry) => ({"
+        "  name: entry.name || '',"
+        "  initiatorType: entry.initiatorType || '',"
+        "  startTime: Number(entry.startTime || 0),"
+        "  responseEnd: Number(entry.responseEnd || 0),"
+        "  duration: Number(entry.duration || 0)"
+        "})),"
+        "hasConnectionMonitorInstalled: !!window.__coinboxConnectionMonitorInstalled,"
+        "hasGlyphApi: !!(window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function'),"
+        "hasGlyphLayer: !!document.querySelector('.bg-glyph-layer'),"
+        "hasNavbarStyle: !!document.getElementById('navbar-shared-style'),"
+        "navbarLinks: Array.from(document.querySelectorAll('#navbar nav a')).map((link) => (link.textContent || '').trim())"
+        "}))()"
+    )
+    response = _cdp_send_command(
+        sock,
+        command_id,
+        "Runtime.evaluate",
+        {
+            "expression": expression,
+            "returnByValue": True,
+        },
+    )
+    result = response.get("result", {}).get("result", {})
+    value = result.get("value")
+    if not isinstance(value, dict):
+        raise RuntimeError(f"Unexpected CDP evaluate response: {response}")
+    return {
+        "current_url": str(value.get("href", "")),
+        "current_path": str(value.get("path", "")) or "/",
+        "title": str(value.get("title", "")),
+        "body_text": str(value.get("bodyText", "")),
+        "page_source": str(value.get("html", "")),
+        "page_ready": str(value.get("pageReady", "")),
+        "script_paths": [str(path) for path in value.get("scriptPaths", []) if str(path)],
+        "paint_timings": list(value.get("paintTimings", [])),
+        "resource_timings": list(value.get("resourceTimings", [])),
+        "has_connection_monitor_installed": bool(value.get("hasConnectionMonitorInstalled", False)),
+        "has_glyph_api": bool(value.get("hasGlyphApi", False)),
+        "has_glyph_layer": bool(value.get("hasGlyphLayer", False)),
+        "has_navbar_style": bool(value.get("hasNavbarStyle", False)),
+        "navbar_links": [str(link) for link in value.get("navbarLinks", []) if str(link)],
+        "error": "",
+    }
+
+
+def _capture_page_load_diagnostics_in_headless_chrome(
+    url: str,
+    wait_paths: tuple[str, ...] = (),
+    wait_condition=None,
+    wait_s: float = 8.0,
+) -> dict:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                last_state = {
+                    "current_url": url,
+                    "current_path": urllib.parse.urlparse(url).path or "/",
+                    "title": "",
+                    "body_text": "",
+                    "page_source": "",
+                    "error": "",
+                }
+                deadline = time.time() + wait_s
+                while time.time() < deadline:
+                    try:
+                        state = _cdp_capture_page_state(sock, next_id)
+                        next_id += 1
+                        if state:
+                            last_state = state
+                            if wait_paths and state.get("current_path") in wait_paths:
+                                break
+                            if wait_condition is not None and wait_condition(state):
+                                break
+                    except Exception as exc:
+                        last_state["error"] = f"{type(exc).__name__}: {exc}"
+                    time.sleep(0.2)
+
+                diagnostics = _cdp_capture_page_diagnostics(sock, next_id)
+                next_id += 1
+                diagnostics["error"] = last_state.get("error", "")
+                return diagnostics
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
+def _capture_start_now_load_diagnostics(base_url: str) -> dict:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/"
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + 8.0
+                last_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    last_state = state
+                    if state.get("current_path") == "/" and state.get("page_ready") == "1":
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(f"Bootstrap page did not become interactive before click.\nLast state: {last_state}")
+
+                click_response = _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  const btn = document.getElementById('start-now');"
+                            "  if (!btn) return 'missing-button';"
+                            "  btn.click();"
+                            "  return btn.textContent || '';"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+                click_value = click_response.get("result", {}).get("result", {}).get("value")
+                assert click_value != "missing-button", "Bootstrap start-now button was not present in the browser DOM."
+
+                deadline = time.time() + 5.0
+                last_state = {
+                    "current_url": url,
+                    "current_path": "/",
+                    "title": "",
+                    "body_text": "",
+                    "page_source": "",
+                    "error": "",
+                }
+                while time.time() < deadline:
+                    try:
+                        state = _cdp_capture_page_state(sock, next_id)
+                        next_id += 1
+                        if state:
+                            last_state = state
+                            if state.get("current_path") in ("/sounds/", "/login") and state.get("page_ready") == "1":
+                                break
+                    except Exception as exc:
+                        last_state["error"] = f"{type(exc).__name__}: {exc}"
+                    time.sleep(0.05)
+
+                diagnostics = _cdp_capture_page_diagnostics(sock, next_id)
+                next_id += 1
+                diagnostics["error"] = last_state.get("error", "")
+                return diagnostics
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
+def _normalize_resource_path(url_or_path: str) -> str:
+    parsed = urllib.parse.urlparse(str(url_or_path))
+    if parsed.scheme or parsed.netloc:
+        return parsed.path or "/"
+    return str(url_or_path)
+
+
+def _first_contentful_paint_ms(browser_diagnostics: dict) -> float | None:
+    for entry in browser_diagnostics.get("paint_timings", []):
+        name = str(entry.get("name", "")).strip().lower()
+        if name == "first-contentful-paint":
+            try:
+                return float(entry.get("startTime", 0.0))
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _browser_load_diagnostics_details(browser_diagnostics: dict, log_path) -> str:
+    resource_lines = []
+    for entry in browser_diagnostics.get("resource_timings", [])[:40]:
+        resource_lines.append(
+            f"{_normalize_resource_path(str(entry.get('name', '')))}"
+            f" [{entry.get('initiatorType', '')}]"
+            f" start={float(entry.get('startTime', 0.0)):.1f}"
+            f" responseEnd={float(entry.get('responseEnd', 0.0)):.1f}"
+        )
+
+    paint_lines = []
+    for entry in browser_diagnostics.get("paint_timings", []):
+        paint_lines.append(
+            f"{entry.get('name', '')}={float(entry.get('startTime', 0.0)):.1f}ms"
+        )
+
+    return (
+        f"Browser URL: {browser_diagnostics.get('current_url')}\n"
+        f"Browser title: {browser_diagnostics.get('title')}\n"
+        f"Browser error: {browser_diagnostics.get('error')}\n"
+        f"Page ready: {browser_diagnostics.get('page_ready')}\n"
+        f"Script tags: {browser_diagnostics.get('script_paths', [])}\n"
+        f"Navbar links: {browser_diagnostics.get('navbar_links', [])}\n"
+        f"Connection monitor installed: {browser_diagnostics.get('has_connection_monitor_installed')}\n"
+        f"Glyph API present: {browser_diagnostics.get('has_glyph_api')}\n"
+        f"Glyph layer present: {browser_diagnostics.get('has_glyph_layer')}\n"
+        f"Paint timings: {paint_lines}\n"
+        f"Resource timings:\n" + "\n".join(resource_lines[:40]) + "\n"
+        f"Body text:\n{browser_diagnostics.get('body_text', '')[:1200]}\n"
+        f"DOM snippet:\n{browser_diagnostics.get('page_source', '')[:1200]}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+
+def _assert_js_dependencies_loaded_before_first_paint(
+    browser_diagnostics: dict,
+    expected_script_paths: tuple[str, ...],
+    log_path,
+):
+    details = _browser_load_diagnostics_details(browser_diagnostics, log_path)
+    first_contentful_paint_ms = _first_contentful_paint_ms(browser_diagnostics)
+    assert first_contentful_paint_ms is not None, (
+        "Could not read first-contentful-paint timing for the page under test.\n"
+        f"{details}"
+    )
+
+    script_paths = {str(path) for path in browser_diagnostics.get("script_paths", [])}
+    missing_script_tags = [path for path in expected_script_paths if path not in script_paths]
+    assert not missing_script_tags, (
+        "Expected external script tags were missing from the rendered page.\n"
+        f"Missing: {missing_script_tags}\n"
+        f"{details}"
+    )
+
+    late_or_missing_resources = []
+    for script_path in expected_script_paths:
+        matching_entries = [
+            entry
+            for entry in browser_diagnostics.get("resource_timings", [])
+            if _normalize_resource_path(str(entry.get("name", ""))) == script_path
+        ]
+        if not matching_entries:
+            late_or_missing_resources.append(f"{script_path} (no resource timing entry)")
+            continue
+
+        response_end_ms = max(float(entry.get("responseEnd", 0.0)) for entry in matching_entries)
+        if response_end_ms <= 0.0:
+            late_or_missing_resources.append(f"{script_path} (responseEnd={response_end_ms:.1f}ms)")
+            continue
+        if response_end_ms > first_contentful_paint_ms:
+            late_or_missing_resources.append(
+                f"{script_path} (responseEnd={response_end_ms:.1f}ms, fcp={first_contentful_paint_ms:.1f}ms)"
+            )
+
+    assert not late_or_missing_resources, (
+        "The page became visible before all required JavaScript dependencies had finished loading.\n"
+        f"Late or missing: {late_or_missing_resources}\n"
+        f"{details}"
+    )
 
 
 # Test: Browser handoff from bootstrap should reach login when auth is already enabled.
@@ -732,6 +1120,40 @@ def test_recovery_browser_shows_vendor_firmware_hardware_and_mac(qemu_bootstrap_
     assert _body_text_matches(browser_state, r"Firmware:\s*\d+\.\d+\.\d+"), details
     assert _body_text_matches(browser_state, r"Hardware:\s*\d+\.\d+\.\d+"), details
     assert _body_text_matches(browser_state, rf"MAC:\s*{re.escape(expected_mac)}"), details
+
+
+# Test: Bootstrap root should not become visible until its external JavaScript dependencies are loaded.
+# 1. Open `/` in a real headless browser.
+# 2. Wait until the bootstrap screen is visible and interactive.
+# 3. Assert that all external script dependencies finished loading before first contentful paint.
+# 4. Assert that the expected script side effects are already present in the DOM/runtime.
+def test_bootstrap_browser_loads_javascript_dependencies_before_first_paint(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    browser_diagnostics = _capture_page_load_diagnostics_in_headless_chrome(
+        f"{base_url}/",
+        wait_condition=lambda state: (
+            "Coinbox is starting" in state.get("body_text", "")
+            and "Start now" in state.get("body_text", "")
+        ),
+    )
+    details = _browser_load_diagnostics_details(browser_diagnostics, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_diagnostics,
+        expected_path="/",
+        expected_title_fragment="starting",
+        log_path=log_path,
+        message="Bootstrap root page did not load in the browser as expected.",
+    )
+    _assert_js_dependencies_loaded_before_first_paint(
+        browser_diagnostics=browser_diagnostics,
+        expected_script_paths=("/connection_monitor.js", "/glyphs.js"),
+        log_path=log_path,
+    )
+    assert browser_diagnostics.get("has_connection_monitor_installed") is True, details
+    assert browser_diagnostics.get("has_glyph_api") is True, details
+    assert browser_diagnostics.get("has_glyph_layer") is True, details
 
 
 # Test: Exiting recovery mode should immediately show the intended handoff card.
@@ -880,6 +1302,41 @@ def test_expire_browser_reaches_login_when_auth_already_enabled(qemu_bootstrap_i
         log_path=log_path,
         message="Countdown expiry did not navigate the browser to login when auth was enabled.",
     )
+
+
+# Test: The first main-app page reached from bootstrap should not become visible
+# until its external JavaScript dependencies are loaded.
+# 1. Start from bootstrap mode with auth disabled.
+# 2. Open `/` in a real headless browser and click `Start now`.
+# 3. Wait until the browser reaches `/sounds/`.
+# 4. Assert that all external script dependencies finished loading before first contentful paint.
+# 5. Assert that the navbar, connection monitor, and glyph helper are already active.
+def test_mainapp_entry_browser_loads_javascript_dependencies_before_first_paint(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_bootstrap_root_page(status, headers, body)
+
+    browser_diagnostics = _capture_start_now_load_diagnostics(base_url)
+    details = _browser_load_diagnostics_details(browser_diagnostics, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_diagnostics,
+        expected_path="/sounds/",
+        expected_title_fragment="sounds",
+        log_path=log_path,
+        message="Bootstrap handoff did not reach the Sounds page before JavaScript dependency checks ran.",
+    )
+    _assert_js_dependencies_loaded_before_first_paint(
+        browser_diagnostics=browser_diagnostics,
+        expected_script_paths=("/connection_monitor.js", "/navbar.js", "/glyphs.js"),
+        log_path=log_path,
+    )
+    assert browser_diagnostics.get("has_connection_monitor_installed") is True, details
+    assert browser_diagnostics.get("has_glyph_api") is True, details
+    assert browser_diagnostics.get("has_glyph_layer") is True, details
+    assert browser_diagnostics.get("has_navbar_style") is True, details
+    assert browser_diagnostics.get("navbar_links") == ["Sounds", "Settings"], details
 
 
 # Test: Settings System card should show firmware, hardware, vendor, recovery code, source, and license information.

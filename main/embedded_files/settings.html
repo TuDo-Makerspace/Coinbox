@@ -4,7 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Settings</title>
+  <script>document.documentElement.dataset.pageReady = '0';</script>
   <link rel="stylesheet" href="/glyphs.css">
+  <script src="/glyphs.js"></script>
+  <script src="/connection_monitor.js"></script>
+  <script src="/navbar.js"></script>
   <style>
     :root {
       --text: #0f172a;
@@ -21,6 +25,10 @@
       position: relative;
       overflow-x: hidden;
       isolation: isolate;
+    }
+
+    html[data-page-ready="0"] body {
+      visibility: hidden;
     }
     .content {
       padding: clamp(1rem, 2vw + 0.5rem, 2.5rem);
@@ -588,8 +596,6 @@
 </head>
 <body>
   <div id="navbar"></div>
-  <script src="/connection_monitor.js"></script>
-  <script src="/navbar.js"></script>
 
   <div class="content">
     <h1>Settings</h1>
@@ -793,8 +799,6 @@
       </div>
     </div>
   </div>
-
-  <script src="/glyphs.js"></script>
   <script>
     if (window.COINBOX_GLYPHS && typeof window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs === 'function') {
       window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
@@ -2210,6 +2214,7 @@
     startDeviceInfoAutoRefresh();
     fetchToneStatus();
     startToneAutoRefresh();
+    document.documentElement.dataset.pageReady = '1';
   </script>
 </body>
 </html>
