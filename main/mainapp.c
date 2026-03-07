@@ -19,6 +19,7 @@
 #include "audio.h"
 #include "gpio.h"
 #include "board.h"
+#include "device_info.h"
 #include "mdns_service.h"
 #include "network.h"
 #include "sdkconfig.h"
@@ -566,6 +567,21 @@ static esp_err_t security_init(void)
     return security_load_from_nvs();
 }
 
+esp_err_t mainapp_security_init(void)
+{
+    return security_init();
+}
+
+bool mainapp_security_is_password_set(void)
+{
+    return s_ui_password_set;
+}
+
+bool mainapp_security_password_matches(const char *password)
+{
+    return security_password_matches(password);
+}
+
 esp_err_t mainapp_reset_security_defaults(void)
 {
     return security_clear_password();
@@ -788,6 +804,36 @@ static esp_err_t favicon_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static bool replace_placeholder(char *buffer, size_t buffer_size, const char *placeholder, const char *replacement)
+{
+    const size_t placeholder_len = strlen(placeholder);
+    const size_t replacement_len = strlen(replacement);
+    if (placeholder_len == 0) {
+        return false;
+    }
+
+    bool replaced = false;
+    size_t current_len = strlen(buffer);
+    char *cursor = buffer;
+
+    while ((cursor = strstr(cursor, placeholder)) != NULL) {
+        size_t new_len = current_len - placeholder_len + replacement_len;
+        if (new_len >= buffer_size) {
+            return false;
+        }
+
+        size_t tail_len = current_len - (size_t)(cursor - buffer) - placeholder_len + 1;
+        memmove(cursor + replacement_len, cursor + placeholder_len, tail_len);
+        memcpy(cursor, replacement, replacement_len);
+
+        replaced = true;
+        current_len = new_len;
+        cursor += replacement_len;
+    }
+
+    return replaced;
+}
+
 static esp_err_t http_resp_settings_html(httpd_req_t *req)
 {
     esp_err_t auth_err = security_require_auth(req);
@@ -798,9 +844,47 @@ static esp_err_t http_resp_settings_html(httpd_req_t *req)
     extern const unsigned char settings_html_start[] asm("_binary_settings_html_start");
     extern const unsigned char settings_html_end[] asm("_binary_settings_html_end");
     const size_t settings_html_size = (settings_html_end - settings_html_start);
+    const size_t render_headroom = 512;
+    if (settings_html_size >= (SIZE_MAX - (render_headroom + 1))) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Template size overflow");
+        return ESP_ERR_NO_MEM;
+    }
+
+    const size_t page_capacity = settings_html_size + render_headroom + 1;
+    char *page = malloc(page_capacity);
+    if (!page) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+        return ESP_ERR_NO_MEM;
+    }
+
+    memcpy(page, settings_html_start, settings_html_size);
+    page[settings_html_size] = '\0';
+
+    char mac[18] = {0};
+    if (device_info_get_mac_string(mac, sizeof(mac)) != ESP_OK) {
+        strlcpy(mac, "unknown", sizeof(mac));
+    }
+    char recovery_code[8] = {0};
+    if (device_info_get_recovery_code_string(recovery_code, sizeof(recovery_code)) != ESP_OK) {
+        strlcpy(recovery_code, "unknown", sizeof(recovery_code));
+    }
+
+    if (!replace_placeholder(page, page_capacity, "{{DEVICE_MAC}}", mac) ||
+        !replace_placeholder(page, page_capacity, "{{RECOVERY_CODE}}", recovery_code) ||
+        !replace_placeholder(page, page_capacity, "{{FIRMWARE_VERSION}}", device_info_firmware_version()) ||
+        !replace_placeholder(page, page_capacity, "{{HARDWARE_VERSION}}", device_info_hardware_version()) ||
+        !replace_placeholder(page, page_capacity, "{{VENDOR_NAME}}", device_info_vendor()) ||
+        !replace_placeholder(page, page_capacity, "{{SOURCE_CODE_URL}}", device_info_source_code_url()) ||
+        !replace_placeholder(page, page_capacity, "{{LICENSE_NAME}}", device_info_license_name())) {
+        free(page);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, (const char *)settings_html_start, settings_html_size);
+    httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+    free(page);
     return ESP_OK;
 }
 
@@ -945,6 +1029,43 @@ static esp_err_t send_boot_config_json(httpd_req_t *req)
     int len = snprintf(resp, sizeof(resp),
                        "{\"boot_sound_enabled\":%s}",
                        s_boot_sound_enabled ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
+static esp_err_t send_device_info_json(httpd_req_t *req)
+{
+    char mac[18] = {0};
+    if (device_info_get_mac_string(mac, sizeof(mac)) != ESP_OK) {
+        strlcpy(mac, "unknown", sizeof(mac));
+    }
+    char recovery_code[8] = {0};
+    if (device_info_get_recovery_code_string(recovery_code, sizeof(recovery_code)) != ESP_OK) {
+        strlcpy(recovery_code, "unknown", sizeof(recovery_code));
+    }
+
+    char resp[384];
+    int len = snprintf(
+        resp,
+        sizeof(resp),
+        "{\"vendor\":\"%s\",\"firmware_version\":\"%s\",\"hardware_version\":\"%s\","
+        "\"source_code\":\"%s\",\"license\":\"%s\",\"mac\":\"%s\",\"recovery_code\":\"%s\","
+        "\"auth_required\":%s}",
+        device_info_vendor(),
+        device_info_firmware_version(),
+        device_info_hardware_version(),
+        device_info_source_code_url(),
+        device_info_license_name(),
+        mac,
+        recovery_code,
+        s_ui_password_set ? "true" : "false");
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -1156,6 +1277,15 @@ static esp_err_t boot_config_post_handler(httpd_req_t *req)
     }
 
     return send_boot_config_json(req);
+}
+
+static esp_err_t device_info_get_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
+    }
+    return send_device_info_json(req);
 }
 
 static esp_err_t network_ips_handler(httpd_req_t *req)
@@ -2885,7 +3015,7 @@ static void maybe_play_startup_sound(void)
 
 esp_err_t start_mainapp(void)
 {
-    esp_err_t sec_err = security_init();
+    esp_err_t sec_err = mainapp_security_init();
     if (sec_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize security state: %s", esp_err_to_name(sec_err));
         return sec_err;
@@ -2905,7 +3035,7 @@ esp_err_t start_mainapp(void)
     /* Directory listings plus metadata lookups use a bit more stack now that
      * payloads and metadata are separate; give the HTTPD task extra room. */
     config.stack_size = 8192;
-    config.max_uri_handlers = 44;
+    config.max_uri_handlers = 45;
 
     /* Use the URI wildcard matching function in order to
      * allow the same handler to respond to multiple different
@@ -3077,6 +3207,14 @@ esp_err_t start_mainapp(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &boot_config_post_uri);
+
+    httpd_uri_t device_info_get_uri = {
+        .uri = "/device/info",
+        .method = HTTP_GET,
+        .handler = device_info_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &device_info_get_uri);
 
     httpd_uri_t gpio_state_uri = {
         .uri = "/gpio/state",

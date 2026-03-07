@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import socket
 import struct
@@ -19,6 +20,9 @@ try:
     from tests.integration.integration_helpers import (
         BOOT_TIMEOUT_S,
         CUSTOM_UI_PASSWORD,
+        _enter_recovery_mode,
+        _expected_recovery_code,
+        _get_qemu_factory_mac,
         _http_get,
         _is_bootstrap_root_page,
         _restart_into_bootstrap,
@@ -34,6 +38,9 @@ except ModuleNotFoundError:
     from integration_helpers import (
         BOOT_TIMEOUT_S,
         CUSTOM_UI_PASSWORD,
+        _enter_recovery_mode,
+        _expected_recovery_code,
+        _get_qemu_factory_mac,
         _http_get,
         _is_bootstrap_root_page,
         _restart_into_bootstrap,
@@ -205,6 +212,10 @@ def _assert_connection_lost_popup_visible(
     assert browser_state.get("has_connection_lost_overlay") is True, f"{message}\n{details}"
     assert browser_state.get("connection_lost_visible") is True, f"{message}\n{details}"
     assert "Connection lost!" in browser_state.get("body_text", ""), f"{message}\n{details}"
+
+
+def _body_text_matches(browser_state: dict, pattern: str) -> bool:
+    return re.search(pattern, browser_state.get("body_text", ""), flags=re.IGNORECASE) is not None
 
 
 def _find_browser_binary() -> str | None:
@@ -475,6 +486,34 @@ def test_skip_handoff_browser_reaches_main_app_without_auth(qemu_bootstrap_insta
     )
 
 
+# Test: Recovery page should show vendor, firmware, hardware, and MAC details.
+# 1. Enter recovery mode.
+# 2. Open the recovery page in a real headless browser.
+# 3. Wait until the expected metadata strings are visible in the DOM.
+def test_recovery_browser_shows_vendor_firmware_hardware_and_mac(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+    expected_mac = _get_qemu_factory_mac()
+
+    _enter_recovery_mode(base_url, log_path)
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/",
+        wait_condition=lambda state: (
+            "Vendor: TuDo Makerspace" in state.get("body_text", "")
+            and _body_text_matches(state, r"Firmware:\s*\d+\.\d+\.\d+")
+            and _body_text_matches(state, r"Hardware:\s*\d+\.\d+\.\d+")
+            and _body_text_matches(state, rf"MAC:\s*{re.escape(expected_mac)}")
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    assert browser_state.get("current_path") == "/", details
+    assert "Vendor: TuDo Makerspace" in browser_state.get("body_text", ""), details
+    assert _body_text_matches(browser_state, r"Firmware:\s*\d+\.\d+\.\d+"), details
+    assert _body_text_matches(browser_state, r"Hardware:\s*\d+\.\d+\.\d+"), details
+    assert _body_text_matches(browser_state, rf"MAC:\s*{re.escape(expected_mac)}"), details
+
+
 # Test: Browser countdown expiry should hand off to the main app when auth is disabled.
 # 1. Confirm bootstrap mode is active.
 # 2. Wait until the countdown is nearly expired to keep the test fast.
@@ -555,6 +594,69 @@ def test_expire_browser_reaches_login_when_auth_already_enabled(qemu_bootstrap_i
         log_path=log_path,
         message="Countdown expiry did not navigate the browser to login when auth was enabled.",
     )
+
+
+# Test: Settings System card should show firmware, hardware, vendor, recovery code, source, and license information.
+# 1. Start the main app.
+# 2. Open `/settings` in a real headless browser.
+# 3. Wait until the expected System card text is visible in the DOM.
+def test_settings_browser_shows_system_card_metadata(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+    expected_recovery_code = _expected_recovery_code()
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/settings",
+        wait_condition=lambda state: (
+            "Vendor: TuDo Makerspace" in state.get("body_text", "")
+            and _body_text_matches(state, r"Firmware:\s*\d+\.\d+\.\d+")
+            and _body_text_matches(state, r"Hardware:\s*\d+\.\d+\.\d+")
+            and _body_text_matches(state, rf"Recovery Code:\s*{expected_recovery_code:04d}")
+            and "Source Code: https://github.com/TuDo-Makerspace/Coinbox" in state.get("body_text", "")
+            and "License: MIT License" in state.get("body_text", "")
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_state,
+        expected_path="/settings",
+        expected_title_fragment="settings",
+        log_path=log_path,
+        message="Settings page did not render the expected System card metadata.",
+    )
+    assert "Vendor: TuDo Makerspace" in browser_state.get("body_text", ""), details
+    assert _body_text_matches(browser_state, r"Firmware:\s*\d+\.\d+\.\d+"), details
+    assert _body_text_matches(browser_state, r"Hardware:\s*\d+\.\d+\.\d+"), details
+    assert _body_text_matches(browser_state, rf"Recovery Code:\s*{expected_recovery_code:04d}"), details
+    assert "Source Code: https://github.com/TuDo-Makerspace/Coinbox" in browser_state.get("body_text", ""), details
+    assert "License: MIT License" in browser_state.get("body_text", ""), details
+
+
+# Test: Settings Network card should show the device MAC address.
+# 1. Start the main app.
+# 2. Open `/settings` in a real headless browser.
+# 3. Wait until the expected MAC string is visible in the DOM.
+def test_settings_browser_shows_network_mac(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+    expected_mac = _get_qemu_factory_mac()
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/settings",
+        wait_condition=lambda state: _body_text_matches(
+            state,
+            rf"\b{re.escape(expected_mac)}\b",
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_state,
+        expected_path="/settings",
+        expected_title_fragment="settings",
+        log_path=log_path,
+        message="Settings page did not render the expected Network card MAC address.",
+    )
+    assert _body_text_matches(browser_state, rf"\b{re.escape(expected_mac)}\b"), details
 
 
 # Test: Bootstrap root page should show the connection-lost popup after the device disappears.

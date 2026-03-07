@@ -153,6 +153,10 @@
       white-space: pre-line;
     }
 
+    .status-text.strong {
+      font-weight: 700;
+    }
+
     .actions {
       display: flex;
       gap: 0.75rem;
@@ -195,6 +199,84 @@
     .note {
       color: var(--muted);
       font-size: 0.95rem;
+    }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      z-index: 20;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: min(100%, 420px);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.2);
+      padding: 1.1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      text-align: left;
+    }
+
+    .modal-card h2 {
+      font-size: 1.15rem;
+      margin: 0;
+    }
+
+    .modal-copy {
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .modal-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .modal-field label {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+
+    .modal-field input {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.72rem 0.78rem;
+      font: inherit;
+      width: 100%;
+      background: #fff;
+      color: var(--text);
+    }
+
+    .modal-field input.pin-input {
+      font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
+      letter-spacing: 0.08em;
+    }
+
+    .modal-error {
+      min-height: 1.2rem;
+      color: #b91c1c;
+      font-size: 0.9rem;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.65rem;
+      flex-wrap: wrap;
     }
 
     @media (max-width:640px) {
@@ -252,11 +334,32 @@
         <span class="badge" id="countdown">{{SECONDS}}</span>
         <div class="status-text" id="status-text">seconds remaining</div>
       </div>
+      <p class="status-text" id="device-info" hidden></p>
+      <p class="status-text strong" id="ota-status" hidden>Awaiting OTA update...</p>
       <div class="actions" id="actions">
         <a class="btn primary" id="start-now" href="/skip">Start now</a>
         <a class="btn" id="stay" href="#">Enter recovery mode</a>
       </div>
       <p class="note" id="extend-note">{{ EXTEND_NOTE }}</p>
+    </div>
+  </div>
+  <div class="modal-backdrop glyph-overlay-exempt" id="recovery-auth-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="recovery-auth-title">
+      <h2 id="recovery-auth-title">Authentication Required</h2>
+      <p class="modal-copy">Enter the UI password or the 4-digit recovery PIN to unlock recovery actions.</p>
+      <div class="modal-field">
+        <label for="recovery-auth-password">Password</label>
+        <input id="recovery-auth-password" type="password" maxlength="64" autocomplete="current-password">
+      </div>
+      <div class="modal-field">
+        <label for="recovery-auth-pin">Recovery PIN</label>
+        <input id="recovery-auth-pin" class="pin-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="one-time-code" placeholder="4 digits">
+      </div>
+      <div class="modal-error" id="recovery-auth-error" aria-live="polite"></div>
+      <div class="modal-actions">
+        <button class="btn" id="recovery-auth-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="recovery-auth-submit" type="button">Unlock</button>
+      </div>
     </div>
   </div>
   <script src="/connection_monitor.js"></script>
@@ -278,16 +381,27 @@
     const actions = document.getElementById('actions');
     const titleEl = document.getElementById('title');
     const statusText = document.getElementById('status-text');
+    const deviceInfoText = document.getElementById('device-info');
+    const otaStatusText = document.getElementById('ota-status');
     const stayBtn = document.getElementById('stay');
     const startBtn = document.getElementById('start-now');
     const extendNote = document.getElementById('extend-note');
     const resetBtn = document.getElementById('reset-settings-icon');
     const formatBtn = document.getElementById('format-storage-icon');
     const cardTools = cardEl ? cardEl.querySelector('.card-tools') : null;
+    const recoveryAuthModal = document.getElementById('recovery-auth-modal');
+    const recoveryAuthPasswordInput = document.getElementById('recovery-auth-password');
+    const recoveryAuthPinInput = document.getElementById('recovery-auth-pin');
+    const recoveryAuthError = document.getElementById('recovery-auth-error');
+    const recoveryAuthCancelBtn = document.getElementById('recovery-auth-cancel');
+    const recoveryAuthSubmitBtn = document.getElementById('recovery-auth-submit');
     let resetting = false;
     let formatting = false;
     let handoffRetryTimerId = null;
     let skipRequestSent = false;
+    let recoveryAuthRequired = null;
+    let recoveryAuthToken = '';
+    let recoveryAuthDialogPromise = null;
     const handoffRoute = '/skip';
     const LASER_EXTENDED_NOTE = 'Laser beam interrupted three times. Countdown extended.';
     function markLaserExtensionSeen() {
@@ -328,12 +442,20 @@
       lines.push('Recovery AP: coinboxrecovery')
       lines.push(`AP IP: ${(info && info.ap) || 'not assigned'}`);
 
-      lines.push('');
-
-      lines.push('Awaiting OTA update...');
-
       statusText.textContent = lines.join('\n');
     }
+
+    function setRecoveryDeviceInfo(info) {
+      if (!deviceInfoText) return;
+      const lines = [
+        `Firmware: ${(info && info.firmware_version) || 'unknown'}`,
+        `Hardware: ${(info && info.hardware_version) || 'unknown'}`,
+        `Vendor: ${(info && info.vendor) || 'unknown'}`,
+        `MAC: ${(info && info.mac) || 'unknown'}`,
+      ];
+      deviceInfoText.textContent = lines.join('\n');
+    }
+
     async function refreshDeviceIps() {
       try {
         const res = await fetch('/network/ips', { cache: 'no-store' });
@@ -342,6 +464,21 @@
         setRecoveryStatus(data || {});
       } catch (_) {
         setRecoveryStatus({});
+      }
+    }
+
+    async function fetchRecoveryDeviceInfo() {
+      try {
+        const res = await fetch('/device/info', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch device info');
+        const data = await res.json();
+        recoveryAuthRequired = !!data?.auth_required;
+        setRecoveryDeviceInfo(data || {});
+      } catch (_) {
+        if (typeof recoveryAuthRequired !== 'boolean') {
+          recoveryAuthRequired = true;
+        }
+        setRecoveryDeviceInfo({});
       }
     }
 
@@ -401,6 +538,8 @@
       titleEl.textContent = 'Recovery Mode';
       statusRow.style.display = 'flex';
       el.style.display = 'none';
+      if (deviceInfoText) deviceInfoText.hidden = false;
+      if (otaStatusText) otaStatusText.hidden = false;
       actions.style.display = 'flex';
       if (extendNote) extendNote.style.display = 'none';
       stayBtn.style.display = 'none';
@@ -411,6 +550,7 @@
       autoRefresh = 0;
       isRecovery = true;
       refreshDeviceIps();
+      fetchRecoveryDeviceInfo();
     }
 
     async function enterRecovery() {
@@ -421,18 +561,152 @@
       renderRecovery();
     }
 
+    async function authenticateRecovery({ password, pin }) {
+      const attempts = [];
+      const passwordValue = typeof password === 'string' ? password.trim() : '';
+      const pinValue = typeof pin === 'string' ? pin.trim() : '';
+
+      if (passwordValue) {
+        attempts.push({ password: passwordValue });
+      }
+      if (pinValue) {
+        if (!/^\d{4}$/.test(pinValue)) {
+          throw new Error('Recovery PIN must be exactly 4 digits');
+        }
+        attempts.push({ recovery_code: parseInt(pinValue, 10) });
+      }
+      if (!attempts.length) {
+        throw new Error('Enter a password or recovery PIN');
+      }
+
+      for (const payload of attempts) {
+        const res = await fetch('/recovery/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          recoveryAuthToken = data?.token || '';
+          return;
+        }
+
+        if (res.status === 401) {
+          continue;
+        }
+
+        let reason = '';
+        try { reason = (await res.text()).trim(); } catch (_) { }
+        throw new Error(reason || 'Authentication failed');
+      }
+
+      throw new Error('Authentication failed');
+    }
+
+    function setRecoveryAuthError(message) {
+      if (recoveryAuthError) {
+        recoveryAuthError.textContent = message || '';
+      }
+    }
+
+    function setRecoveryAuthDialogBusy(busy) {
+      if (recoveryAuthPasswordInput) recoveryAuthPasswordInput.disabled = !!busy;
+      if (recoveryAuthPinInput) recoveryAuthPinInput.disabled = !!busy;
+      if (recoveryAuthCancelBtn) recoveryAuthCancelBtn.disabled = !!busy;
+      if (recoveryAuthSubmitBtn) recoveryAuthSubmitBtn.disabled = !!busy;
+    }
+
+    function closeRecoveryAuthDialog(result) {
+      if (!recoveryAuthDialogPromise) return;
+      const { resolve } = recoveryAuthDialogPromise;
+      recoveryAuthDialogPromise = null;
+      if (recoveryAuthModal) {
+        recoveryAuthModal.hidden = true;
+        recoveryAuthModal.classList.remove('open');
+      }
+      setRecoveryAuthError('');
+      setRecoveryAuthDialogBusy(false);
+      if (recoveryAuthPasswordInput) recoveryAuthPasswordInput.value = '';
+      if (recoveryAuthPinInput) recoveryAuthPinInput.value = '';
+      resolve(result);
+    }
+
+    function openRecoveryAuthDialog() {
+      if (recoveryAuthDialogPromise) {
+        return recoveryAuthDialogPromise.promise;
+      }
+
+      let resolveDialog;
+      const promise = new Promise((resolve) => {
+        resolveDialog = resolve;
+      });
+      recoveryAuthDialogPromise = { promise, resolve: resolveDialog };
+      setRecoveryAuthError('');
+      setRecoveryAuthDialogBusy(false);
+      if (recoveryAuthModal) {
+        recoveryAuthModal.hidden = false;
+        recoveryAuthModal.classList.add('open');
+      }
+      if (recoveryAuthPasswordInput) recoveryAuthPasswordInput.value = '';
+      if (recoveryAuthPinInput) recoveryAuthPinInput.value = '';
+      const preferredInput = recoveryAuthPasswordInput || recoveryAuthPinInput;
+      if (preferredInput) {
+        setTimeout(() => preferredInput.focus(), 0);
+      }
+      return promise;
+    }
+
+    async function submitRecoveryAuthDialog() {
+      const password = recoveryAuthPasswordInput ? recoveryAuthPasswordInput.value : '';
+      const pin = recoveryAuthPinInput ? recoveryAuthPinInput.value : '';
+      setRecoveryAuthError('');
+      setRecoveryAuthDialogBusy(true);
+
+      try {
+        await authenticateRecovery({ password, pin });
+        closeRecoveryAuthDialog(true);
+      } catch (e) {
+        setRecoveryAuthDialogBusy(false);
+        setRecoveryAuthError((e && e.message) || 'Authentication failed');
+      }
+    }
+
+    async function ensureRecoveryAuthenticated() {
+      if (!isRecovery) return false;
+      if (recoveryAuthRequired === null) {
+        await fetchRecoveryDeviceInfo();
+      }
+      if (!recoveryAuthRequired) {
+        return true;
+      }
+      if (recoveryAuthToken) {
+        return true;
+      }
+
+      return await openRecoveryAuthDialog();
+    }
+
     async function resetSettings() {
       if (!isRecovery || !resetBtn || resetting || formatting) return;
       if (!confirm('Reset all configured settings to their defaults? This will keep your files but reset all settings, including security and network settings.')) return;
+      if (!await ensureRecoveryAuthenticated()) return;
       resetting = true;
       updateToolButtons();
       try {
-        const res = await fetch('/settings/reset', { method: 'POST' });
+        const headers = recoveryAuthToken ? { 'X-Recovery-Auth': recoveryAuthToken } : {};
+        const res = await fetch('/settings/reset', { method: 'POST', headers });
         if (!res.ok) {
           let reason = '';
           try { reason = (await res.text()).trim(); } catch (_) { }
+          if (res.status === 401) {
+            recoveryAuthToken = '';
+          }
           throw new Error(reason || 'Reset failed');
         }
+        recoveryAuthToken = '';
+        recoveryAuthRequired = false;
+        fetchRecoveryDeviceInfo();
         alert('Settings have been restored to defaults. You may need to reconnect to the device after exiting recovery mode.');
       } catch (e) {
         alert(e.message || 'Reset failed');
@@ -444,13 +718,18 @@
     async function formatStorage() {
       if (!isRecovery || !formatBtn || formatting || resetting) return;
       if (!confirm('Format storage? This will delete all files.')) return;
+      if (!await ensureRecoveryAuthenticated()) return;
       formatting = true;
       updateToolButtons();
       try {
-        const res = await fetch('/format', { method: 'POST' });
+        const headers = recoveryAuthToken ? { 'X-Recovery-Auth': recoveryAuthToken } : {};
+        const res = await fetch('/format', { method: 'POST', headers });
         if (!res.ok) {
           let reason = '';
           try { reason = (await res.text()).trim(); } catch (_) { }
+          if (res.status === 401) {
+            recoveryAuthToken = '';
+          }
           throw new Error(reason || 'Format failed');
         }
         alert('Storage formatted');
@@ -465,6 +744,8 @@
       if (cardEl) cardEl.classList.remove('recovery-active');
       titleEl.textContent = 'Starting main application';
       statusRow.style.display = 'none';
+      if (deviceInfoText) deviceInfoText.hidden = true;
+      if (otaStatusText) otaStatusText.hidden = true;
       actions.style.display = 'none';
       if (extendNote) extendNote.style.display = 'none';
       if (cardTools) cardTools.style.display = 'none';
@@ -522,6 +803,44 @@
     }
     if (resetBtn) { resetBtn.addEventListener('click', () => { resetSettings(); }); }
     if (formatBtn) { formatBtn.addEventListener('click', () => { formatStorage(); }); }
+    if (recoveryAuthCancelBtn) {
+      recoveryAuthCancelBtn.addEventListener('click', () => { closeRecoveryAuthDialog(false); });
+    }
+    if (recoveryAuthSubmitBtn) {
+      recoveryAuthSubmitBtn.addEventListener('click', () => { submitRecoveryAuthDialog(); });
+    }
+    if (recoveryAuthModal) {
+      recoveryAuthModal.addEventListener('click', (e) => {
+        if (e.target === recoveryAuthModal) {
+          closeRecoveryAuthDialog(false);
+        }
+      });
+    }
+    if (recoveryAuthPasswordInput) {
+      recoveryAuthPasswordInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitRecoveryAuthDialog();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeRecoveryAuthDialog(false);
+        }
+      });
+    }
+    if (recoveryAuthPinInput) {
+      recoveryAuthPinInput.addEventListener('input', () => {
+        recoveryAuthPinInput.value = recoveryAuthPinInput.value.replace(/\D+/g, '').slice(0, 4);
+      });
+      recoveryAuthPinInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitRecoveryAuthDialog();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeRecoveryAuthDialog(false);
+        }
+      });
+    }
     if (cardEl && !isRecovery) { cardEl.classList.remove('recovery-active'); }
     if (laserExtensionSeen) { markLaserExtensionSeen(); }
     if (forceHandoff) {

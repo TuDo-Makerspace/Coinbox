@@ -9,22 +9,27 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
+#include "esp_random.h"
 #include "esp_vfs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "audio.h"
 #include "sdkconfig.h"
+#include "device_info.h"
 #include "mainapp.h"
 #include "network.h"
 #include "files.h"
 #include "ota.h"
 #include "gpio.h"
+#include "recovery_code.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Constants
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 static const char *TAG = "bootstrap";
+#define RECOVERY_AUTH_TOKEN_NUM_BYTES 16
+#define RECOVERY_AUTH_TOKEN_HEX_LEN (RECOVERY_AUTH_TOKEN_NUM_BYTES * 2)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Vars
@@ -38,6 +43,8 @@ static bool s_main_started;
 static TaskHandle_t s_start_task;
 static bool s_main_start_pending;
 static bool s_laser_countdown_boost_applied;
+static bool s_recovery_auth_required;
+static char s_recovery_auth_token[RECOVERY_AUTH_TOKEN_HEX_LEN + 1];
 
 static const uint32_t BOOTSTRAP_LASER_BREAKS_FOR_EXTENSION = 3;
 static const uint32_t BOOTSTRAP_LASER_EXTENDED_SECONDS = 60;
@@ -62,6 +69,207 @@ static bool replace_placeholder(char *buffer, size_t buffer_size, const char *pl
 static bool replace_placeholder_any(char *buffer, size_t buffer_size,
                                     const char *placeholder_a, const char *placeholder_b,
                                     const char *replacement);
+static bool json_get_int(const char *json, const char *key, int *out);
+static bool json_get_string(const char *json, const char *key, char *out, size_t out_size);
+static bool json_has_key(const char *json, const char *key);
+static esp_err_t bootstrap_read_request_body(httpd_req_t *req, char *body, size_t body_size);
+static esp_err_t bootstrap_send_unauthorized(httpd_req_t *req);
+static void bootstrap_generate_recovery_auth_token(void);
+static bool bootstrap_is_recovery_authenticated_request(httpd_req_t *req);
+static esp_err_t bootstrap_require_recovery_auth(httpd_req_t *req);
+static esp_err_t bootstrap_require_recovery_access(httpd_req_t *req, const char *conflict_message);
+static esp_err_t send_device_info_json(httpd_req_t *req);
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// JSON and Auth Helpers
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static bool json_get_int(const char *json, const char *key, int *out)
+{
+    if (!json || !key || !out) {
+        return false;
+    }
+    const char *p = strstr(json, key);
+    if (!p) {
+        return false;
+    }
+    p = strchr(p, ':');
+    if (!p) {
+        return false;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+    return sscanf(p, "%d", out) == 1;
+}
+
+static bool json_get_string(const char *json, const char *key, char *out, size_t out_size)
+{
+    if (!json || !key || !out || out_size == 0) {
+        return false;
+    }
+
+    out[0] = '\0';
+    const char *p = strstr(json, key);
+    if (!p) {
+        return false;
+    }
+    p = strchr(p, ':');
+    if (!p) {
+        return false;
+    }
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+        p++;
+    }
+    if (*p != '"') {
+        return false;
+    }
+    p++;
+
+    size_t w = 0;
+    while (*p && *p != '"') {
+        char c = *p++;
+        if (c == '\\' && *p) {
+            char esc = *p++;
+            switch (esc) {
+                case '"': c = '"'; break;
+                case '\\': c = '\\'; break;
+                case '/': c = '/'; break;
+                case 'b': c = '\b'; break;
+                case 'f': c = '\f'; break;
+                case 'n': c = '\n'; break;
+                case 'r': c = '\r'; break;
+                case 't': c = '\t'; break;
+                default: c = esc; break;
+            }
+        }
+
+        if (w + 1 >= out_size) {
+            return false;
+        }
+        out[w++] = c;
+    }
+    if (*p != '"') {
+        return false;
+    }
+
+    out[w] = '\0';
+    return true;
+}
+
+static bool json_has_key(const char *json, const char *key)
+{
+    return json && key && strstr(json, key) != NULL;
+}
+
+static esp_err_t bootstrap_read_request_body(httpd_req_t *req, char *body, size_t body_size)
+{
+    if (!req || !body || body_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (req->content_len <= 0 || req->content_len >= (int)body_size) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request body");
+        return ESP_FAIL;
+    }
+
+    int received = 0;
+    while (received < req->content_len) {
+        int r = httpd_req_recv(req, body + received, req->content_len - received);
+        if (r <= 0) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read body");
+            return ESP_FAIL;
+        }
+        received += r;
+    }
+    body[req->content_len] = '\0';
+    return ESP_OK;
+}
+
+static esp_err_t bootstrap_send_unauthorized(httpd_req_t *req)
+{
+    httpd_resp_set_status(req, "401 Unauthorized");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_sendstr(req, "Unauthorized");
+    return ESP_FAIL;
+}
+
+static void bootstrap_bytes_to_hex(const uint8_t *src, size_t src_len, char *dst, size_t dst_size)
+{
+    static const char hex[] = "0123456789abcdef";
+
+    if (!src || !dst || dst_size < (src_len * 2 + 1)) {
+        if (dst && dst_size > 0) {
+            dst[0] = '\0';
+        }
+        return;
+    }
+
+    for (size_t i = 0; i < src_len; ++i) {
+        dst[i * 2] = hex[(src[i] >> 4) & 0x0F];
+        dst[i * 2 + 1] = hex[src[i] & 0x0F];
+    }
+    dst[src_len * 2] = '\0';
+}
+
+static void bootstrap_generate_recovery_auth_token(void)
+{
+    uint8_t token[RECOVERY_AUTH_TOKEN_NUM_BYTES];
+
+    for (size_t i = 0; i < sizeof(token); i += sizeof(uint32_t)) {
+        uint32_t value = esp_random();
+        size_t remaining = sizeof(token) - i;
+        size_t copy_len = remaining < sizeof(uint32_t) ? remaining : sizeof(uint32_t);
+        memcpy(&token[i], &value, copy_len);
+    }
+
+    bootstrap_bytes_to_hex(token, sizeof(token), s_recovery_auth_token, sizeof(s_recovery_auth_token));
+}
+
+static bool bootstrap_is_recovery_authenticated_request(httpd_req_t *req)
+{
+    s_recovery_auth_required = mainapp_security_is_password_set();
+    if (!s_recovery_auth_required) {
+        return true;
+    }
+    if (!req || s_recovery_auth_token[0] == '\0') {
+        return false;
+    }
+
+    size_t header_len = httpd_req_get_hdr_value_len(req, "X-Recovery-Auth");
+    if (header_len == 0 || header_len >= sizeof(s_recovery_auth_token)) {
+        return false;
+    }
+
+    char header_value[sizeof(s_recovery_auth_token)] = {0};
+    if (httpd_req_get_hdr_value_str(req, "X-Recovery-Auth", header_value, sizeof(header_value)) != ESP_OK) {
+        return false;
+    }
+
+    return strcmp(header_value, s_recovery_auth_token) == 0;
+}
+
+static esp_err_t bootstrap_require_recovery_auth(httpd_req_t *req)
+{
+    if (bootstrap_is_recovery_authenticated_request(req)) {
+        return ESP_OK;
+    }
+    return bootstrap_send_unauthorized(req);
+}
+
+static esp_err_t bootstrap_require_recovery_access(httpd_req_t *req, const char *conflict_message)
+{
+    if (!s_recovery_requested) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_sendstr(req, conflict_message);
+        return ESP_FAIL;
+    }
+
+    return bootstrap_require_recovery_auth(req);
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Handlers
@@ -174,11 +382,11 @@ static esp_err_t bootstrap_skip_handler(httpd_req_t *req)
 
 static esp_err_t bootstrap_format_storage_handler(httpd_req_t *req)
 {
-    if (!s_recovery_requested) {
-        httpd_resp_set_status(req, "409 Conflict");
-        httpd_resp_set_type(req, "text/plain");
-        httpd_resp_sendstr(req, "Enter recovery mode before formatting storage.");
-        return ESP_OK;
+    esp_err_t access_err = bootstrap_require_recovery_access(
+        req,
+        "Enter recovery mode before formatting storage.");
+    if (access_err != ESP_OK) {
+        return access_err;
     }
 
     ESP_LOGW(TAG, "Formatting storage from recovery mode");
@@ -194,11 +402,11 @@ static esp_err_t bootstrap_format_storage_handler(httpd_req_t *req)
 
 static esp_err_t bootstrap_reset_settings_handler(httpd_req_t *req)
 {
-    if (!s_recovery_requested) {
-        httpd_resp_set_status(req, "409 Conflict");
-        httpd_resp_set_type(req, "text/plain");
-        httpd_resp_sendstr(req, "Enter recovery mode before resetting settings.");
-        return ESP_OK;
+    esp_err_t access_err = bootstrap_require_recovery_access(
+        req,
+        "Enter recovery mode before resetting settings.");
+    if (access_err != ESP_OK) {
+        return access_err;
     }
 
     ESP_LOGW(TAG, "Resetting configured settings to defaults from recovery mode");
@@ -232,6 +440,8 @@ static esp_err_t bootstrap_reset_settings_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    s_recovery_auth_required = mainapp_security_is_password_set();
+    s_recovery_auth_token[0] = '\0';
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, "Settings reset to defaults");
     return ESP_OK;
@@ -263,6 +473,110 @@ static void json_escape_copy(const char *src, char *dst, size_t dst_size)
         }
     }
     dst[w] = '\0';
+}
+
+static esp_err_t send_device_info_json(httpd_req_t *req)
+{
+    s_recovery_auth_required = mainapp_security_is_password_set();
+
+    char mac[18] = {0};
+    if (device_info_get_mac_string(mac, sizeof(mac)) != ESP_OK) {
+        strlcpy(mac, "unknown", sizeof(mac));
+    }
+
+    char resp[320];
+    int len = snprintf(
+        resp,
+        sizeof(resp),
+        "{\"vendor\":\"%s\",\"firmware_version\":\"%s\",\"hardware_version\":\"%s\","
+        "\"source_code\":\"%s\",\"license\":\"%s\",\"mac\":\"%s\",\"auth_required\":%s}",
+        device_info_vendor(),
+        device_info_firmware_version(),
+        device_info_hardware_version(),
+        device_info_source_code_url(),
+        device_info_license_name(),
+        mac,
+        s_recovery_auth_required ? "true" : "false");
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
+static esp_err_t bootstrap_recovery_auth_handler(httpd_req_t *req)
+{
+    if (!s_recovery_requested) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_sendstr(req, "Enter recovery mode before authenticating.");
+        return ESP_OK;
+    }
+
+    s_recovery_auth_required = mainapp_security_is_password_set();
+    if (!s_recovery_auth_required) {
+        bootstrap_generate_recovery_auth_token();
+    } else {
+        char body[256];
+        if (bootstrap_read_request_body(req, body, sizeof(body)) != ESP_OK) {
+            return ESP_FAIL;
+        }
+
+        bool password_present = json_has_key(body, "password");
+        bool recovery_code_present = json_has_key(body, "recovery_code");
+        if (password_present == recovery_code_present) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Provide password or recovery_code");
+            return ESP_FAIL;
+        }
+
+        bool authenticated = false;
+        if (password_present) {
+            char password[65];
+            if (!json_get_string(body, "password", password, sizeof(password))) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid password");
+                return ESP_FAIL;
+            }
+            authenticated = mainapp_security_password_matches(password);
+        } else {
+            int recovery_code = 0;
+            if (!json_get_int(body, "recovery_code", &recovery_code)) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid recovery code");
+                return ESP_FAIL;
+            }
+            authenticated = recovery_code_check(recovery_code);
+        }
+
+        if (!authenticated) {
+            s_recovery_auth_token[0] = '\0';
+            return bootstrap_send_unauthorized(req);
+        }
+
+        bootstrap_generate_recovery_auth_token();
+    }
+
+    char resp[96];
+    int len = snprintf(resp,
+                       sizeof(resp),
+                       "{\"ok\":true,\"token\":\"%s\"}",
+                       s_recovery_auth_token);
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
+static esp_err_t bootstrap_device_info_handler(httpd_req_t *req)
+{
+    return send_device_info_json(req);
 }
 
 static esp_err_t bootstrap_network_ips_handler(httpd_req_t *req)
@@ -649,7 +963,15 @@ esp_err_t bootstrap(void)
     s_recovery_window_active = true;
     s_recovery_deadline_ticks = xTaskGetTickCount() + pdMS_TO_TICKS(CONFIG_RECOVERY_ENTRY_TIME * 1000);
     s_laser_countdown_boost_applied = false;
+    s_recovery_auth_token[0] = '\0';
     gpio_set_runtime_mode(GPIO_RUNTIME_BOOTSTRAP);
+
+    esp_err_t security_err = mainapp_security_init();
+    if (security_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load security state for bootstrap: %s", esp_err_to_name(security_err));
+        return security_err;
+    }
+    s_recovery_auth_required = mainapp_security_is_password_set();
 
     esp_err_t ap_err = network_enable_recovery_ap();
     if (ap_err != ESP_OK && ap_err != ESP_ERR_NOT_SUPPORTED) {
@@ -658,7 +980,7 @@ esp_err_t bootstrap(void)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 14;
 
     esp_err_t err = httpd_start(&s_bootstrap_server, &config);
     if (err != ESP_OK) {
@@ -718,6 +1040,18 @@ esp_err_t bootstrap(void)
         .handler = bootstrap_network_ips_handler,
         .user_ctx = NULL
     };
+    httpd_uri_t recovery_auth = {
+        .uri = "/recovery/auth",
+        .method = HTTP_POST,
+        .handler = bootstrap_recovery_auth_handler,
+        .user_ctx = NULL
+    };
+    httpd_uri_t device_info = {
+        .uri = "/device/info",
+        .method = HTTP_GET,
+        .handler = bootstrap_device_info_handler,
+        .user_ctx = NULL
+    };
     httpd_uri_t glyphs_js = {
         .uri = "/glyphs.js",
         .method = HTTP_GET,
@@ -758,6 +1092,8 @@ esp_err_t bootstrap(void)
         httpd_register_uri_handler(s_bootstrap_server, &format_storage) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &reset_settings) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &network_ips) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &recovery_auth) != ESP_OK ||
+        httpd_register_uri_handler(s_bootstrap_server, &device_info) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &connection_monitor_js) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &glyphs_js) != ESP_OK ||
         httpd_register_uri_handler(s_bootstrap_server, &glyphs_css) != ESP_OK) {

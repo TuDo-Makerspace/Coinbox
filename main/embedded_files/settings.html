@@ -213,6 +213,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       background: #f8fafc;
+      transition: background 0.15s ease;
     }
     .settings-toggle.no-top-margin {
       margin-top: 0;
@@ -233,6 +234,14 @@
       height: 1.25rem;
       accent-color: #2563eb;
       flex: 0 0 auto;
+      transition: transform 0.12s ease, box-shadow 0.15s ease;
+    }
+    .settings-toggle:hover {
+      background: rgba(37, 99, 235, 0.06);
+    }
+    .settings-toggle:hover input[type="checkbox"] {
+      transform: scale(1.05);
+      box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.12);
     }
     .settings-toggle-copy {
       display: flex;
@@ -249,13 +258,36 @@
       min-width: 0;
       min-height: 1.65rem;
     }
-    .settings-toggle-heading .sensor-label {
+    .settings-toggle-heading .section-label {
       color: var(--text);
       flex: 0 1 auto;
       min-width: 0;
     }
     .settings-toggle-note {
       margin: 0;
+    }
+    .info-list {
+      margin-top: 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .info-list .note {
+      margin: 0;
+    }
+    .info-subcard {
+      margin-bottom: 1.2rem;
+      padding: 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .info-subcard .info-list {
+      margin-top: 0;
+      font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
     }
     .network-actions button {
       padding: 0.7em 1.1em;
@@ -387,6 +419,11 @@
       gap: 0.75rem;
       flex-wrap: wrap;
     }
+    .card-meta {
+      color: var(--muted);
+      font-family: "SFMono-Regular","Consolas","Liberation Mono",monospace;
+      font-size: 0.9rem;
+    }
     .tone-status {
       display: inline-flex;
       align-items: center;
@@ -466,7 +503,7 @@
       flex-direction: column;
       gap: 0.35rem;
     }
-    .sensor-label { color: var(--muted); font-weight: 600; font-size: 0.95rem; }
+    .section-label { color: var(--muted); font-weight: 600; font-size: 0.95rem; }
     .sensor-reading { font-size: 1.1rem; font-weight: 700; }
     .sensor-note { color: var(--muted); font-size: 0.95rem; }
     .sensor-chart {
@@ -535,7 +572,7 @@
         gap: 0.35rem;
         min-height: 0;
       }
-      .settings-toggle-heading .sensor-label {
+      .settings-toggle-heading .section-label {
         display: block;
       }
       .settings-toggle-heading .net-state {
@@ -566,7 +603,7 @@
           <input id="startup-sound-enabled" type="checkbox" disabled>
           <div class="settings-toggle-copy">
             <div class="settings-toggle-heading">
-              <div class="sensor-label">Play startup sound</div>
+              <div class="section-label">Play startup sound</div>
             </div>
             <p class="note settings-toggle-note">Play the default coin sound when the system starts.</p>
           </div>
@@ -577,12 +614,13 @@
     <div class="card">
       <div class="card-header">
         <h2>Network</h2>
+        <div class="card-meta" id="network-mac">{{DEVICE_MAC}}</div>
       </div>
       <p class="note network-note">Changes will be applied after reboot</p>
       <div class="network-grid">
         <div class="net-field">
           <div class="net-top-line">
-            <div class="sensor-label">Access Point</div>
+            <div class="section-label">Access Point</div>
             <div class="net-state" id="network-ap-state" data-state="reboot-required" hidden>Reboot required</div>
           </div>
           <div class="net-ip" id="network-ap-ip">IP: --</div>
@@ -593,7 +631,7 @@
         </div>
         <div class="net-field">
           <div class="net-top-line">
-            <div class="sensor-label">Wi-Fi</div>
+            <div class="section-label">Wi-Fi</div>
             <div class="net-state" id="network-sta-state" data-state="disconnected">Disconnected</div>
           </div>
           <div class="net-ip" id="network-sta-ip">IP: --</div>
@@ -608,7 +646,7 @@
           <input id="network-disable-ap-when-sta-connected" type="checkbox">
           <div class="settings-toggle-copy">
             <div class="settings-toggle-heading">
-              <div class="sensor-label">Disable Access Point when connected to Wi-Fi</div>
+              <div class="section-label">Disable Access Point when connected to Wi-Fi</div>
               <div class="net-state" id="network-toggle-state" data-state="reboot-required" hidden>Reboot required</div>
             </div>
             <p class="note settings-toggle-note">If enabled, the Access Point stays off whenever the device has an active Wi-Fi connection.</p>
@@ -656,7 +694,7 @@
       </div>
       <div class="sensor-grid">
         <div class="sensor">
-          <div class="sensor-label">Laser receiver (GPIO 23)</div>
+          <div class="section-label">Laser receiver (GPIO 23)</div>
           <div class="sensor-reading" id="laser-level">--</div>
           <div class="sensor-note" id="laser-meaning">Waiting for data...</div>
           <div class="sensor-note">Changes: <span id="laser-changes">--</span></div>
@@ -667,7 +705,7 @@
           </div>
         </div>
         <div class="sensor">
-          <div class="sensor-label">Hall lid sensor (GPIO 2)</div>
+          <div class="section-label">Hall lid sensor (GPIO 2)</div>
           <div class="sensor-reading" id="hall-level">--</div>
           <div class="sensor-note" id="hall-meaning">Waiting for data...</div>
           <div class="sensor-note">Changes: <span id="hall-changes">--</span></div>
@@ -730,6 +768,16 @@
       <div class="card-header">
         <h2>System</h2>
       </div>
+      <div class="info-subcard">
+        <div class="info-list">
+          <p class="note" id="system-firmware">Firmware: {{FIRMWARE_VERSION}}</p>
+          <p class="note" id="system-hardware">Hardware: {{HARDWARE_VERSION}}</p>
+          <p class="note" id="system-recovery-code">Recovery Code: {{RECOVERY_CODE}}</p>
+          <p class="note" id="system-vendor">Vendor: {{VENDOR_NAME}}</p>
+          <p class="note">Source Code: <a id="system-source-code" href="{{SOURCE_CODE_URL}}" target="_blank" rel="noopener noreferrer">{{SOURCE_CODE_URL}}</a></p>
+          <p class="note" id="system-license">License: {{LICENSE_NAME}}</p>
+        </div>
+      </div>
       <div class="actions">
         <button id="restart-device">Restart device</button>
       </div>
@@ -764,7 +812,14 @@
     const toggleState = document.getElementById('network-toggle-state');
     const disableApWhenStaConnectedInput = document.getElementById('network-disable-ap-when-sta-connected');
     const networkSaveBtn = document.getElementById('network-save');
+    const networkMacText = document.getElementById('network-mac');
     const startupSoundInput = document.getElementById('startup-sound-enabled');
+    const systemFirmwareText = document.getElementById('system-firmware');
+    const systemHardwareText = document.getElementById('system-hardware');
+    const systemVendorText = document.getElementById('system-vendor');
+    const systemRecoveryCodeText = document.getElementById('system-recovery-code');
+    const systemSourceCodeLink = document.getElementById('system-source-code');
+    const systemLicenseText = document.getElementById('system-license');
     const securityStatus = document.getElementById('security-status');
     const securityStatusPill = document.getElementById('security-status-pill');
     const securityStatusPillText = document.getElementById('security-status-pill-text');
@@ -772,10 +827,13 @@
     const securityPasswordConfirmInput = document.getElementById('security-password-confirm');
     const securitySaveBtn = document.getElementById('security-save');
     const securityRemoveBtn = document.getElementById('security-remove');
+    const DEVICE_INFO_TIMEOUT_MS = 1500;
+    const DEVICE_INFO_POLL_MS = 2000;
     const LOG_POLL_MS = 3000;
     const IP_POLL_MS = 10000;
     let logIntervalId;
     let ipIntervalId;
+    let deviceInfoIntervalId;
     let logLoading = false;
     let lastLogText = null;
     let lastRenderWasError = false;
@@ -785,6 +843,8 @@
     let bootConfigLoaded = false;
     let bootConfigSaving = false;
     let bootSoundEnabledSnapshot = true;
+    let deviceInfoLoaded = false;
+    let deviceInfoLoading = false;
     let securitySaving = false;
     const NETWORK_PASSWORD_MASK_VALUE = 'xxxxxxxxxxxx';
     const apPasswordState = { masked: false, edited: false };
@@ -1117,6 +1177,66 @@
         bootConfigSaving = false;
         renderBootConfig({ boot_sound_enabled: bootSoundEnabledSnapshot });
       }
+    }
+
+    function renderDeviceInfo(data) {
+      const firmwareVersion = data?.firmware_version || 'unknown';
+      const hardwareVersion = data?.hardware_version || 'unknown';
+      const vendor = data?.vendor || 'unknown';
+      const sourceCode = data?.source_code || '';
+      const license = data?.license || 'unknown';
+      const mac = data?.mac || 'unknown';
+      const recoveryCode = data?.recovery_code || 'unknown';
+
+      if (networkMacText) {
+        networkMacText.textContent = mac;
+      }
+      if (systemFirmwareText) {
+        systemFirmwareText.textContent = `Firmware: ${firmwareVersion}`;
+      }
+      if (systemHardwareText) {
+        systemHardwareText.textContent = `Hardware: ${hardwareVersion}`;
+      }
+      if (systemVendorText) {
+        systemVendorText.textContent = `Vendor: ${vendor}`;
+      }
+      if (systemRecoveryCodeText) {
+        systemRecoveryCodeText.textContent = `Recovery Code: ${recoveryCode}`;
+      }
+      if (systemSourceCodeLink) {
+        systemSourceCodeLink.textContent = sourceCode || 'Unavailable';
+        systemSourceCodeLink.href = sourceCode || '#';
+      }
+      if (systemLicenseText) {
+        systemLicenseText.textContent = `License: ${license}`;
+      }
+    }
+
+    async function fetchDeviceInfo() {
+      if (deviceInfoLoading) return;
+      deviceInfoLoading = true;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DEVICE_INFO_TIMEOUT_MS);
+      try {
+        const res = await fetch('/device/info', { cache: 'no-store', signal: controller.signal });
+        if (!res.ok) throw new Error('Failed to load device info');
+        const data = await res.json();
+        deviceInfoLoaded = true;
+        renderDeviceInfo(data);
+      } catch (_) {
+        deviceInfoLoaded = false;
+        renderDeviceInfo({});
+      } finally {
+        clearTimeout(timeoutId);
+        deviceInfoLoading = false;
+      }
+    }
+
+    function startDeviceInfoAutoRefresh() {
+      if (deviceInfoIntervalId) clearInterval(deviceInfoIntervalId);
+      deviceInfoIntervalId = setInterval(() => {
+        if (!document.hidden && !deviceInfoLoaded) fetchDeviceInfo();
+      }, DEVICE_INFO_POLL_MS);
     }
 
     function renderSecurityConfig(data) {
@@ -2059,6 +2179,7 @@
     }
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
+        fetchDeviceInfo();
         fetchLog();
         fetchGpioState();
         fetchNetworkIps();
@@ -2076,6 +2197,7 @@
     }
     renderEventChart(laserChart, laserEvents, '#2563eb');
     renderEventChart(hallChart, hallEvents, '#f97316');
+    fetchDeviceInfo();
     fetchLog();
     fetchGpioState();
     fetchNetworkIps();
@@ -2085,6 +2207,7 @@
     startLogAutoRefresh();
     startGpioAutoRefresh();
     startIpAutoRefresh();
+    startDeviceInfoAutoRefresh();
     fetchToneStatus();
     startToneAutoRefresh();
   </script>

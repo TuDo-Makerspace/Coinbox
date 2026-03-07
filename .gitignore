@@ -28,6 +28,7 @@ bootloader.bin
 # Node / tooling
 node_modules/
 .pio
+.env
 
 # VS Code
 .vscode/

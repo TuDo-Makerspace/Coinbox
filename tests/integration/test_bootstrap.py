@@ -18,16 +18,19 @@ try:
         MAIN_READY_TIMEOUT_S,
         RACE_RECOVERY_COUNTDOWN_THRESHOLD_S,
         RACE_SKIP_COUNTDOWN_THRESHOLD_S,
+        _authenticate_recovery,
         _assert_network_ips_payload,
         _assert_recovery_persists,
         _assert_sound_download_status,
         _ensure_auth_enabled,
         _enter_recovery_mode,
+        _expected_recovery_code,
         _extract_bootstrap_countdown_seconds,
         _format_storage_from_recovery,
         _get_network_config,
         _get_security_config,
         _http_get,
+        _http_post_json,
         _http_request,
         _is_bootstrap_root_page,
         _is_login_redirect,
@@ -58,16 +61,19 @@ except ModuleNotFoundError:
         MAIN_READY_TIMEOUT_S,
         RACE_RECOVERY_COUNTDOWN_THRESHOLD_S,
         RACE_SKIP_COUNTDOWN_THRESHOLD_S,
+        _authenticate_recovery,
         _assert_network_ips_payload,
         _assert_recovery_persists,
         _assert_sound_download_status,
         _ensure_auth_enabled,
         _enter_recovery_mode,
+        _expected_recovery_code,
         _extract_bootstrap_countdown_seconds,
         _format_storage_from_recovery,
         _get_network_config,
         _get_security_config,
         _http_get,
+        _http_post_json,
         _http_request,
         _is_bootstrap_root_page,
         _is_login_redirect,
@@ -158,6 +164,14 @@ def _get_bootstrap_extend_note_text(base_url: str) -> str:
     note = _extract_bootstrap_extend_note_text(body)
     assert note is not None, "Could not parse extension note from bootstrap page."
     return note
+
+
+def _prepare_auth_enabled_recovery(base_url: str, log_path) -> str:
+    _skip_to_main_app(base_url, log_path)
+    auth_cookie = _set_security_password(base_url, CUSTOM_UI_PASSWORD)
+    _restart_into_bootstrap(base_url, log_path, headers={"Cookie": auth_cookie})
+    _enter_recovery_mode(base_url, log_path)
+    return auth_cookie
 
 # Test: Bootstrap unknown route redirects to root.
 # 1. Confirm bootstrap mode is active via unique root-page marker.
@@ -720,6 +734,220 @@ def test_recovery_reset_after_custom_settings(qemu_bootstrap_instance):
         "Expected /sounds/ to be accessible after recovery reset removed auth.\n"
         f"status={status}, location={headers.get('Location')}"
     )
+
+
+# Test: Recovery reset should reject unauthenticated clients when main-app auth is enabled.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Call `POST /settings/reset` without bootstrap recovery auth.
+# 4. Assert request is rejected and recovery mode remains active.
+def test_recovery_reset_rejects_unauthenticated_client_when_auth_enabled(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/settings/reset",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected recovery reset to reject unauthenticated clients when auth is enabled.\n"
+        f"status={status}, body={body}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert "unauthorized" in body.lower(), (
+        "Expected unauthorized response body for unauthenticated recovery reset.\n"
+        f"body={body}"
+    )
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_recovery_bootstrap_page(status, headers, body)
+
+
+# Test: Recovery format should reject unauthenticated clients when main-app auth is enabled.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Call `POST /format` without bootstrap recovery auth.
+# 4. Assert request is rejected and recovery mode remains active.
+def test_recovery_format_rejects_unauthenticated_client_when_auth_enabled(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected recovery format to reject unauthenticated clients when auth is enabled.\n"
+        f"status={status}, body={body}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert "unauthorized" in body.lower(), (
+        "Expected unauthorized response body for unauthenticated recovery format.\n"
+        f"body={body}"
+    )
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_recovery_bootstrap_page(status, headers, body)
+
+
+# Test: Wrong recovery password must not unlock destructive actions.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Submit an incorrect password to `POST /recovery/auth`.
+# 4. Assert auth is rejected and reset/format remain blocked.
+def test_recovery_auth_rejects_wrong_password(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+
+    status, _, body = _http_post_json(
+        base_url,
+        "/recovery/auth",
+        {"password": f"{CUSTOM_UI_PASSWORD}-wrong"},
+        timeout_s=8.0,
+    )
+    assert status == 401, (
+        "Expected bootstrap recovery auth to reject an incorrect password.\n"
+        f"status={status}, body={body}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert "unauthorized" in body.lower(), (
+        "Expected unauthorized response body for incorrect bootstrap recovery password.\n"
+        f"body={body}"
+    )
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected /format to remain locked after failed bootstrap recovery password auth.\n"
+        f"status={status}, body={body}"
+    )
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/settings/reset",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected /settings/reset to remain locked after failed bootstrap recovery password auth.\n"
+        f"status={status}, body={body}"
+    )
+
+
+# Test: Wrong recovery code must not unlock destructive actions.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Submit an incorrect recovery code to `POST /recovery/auth`.
+# 4. Assert auth is rejected and reset/format remain blocked.
+def test_recovery_auth_rejects_wrong_recovery_code(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+
+    expected_code = _expected_recovery_code()
+    wrong_code = (expected_code + 1) % 10000
+    if wrong_code == expected_code:
+        wrong_code = (expected_code + 2) % 10000
+
+    status, _, body = _http_post_json(
+        base_url,
+        "/recovery/auth",
+        {"recovery_code": wrong_code},
+        timeout_s=8.0,
+    )
+    assert status == 401, (
+        "Expected bootstrap recovery auth to reject an incorrect recovery code.\n"
+        f"status={status}, body={body}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert "unauthorized" in body.lower(), (
+        "Expected unauthorized response body for incorrect bootstrap recovery code.\n"
+        f"body={body}"
+    )
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected /format to remain locked after failed bootstrap recovery-code auth.\n"
+        f"status={status}, body={body}"
+    )
+
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/settings/reset",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 401, (
+        "Expected /settings/reset to remain locked after failed bootstrap recovery-code auth.\n"
+        f"status={status}, body={body}"
+    )
+
+
+# Test: Recovery password authentication unlocks both destructive actions.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Authenticate bootstrap recovery with the configured password.
+# 4. Call `POST /format` then `POST /settings/reset` using that recovery auth.
+def test_recovery_reset_and_format_work_after_password_auth(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+    recovery_headers = _authenticate_recovery(base_url, password=CUSTOM_UI_PASSWORD)
+
+    _format_storage_from_recovery(base_url, headers=recovery_headers)
+    _reset_settings_from_recovery(base_url, headers=recovery_headers)
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_recovery_bootstrap_page(status, headers, body)
+
+
+# Test: Recovery-code authentication unlocks both destructive actions.
+# 1. Start main app and enable UI auth.
+# 2. Restart into bootstrap and enter recovery mode.
+# 3. Authenticate bootstrap recovery with the device's recovery code.
+# 4. Call `POST /format` then `POST /settings/reset` using that recovery auth.
+def test_recovery_reset_and_format_work_after_recovery_code_auth(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _prepare_auth_enabled_recovery(base_url, log_path)
+    recovery_headers = _authenticate_recovery(
+        base_url,
+        recovery_code=_expected_recovery_code(),
+    )
+
+    _format_storage_from_recovery(base_url, headers=recovery_headers)
+    _reset_settings_from_recovery(base_url, headers=recovery_headers)
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_recovery_bootstrap_page(status, headers, body)
 
 
 # Test: Formatting storage in recovery works even when storage is empty.

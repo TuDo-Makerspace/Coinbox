@@ -37,6 +37,9 @@ MAIN_READY_TIMEOUT_S = 20.0
 BOOTSTRAP_HTML_MARKER = "Coinbox is starting"
 RECOVERY_AP_ATTEMPT_LOG_MARKER = "Creating AP: coinboxrecovery"
 RECOVERY_MODE_ENGAGED_LOG_MARKER = "Recovery endpoint hit; countdown aborted"
+RECOVERY_SEED_DEFAULT = "test"
+QEMU_EFUSE_FACTORY_MAC_OFFSET = 4
+QEMU_EFUSE_FACTORY_MAC_LEN = 6
 CUSTOM_AP_SSID = "coinbox-reset-ap"
 CUSTOM_AP_PASSWORD = "coinbox-reset-pass"
 CUSTOM_STA_SSID = "coinbox-reset-sta"
@@ -310,6 +313,89 @@ def _extract_cookie_pair(headers, cookie_name: str) -> str | None:
     return None
 
 
+def _strip_optional_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
+
+
+def _load_recovery_seed() -> str:
+    env_path = REPO_ROOT / ".env"
+    if not env_path.is_file():
+        return RECOVERY_SEED_DEFAULT
+
+    for raw_line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == "COINBOX_RECOVERY_SEED":
+            return _strip_optional_quotes(value.strip())
+
+    return RECOVERY_SEED_DEFAULT
+
+
+def _get_qemu_factory_mac() -> str:
+    efuse_path = REPO_ROOT / TEST_BUILD_DIR / "qemu_efuse.bin"
+    assert efuse_path.is_file(), f"Missing QEMU efuse image: {efuse_path}"
+
+    efuse_bytes = efuse_path.read_bytes()
+    start = QEMU_EFUSE_FACTORY_MAC_OFFSET
+    end = start + QEMU_EFUSE_FACTORY_MAC_LEN
+    assert len(efuse_bytes) >= end, f"QEMU efuse image too short: {efuse_path}"
+
+    mac = efuse_bytes[start:end]
+    return ":".join(f"{byte:02x}" for byte in mac)
+
+
+def _expected_recovery_code() -> int:
+    script_path = REPO_ROOT / "tools" / "recovery_code.py"
+    assert script_path.is_file(), f"Missing recovery code helper script: {script_path}"
+
+    output = subprocess.check_output(
+        ["python3", str(script_path), _load_recovery_seed(), _get_qemu_factory_mac()],
+        cwd=REPO_ROOT,
+        text=True,
+    ).strip()
+    assert output.isdigit(), f"Unexpected recovery code output: {output!r}"
+    return int(output)
+
+
+def _authenticate_recovery(
+    base_url: str,
+    *,
+    password: str | None = None,
+    recovery_code: int | None = None,
+) -> dict[str, str]:
+    assert (password is None) != (recovery_code is None), (
+        "Provide exactly one of password or recovery_code when authenticating bootstrap recovery."
+    )
+
+    payload: dict[str, object] = {}
+    if password is not None:
+        payload["password"] = password
+    else:
+        payload["recovery_code"] = recovery_code
+
+    status, headers, body = _http_post_json(base_url, "/recovery/auth", payload)
+    assert status == 200, (
+        f"Bootstrap recovery auth failed. status={status}, body={body}, headers={dict(headers)}"
+    )
+
+    cookie = _extract_cookie_pair(headers, "coinbox_recovery_auth")
+    if cookie:
+        if body.strip().startswith("{"):
+            payload_obj = _json_load_object(body, "POST /recovery/auth")
+            assert payload_obj.get("ok") is True, f"Unexpected bootstrap auth JSON body: {payload_obj}"
+        return {"Cookie": cookie}
+
+    payload_obj = _json_load_object(body, "POST /recovery/auth")
+    assert payload_obj.get("ok") is True, f"Unexpected bootstrap auth response: {payload_obj}"
+    token = payload_obj.get("token")
+    assert isinstance(token, str) and token, f"Missing bootstrap auth token in response: {payload_obj}"
+    return {"X-Recovery-Auth": token}
+
+
 def _wait_for_json_200(
     base_url: str,
     path: str,
@@ -444,25 +530,27 @@ def _restart_into_bootstrap(
     assert ready, f"Device did not reboot back to bootstrap mode.\nLog tail:\n{_tail_log(log_path)}"
 
 
-def _reset_settings_from_recovery(base_url: str):
+def _reset_settings_from_recovery(base_url: str, headers: dict[str, str] | None = None):
     status, _, body = _http_request(
         base_url=base_url,
         method="POST",
         path="/settings/reset",
         timeout_s=2.0,
         data=b"",
+        headers=headers,
     )
     assert status == 200, f"/settings/reset failed in recovery. status={status}, body={body}"
     assert "Settings reset to defaults" in body
 
 
-def _format_storage_from_recovery(base_url: str):
+def _format_storage_from_recovery(base_url: str, headers: dict[str, str] | None = None):
     status, _, body = _http_request(
         base_url=base_url,
         method="POST",
         path="/format",
         timeout_s=2.0,
         data=b"",
+        headers=headers,
     )
     assert status == 200, f"/format failed in recovery. status={status}, body={body}"
     assert "Storage formatted" in body
