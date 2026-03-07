@@ -772,7 +772,7 @@ def test_recovery_reset_defaults_is_idempotent(qemu_bootstrap_instance):
 #    - Update AP/STA settings when those features are enabled in this build.
 # 3. Verify auth is active and (when applicable) network settings changed.
 # 4. Restart into bootstrap using authenticated `/restart`.
-# 5. Enter recovery and call `POST /settings/reset`.
+# 5. Enter recovery, authenticate bootstrap recovery, and call `POST /settings/reset`.
 # 6. Leave recovery via `/skip` and wait for main app.
 # 7. Assert auth is disabled and network/security config is back to baseline defaults.
 def test_recovery_reset_after_custom_settings(qemu_bootstrap_instance):
@@ -824,7 +824,8 @@ def test_recovery_reset_after_custom_settings(qemu_bootstrap_instance):
 
     _restart_into_bootstrap(base_url, log_path, headers=auth_headers)
     _enter_recovery_mode(base_url, log_path)
-    _reset_settings_from_recovery(base_url)
+    recovery_headers = _authenticate_recovery(base_url, password=CUSTOM_UI_PASSWORD)
+    _reset_settings_from_recovery(base_url, headers=recovery_headers)
     _skip_to_main_app(base_url, log_path)
 
     network_after_reset = _get_network_config(base_url)
