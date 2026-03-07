@@ -64,7 +64,7 @@ static void bootstrap_process_laser_beam_breaks(void);
 static void schedule_main_start(void);
 static void enter_main_task(void *arg);
 static void start_main_application(void);
-static esp_err_t render_bootstrap_page(httpd_req_t *req, bool force_handoff);
+static esp_err_t render_bootstrap_page(httpd_req_t *req);
 static bool replace_placeholder(char *buffer, size_t buffer_size, const char *placeholder, const char *replacement);
 static bool replace_placeholder_any(char *buffer, size_t buffer_size,
                                     const char *placeholder_a, const char *placeholder_b,
@@ -286,10 +286,10 @@ static esp_err_t bootstrap_404_redirect_handler(httpd_req_t *req, httpd_err_code
 
 static esp_err_t bootstrap_root_handler(httpd_req_t *req)
 {
-    return render_bootstrap_page(req, false);
+    return render_bootstrap_page(req);
 }
 
-static esp_err_t render_bootstrap_page(httpd_req_t *req, bool force_handoff)
+static esp_err_t render_bootstrap_page(httpd_req_t *req)
 {
     // Get remaining seconds on recovery timer.
     uint32_t seconds = get_remaining_seconds();
@@ -321,11 +321,11 @@ static esp_err_t render_bootstrap_page(httpd_req_t *req, bool force_handoff)
     char refresh_buf[2];
     char recovery_buf[2];
     char laser_extended_buf[2];
-    char force_handoff_buf[2];
-    bool auto_refresh = !s_recovery_requested && !force_handoff;
-    bool is_recovery = s_recovery_requested && !force_handoff;
+    bool auto_refresh = !s_recovery_requested;
+    bool is_recovery = s_recovery_requested;
     bool laser_extended = s_laser_countdown_boost_applied;
     const char *extend_note = laser_extended ? BOOTSTRAP_LASER_EXTEND_NOTE_EXTENDED : BOOTSTRAP_LASER_EXTEND_NOTE_DEFAULT;
+
     snprintf(seconds_buf, sizeof(seconds_buf), "%lu", (unsigned long)seconds);
     refresh_buf[0] = auto_refresh ? '1' : '0';
     refresh_buf[1] = '\0';
@@ -333,13 +333,10 @@ static esp_err_t render_bootstrap_page(httpd_req_t *req, bool force_handoff)
     recovery_buf[1] = '\0';
     laser_extended_buf[0] = laser_extended ? '1' : '0';
     laser_extended_buf[1] = '\0';
-    force_handoff_buf[0] = force_handoff ? '1' : '0';
-    force_handoff_buf[1] = '\0';
 
     if (!replace_placeholder_any(page, page_capacity, "{{SECONDS}}", "{{ SECONDS }}", seconds_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{AUTO_REFRESH}}", "{{ AUTO_REFRESH }}", refresh_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{IS_RECOVERY}}", "{{ IS_RECOVERY }}", recovery_buf) ||
-        !replace_placeholder_any(page, page_capacity, "{{FORCE_HANDOFF}}", "{{ FORCE_HANDOFF }}", force_handoff_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{LASER_EXTENSION_SEEN}}", "{{ LASER_EXTENSION_SEEN }}", laser_extended_buf) ||
         !replace_placeholder_any(page, page_capacity, "{{EXTEND_NOTE}}", "{{ EXTEND_NOTE }}", extend_note)) {
         ESP_LOGE(TAG, "Failed to render bootstrap page");
@@ -373,11 +370,13 @@ static esp_err_t bootstrap_skip_handler(httpd_req_t *req)
     cancel_recovery_timer();
 
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    esp_err_t err = render_bootstrap_page(req, true);
+    httpd_resp_set_status(req, "200 OK");
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "Starting main application");
 
     // Start handoff only after finishing the /skip response to reduce socket-close races.
     schedule_main_start();
-    return err;
+    return ESP_OK;
 }
 
 static esp_err_t bootstrap_format_storage_handler(httpd_req_t *req)

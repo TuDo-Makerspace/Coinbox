@@ -218,6 +218,230 @@ def _body_text_matches(browser_state: dict, pattern: str) -> bool:
     return re.search(pattern, browser_state.get("body_text", ""), flags=re.IGNORECASE) is not None
 
 
+def _capture_recovery_exit_transition_states(base_url: str) -> list[dict]:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/"
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + 5.0
+                last_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    last_state = state
+                    if "Recovery Mode" in state.get("body_text", "") and "Exit recovery mode" in state.get("body_text", ""):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(f"Recovery page did not become interactive before click.\nLast state: {last_state}")
+
+                click_response = _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  const btn = document.getElementById('start-now');"
+                            "  if (!btn) return 'missing-button';"
+                            "  btn.click();"
+                            "  return btn.textContent || '';"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+                click_value = click_response.get("result", {}).get("result", {}).get("value")
+                assert click_value != "missing-button", "Recovery exit button was not present in the browser DOM."
+
+                captured_states: list[dict] = []
+                deadline = time.time() + 3.0
+                while time.time() < deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    captured_states.append(state)
+                    if state.get("current_path") == "/sounds/":
+                        break
+                    time.sleep(0.05)
+
+                return captured_states
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
+def _capture_start_now_transition_states(base_url: str) -> list[dict]:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/"
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + 5.0
+                last_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    last_state = state
+                    if "Coinbox is starting" in state.get("body_text", "") and "Start now" in state.get("body_text", ""):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(f"Bootstrap page did not become interactive before click.\nLast state: {last_state}")
+
+                click_response = _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  const btn = document.getElementById('start-now');"
+                            "  if (!btn) return 'missing-button';"
+                            "  btn.click();"
+                            "  return btn.textContent || '';"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+                click_value = click_response.get("result", {}).get("result", {}).get("value")
+                assert click_value != "missing-button", "Bootstrap start-now button was not present in the browser DOM."
+
+                captured_states: list[dict] = []
+                deadline = time.time() + 3.0
+                while time.time() < deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    captured_states.append(state)
+                    if state.get("current_path") in ("/sounds/", "/login"):
+                        break
+                    time.sleep(0.05)
+
+                return captured_states
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
+def _transition_states_details(states: list[dict], log_path) -> str:
+    lines = []
+    for index, state in enumerate(states[:20], start=1):
+        body = state.get("body_text", "").replace("\n", " | ")
+        lines.append(
+            f"{index}. path={state.get('current_path')} title={state.get('title')} body={body[:220]}"
+        )
+    return "Captured states:\n" + "\n".join(lines) + f"\nLog tail:\n{_tail_log(log_path)}"
+
+
 def _find_browser_binary() -> str | None:
     for candidate in ("google-chrome", "google-chrome-stable", "chromium-browser", "chromium"):
         path = shutil.which(candidate)
@@ -433,7 +657,7 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
 # Test: Browser handoff from bootstrap should reach login when auth is already enabled.
 # 1. Start main app and enable auth.
 # 2. Restart back into bootstrap while auth remains enabled.
-# 3. Open `/skip` in a real headless browser and let the bootstrap handoff JS run.
+# 3. Open `/` in a real headless browser and click `Start now`.
 # 4. Assert the browser leaves bootstrap and lands on `/login`.
 def test_skip_handoff_browser_detects_login_when_auth_already_enabled(qemu_bootstrap_instance):
     base_url = qemu_bootstrap_instance["base_url"]
@@ -449,10 +673,8 @@ def test_skip_handoff_browser_detects_login_when_auth_already_enabled(qemu_boots
     status, headers, body = _http_get(base_url, "/")
     assert _is_bootstrap_root_page(status, headers, body)
 
-    browser_state = _capture_browser_state_in_headless_chrome(
-        f"{base_url}/skip",
-        wait_paths=("/login",),
-    )
+    states = _capture_start_now_transition_states(base_url)
+    browser_state = next((state for state in reversed(states) if state.get("current_path") == "/login"), states[-1])
     _assert_browser_lands_on(
         browser_state=browser_state,
         expected_path="/login",
@@ -464,7 +686,7 @@ def test_skip_handoff_browser_detects_login_when_auth_already_enabled(qemu_boots
 
 # Test: Browser handoff from bootstrap should reach the main app when auth is disabled.
 # 1. Confirm bootstrap mode is active.
-# 2. Open `/skip` in a real headless browser and let the bootstrap handoff JS run.
+# 2. Open `/` in a real headless browser and click `Start now`.
 # 3. Assert the browser leaves bootstrap and lands on `/sounds/`.
 def test_skip_handoff_browser_reaches_main_app_without_auth(qemu_bootstrap_instance):
     base_url = qemu_bootstrap_instance["base_url"]
@@ -473,10 +695,8 @@ def test_skip_handoff_browser_reaches_main_app_without_auth(qemu_bootstrap_insta
     status, headers, body = _http_get(base_url, "/")
     assert _is_bootstrap_root_page(status, headers, body)
 
-    browser_state = _capture_browser_state_in_headless_chrome(
-        f"{base_url}/skip",
-        wait_paths=("/sounds/",),
-    )
+    states = _capture_start_now_transition_states(base_url)
+    browser_state = next((state for state in reversed(states) if state.get("current_path") == "/sounds/"), states[-1])
     _assert_browser_lands_on(
         browser_state=browser_state,
         expected_path="/sounds/",
@@ -512,6 +732,72 @@ def test_recovery_browser_shows_vendor_firmware_hardware_and_mac(qemu_bootstrap_
     assert _body_text_matches(browser_state, r"Firmware:\s*\d+\.\d+\.\d+"), details
     assert _body_text_matches(browser_state, r"Hardware:\s*\d+\.\d+\.\d+"), details
     assert _body_text_matches(browser_state, rf"MAC:\s*{re.escape(expected_mac)}"), details
+
+
+# Test: Exiting recovery mode should immediately show the intended handoff card.
+# 1. Enter recovery mode.
+# 2. Open the recovery page in a real headless browser.
+# 3. Click the "Exit recovery mode" button.
+# 4. Assert the first non-recovery handoff screen already shows the "Getting things ready..." card,
+#    without the countdown or recovery/start buttons.
+def test_recovery_exit_browser_immediately_shows_starting_main_application(qemu_bootstrap_instance):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+
+    _enter_recovery_mode(base_url, log_path)
+
+    states = _capture_recovery_exit_transition_states(base_url)
+    details = _transition_states_details(states, log_path)
+    assert states, f"No browser states were captured after exiting recovery mode.\n{details}"
+
+    transition_state = next(
+        (
+            state for state in states
+            if "Recovery Mode" not in state.get("body_text", "")
+            and (
+                "Starting main application" in state.get("body_text", "")
+                or "Getting things ready..." in state.get("body_text", "")
+                or "Coinbox is starting" in state.get("body_text", "")
+            )
+        ),
+        None,
+    )
+    assert transition_state is not None, (
+        "Did not observe a bootstrap handoff screen after clicking exit recovery mode.\n"
+        f"{details}"
+    )
+    assert "Starting main application" in transition_state.get("body_text", ""), (
+        "The first post-recovery handoff screen was not 'Starting main application'.\n"
+        f"{details}"
+    )
+    assert "Getting things ready..." in transition_state.get("body_text", ""), (
+        "The first post-recovery handoff screen did not show the intended handoff card body.\n"
+        f"{details}"
+    )
+    assert "Coinbox is starting" not in transition_state.get("body_text", ""), (
+        "Observed an intermediate 'Coinbox is starting' screen after clicking exit recovery mode.\n"
+        f"{details}"
+    )
+    assert "seconds remaining" not in transition_state.get("body_text", ""), (
+        "Observed the countdown on the first post-recovery handoff screen.\n"
+        f"{details}"
+    )
+    assert "Start now" not in transition_state.get("body_text", ""), (
+        "Observed the Start now button on the first post-recovery handoff screen.\n"
+        f"{details}"
+    )
+    assert "Enter recovery mode" not in transition_state.get("body_text", ""), (
+        "Observed the recovery-entry button on the first post-recovery handoff screen.\n"
+        f"{details}"
+    )
+    assert "Exit recovery mode" not in transition_state.get("body_text", ""), (
+        "Observed the recovery-exit button on the first post-recovery handoff screen.\n"
+        f"{details}"
+    )
+    assert any(state.get("current_path") == "/sounds/" for state in states), (
+        "Browser did not complete the handoff into the main app after exiting recovery mode.\n"
+        f"{details}"
+    )
 
 
 # Test: Browser countdown expiry should hand off to the main app when auth is disabled.

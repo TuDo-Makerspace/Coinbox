@@ -312,9 +312,9 @@ def test_bootstrap_three_laser_beam_breaks_extend_countdown_to_sixty(qemu_bootst
 
 # Test: `/skip` starts main app (no auth flow).
 # 1. Confirm bootstrap mode is active.
-# 2. Call `GET /skip` and verify skip page response.
+# 2. Call `GET /skip` and verify the trigger response.
 # 3. Wait until main app is reachable.
-# 4. Confirm `/skip` no longer serves bootstrap skip page.
+# 4. Confirm `/skip` no longer serves the bootstrap trigger response.
 def test_skip(qemu_bootstrap_instance):
     base_url = qemu_bootstrap_instance["base_url"]
     log_path = qemu_bootstrap_instance["log_path"]
@@ -323,11 +323,11 @@ def test_skip(qemu_bootstrap_instance):
     status, headers, body = _http_get(base_url, "/")
     assert _is_bootstrap_root_page(status, headers, body)
 
-    # Hit /skip and verify skip page response.
+    # Hit /skip and verify the trigger response.
     status, headers, body = _http_get(base_url, "/skip")
     assert status == 200
     assert headers.get("Cache-Control") == "no-store"
-    assert "text/html" in headers.get("Content-Type", "")
+    assert "text/plain" in headers.get("Content-Type", "")
     assert "Starting main application" in body
 
     # Wait for main app handoff to complete.

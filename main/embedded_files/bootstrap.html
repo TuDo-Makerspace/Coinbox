@@ -313,7 +313,7 @@
 <body>
   <div class="content">
     <div class="card" id="card">
-      <div class="card-tools">
+      <div class="card-tools" id="card-tools" style="display:none;">
         <button class="tool-btn warning" id="reset-settings-icon" type="button" style="display:none;"
           aria-label="Reset settings to defaults" title="Reset settings to defaults">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -334,12 +334,13 @@
         <span class="badge" id="countdown">{{SECONDS}}</span>
         <div class="status-text" id="status-text">seconds remaining</div>
       </div>
-      <p class="status-text" id="device-info" hidden></p>
-      <p class="status-text strong" id="ota-status" hidden>Awaiting OTA update...</p>
+      <p class="status-text" id="device-info" style="display:none;"></p>
+      <p class="status-text strong" id="ota-status" style="display:none;">Awaiting OTA update...</p>
       <div class="actions" id="actions">
         <a class="btn primary" id="start-now" href="/skip">Start now</a>
         <a class="btn" id="stay" href="#">Enter recovery mode</a>
       </div>
+      <p class="status-text" id="handoff-note" style="display:none;"></p>
       <p class="note" id="extend-note">{{ EXTEND_NOTE }}</p>
     </div>
   </div>
@@ -372,8 +373,7 @@
     let remaining = {{ SECONDS }};
     let autoRefresh = {{ AUTO_REFRESH }};
     let isRecovery = {{ IS_RECOVERY }};
-    let forceHandoff = {{ FORCE_HANDOFF }};
-    let refreshed = false;
+    let forceHandoff = 0;
     let laserExtensionSeen = {{ LASER_EXTENSION_SEEN }};
     const el = document.getElementById('countdown');
     const cardEl = document.getElementById('card');
@@ -386,9 +386,10 @@
     const stayBtn = document.getElementById('stay');
     const startBtn = document.getElementById('start-now');
     const extendNote = document.getElementById('extend-note');
+    const handoffNote = document.getElementById('handoff-note');
     const resetBtn = document.getElementById('reset-settings-icon');
     const formatBtn = document.getElementById('format-storage-icon');
-    const cardTools = cardEl ? cardEl.querySelector('.card-tools') : null;
+    const cardTools = document.getElementById('card-tools');
     const recoveryAuthModal = document.getElementById('recovery-auth-modal');
     const recoveryAuthPasswordInput = document.getElementById('recovery-auth-password');
     const recoveryAuthPinInput = document.getElementById('recovery-auth-pin');
@@ -397,13 +398,20 @@
     const recoveryAuthSubmitBtn = document.getElementById('recovery-auth-submit');
     let resetting = false;
     let formatting = false;
-    let handoffRetryTimerId = null;
     let skipRequestSent = false;
+    let handoffPollIntervalId = null;
+    let handoffSkipRetryIntervalId = null;
+    let handoffPollInFlight = false;
+    let handoffSkipInFlight = false;
+    let handoffCompleted = false;
     let recoveryAuthRequired = null;
     let recoveryAuthToken = '';
     let recoveryAuthDialogPromise = null;
     const handoffRoute = '/skip';
     const LASER_EXTENDED_NOTE = 'Laser beam interrupted three times. Countdown extended.';
+    const MAIN_HANDOFF_POLL_MS = 250;
+    const MAIN_HANDOFF_SKIP_RETRY_MS = 750;
+    const MAIN_HANDOFF_REQUEST_TIMEOUT_MS = 1500;
     function markLaserExtensionSeen() {
       laserExtensionSeen = true;
       if (extendNote) {
@@ -518,19 +526,115 @@
       } catch (_) { }
     }
 
-    function buildHandoffUrl() {
-      const url = new URL(handoffRoute, window.location.origin);
+    function buildCacheBustedUrl(path) {
+      const url = new URL(path, window.location.origin);
       url.searchParams.set('_cb', `${Date.now()}`);
       return url.toString();
     }
 
-    function scheduleHandoffNavigation(delayMs = 700) {
-      if (handoffRetryTimerId !== null) {
-        clearTimeout(handoffRetryTimerId);
+    function xhrGet(url, timeoutMs = MAIN_HANDOFF_REQUEST_TIMEOUT_MS) {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.timeout = timeoutMs;
+        xhr.onload = () => {
+          resolve({
+            status: xhr.status,
+            responseURL: xhr.responseURL || url,
+            responseText: xhr.responseText || '',
+          });
+        };
+        xhr.onerror = () => reject(new Error('Network request failed'));
+        xhr.ontimeout = () => reject(new Error('Network request timed out'));
+        xhr.send();
+      });
+    }
+
+    function clearHandoffTimers() {
+      if (handoffPollIntervalId !== null) {
+        clearInterval(handoffPollIntervalId);
+        handoffPollIntervalId = null;
       }
-      handoffRetryTimerId = setTimeout(() => {
-        location.replace(buildHandoffUrl());
-      }, delayMs);
+      if (handoffSkipRetryIntervalId !== null) {
+        clearInterval(handoffSkipRetryIntervalId);
+        handoffSkipRetryIntervalId = null;
+      }
+    }
+
+    function tryNavigateToMainApp(finalUrl) {
+      if (handoffCompleted) {
+        return true;
+      }
+
+      const resolvedUrl = new URL(finalUrl || window.location.href, window.location.origin);
+      const path = resolvedUrl.pathname || '/';
+      if (path !== '/sounds/' && path !== '/login') {
+        return false;
+      }
+
+      handoffCompleted = true;
+      clearHandoffTimers();
+      location.replace(resolvedUrl.toString());
+      return true;
+    }
+
+    async function probeMainAppReady() {
+      if (!forceHandoff || handoffCompleted || handoffPollInFlight) {
+        return;
+      }
+
+      handoffPollInFlight = true;
+      try {
+        const response = await xhrGet(buildCacheBustedUrl('/sounds/'));
+        const resolvedUrl = new URL(response.responseURL || window.location.href, window.location.origin);
+        const resolvedPath = resolvedUrl.pathname || '/';
+        if (response.status === 401 && resolvedPath === '/sounds/') {
+          tryNavigateToMainApp('/login?next=%2Fsounds%2F');
+          return;
+        }
+        tryNavigateToMainApp(response.responseURL);
+      } catch (_) {
+      } finally {
+        handoffPollInFlight = false;
+      }
+    }
+
+    async function triggerSkipRequest() {
+      if (!forceHandoff || handoffCompleted || handoffSkipInFlight) {
+        return;
+      }
+
+      handoffSkipInFlight = true;
+      try {
+        const response = await xhrGet(buildCacheBustedUrl(handoffRoute));
+        tryNavigateToMainApp(response.responseURL);
+      } catch (_) {
+      } finally {
+        handoffSkipInFlight = false;
+      }
+    }
+
+    function beginMainAppHandoff(triggerSkip) {
+      if (handoffCompleted) {
+        return;
+      }
+
+      forceHandoff = 1;
+      isRecovery = 0;
+      autoRefresh = 0;
+      renderStartingCard();
+
+      clearHandoffTimers();
+      if (triggerSkip) {
+        triggerSkipRequest();
+        handoffSkipRetryIntervalId = setInterval(() => {
+          triggerSkipRequest();
+        }, MAIN_HANDOFF_SKIP_RETRY_MS);
+      }
+      probeMainAppReady();
+      handoffPollIntervalId = setInterval(() => {
+        probeMainAppReady();
+      }, MAIN_HANDOFF_POLL_MS);
     }
 
     function renderRecovery() {
@@ -538,10 +642,12 @@
       titleEl.textContent = 'Recovery Mode';
       statusRow.style.display = 'flex';
       el.style.display = 'none';
-      if (deviceInfoText) deviceInfoText.hidden = false;
-      if (otaStatusText) otaStatusText.hidden = false;
+      if (deviceInfoText) deviceInfoText.style.display = '';
+      if (otaStatusText) otaStatusText.style.display = '';
       actions.style.display = 'flex';
       if (extendNote) extendNote.style.display = 'none';
+      if (handoffNote) handoffNote.style.display = 'none';
+      if (cardTools) cardTools.style.display = 'flex';
       stayBtn.style.display = 'none';
       if (resetBtn) resetBtn.style.display = 'inline-flex';
       if (formatBtn) formatBtn.style.display = 'inline-flex';
@@ -744,25 +850,17 @@
       if (cardEl) cardEl.classList.remove('recovery-active');
       titleEl.textContent = 'Starting main application';
       statusRow.style.display = 'none';
-      if (deviceInfoText) deviceInfoText.hidden = true;
-      if (otaStatusText) otaStatusText.hidden = true;
+      if (deviceInfoText) deviceInfoText.style.display = 'none';
+      if (otaStatusText) otaStatusText.style.display = 'none';
       actions.style.display = 'none';
       if (extendNote) extendNote.style.display = 'none';
       if (cardTools) cardTools.style.display = 'none';
       if (resetBtn) resetBtn.style.display = 'none';
       if (formatBtn) formatBtn.style.display = 'none';
-
-      let note = document.getElementById('handoff-note');
-      if (!note && cardEl) {
-        note = document.createElement('p');
-        note.id = 'handoff-note';
-        note.className = 'status-text';
-        cardEl.appendChild(note);
+      if (handoffNote) {
+        handoffNote.style.display = '';
+        handoffNote.textContent = 'Getting things ready...';
       }
-      if (note) {
-        note.textContent = 'Getting things ready...';
-      }
-      scheduleHandoffNavigation();
     }
 
     function requestSkipHandoff() {
@@ -771,7 +869,7 @@
       }
 
       skipRequestSent = true;
-      location.assign(handoffRoute);
+      beginMainAppHandoff(true);
     }
 
     function tick() {
@@ -783,10 +881,8 @@
       }
       if (remaining <= 0) {
         el.textContent = '0';
-        renderStartingCard();
-        if (autoRefresh && !refreshed) {
-          refreshed = true;
-          forceHandoff = 1;
+        if (autoRefresh) {
+          beginMainAppHandoff(true);
         }
         return;
       }
@@ -844,7 +940,7 @@
     if (cardEl && !isRecovery) { cardEl.classList.remove('recovery-active'); }
     if (laserExtensionSeen) { markLaserExtensionSeen(); }
     if (forceHandoff) {
-      renderStartingCard();
+      beginMainAppHandoff(false);
     } else if (isRecovery) {
       renderRecovery();
     }
