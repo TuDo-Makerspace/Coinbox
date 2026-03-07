@@ -832,12 +832,10 @@
     const securitySaveBtn = document.getElementById('security-save');
     const securityRemoveBtn = document.getElementById('security-remove');
     const DEVICE_INFO_TIMEOUT_MS = 1500;
-    const DEVICE_INFO_POLL_MS = 2000;
-    const LOG_POLL_MS = 3000;
-    const IP_POLL_MS = 10000;
+    const LOG_POLL_MS = 2000;
+    const IP_POLL_MS = 5000;
     let logIntervalId;
     let ipIntervalId;
-    let deviceInfoIntervalId;
     let logLoading = false;
     let lastLogText = null;
     let lastRenderWasError = false;
@@ -847,7 +845,6 @@
     let bootConfigLoaded = false;
     let bootConfigSaving = false;
     let bootSoundEnabledSnapshot = true;
-    let deviceInfoLoaded = false;
     let deviceInfoLoading = false;
     let securitySaving = false;
     const NETWORK_PASSWORD_MASK_VALUE = 'xxxxxxxxxxxx';
@@ -1225,22 +1222,13 @@
         const res = await fetch('/device/info', { cache: 'no-store', signal: controller.signal });
         if (!res.ok) throw new Error('Failed to load device info');
         const data = await res.json();
-        deviceInfoLoaded = true;
         renderDeviceInfo(data);
       } catch (_) {
-        deviceInfoLoaded = false;
         renderDeviceInfo({});
       } finally {
         clearTimeout(timeoutId);
         deviceInfoLoading = false;
       }
-    }
-
-    function startDeviceInfoAutoRefresh() {
-      if (deviceInfoIntervalId) clearInterval(deviceInfoIntervalId);
-      deviceInfoIntervalId = setInterval(() => {
-        if (!document.hidden && !deviceInfoLoaded) fetchDeviceInfo();
-      }, DEVICE_INFO_POLL_MS);
     }
 
     function renderSecurityConfig(data) {
@@ -1534,7 +1522,7 @@
     const laserEvents = [];
     const hallEvents = [];
     const MAX_EVENTS = 60;
-    const GPIO_POLL_MS = 100;
+    const GPIO_POLL_MS = 500;
     let lastLaserChanges = null;
     let lastHallChanges = null;
     let lastLaserEventAt = null;
@@ -2225,7 +2213,6 @@
     startLogAutoRefresh();
     startGpioAutoRefresh();
     startIpAutoRefresh();
-    startDeviceInfoAutoRefresh();
     fetchToneStatus();
     startToneAutoRefresh();
     document.documentElement.dataset.pageReady = '1';
