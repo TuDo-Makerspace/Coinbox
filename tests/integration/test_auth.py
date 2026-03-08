@@ -222,6 +222,7 @@ def test_auth_blocks_protected_endpoints(qemu_mainapp_instance):
             {"Content-Type": "application/json"},
         ),
         ("POST", f"/audio/playback?name={filename}", b"", None),
+        ("GET", "/audio/playback", None, None),
         ("GET", "/audio/test", None, None),
         ("POST", "/audio/test?action=stop", b"", None),
         ("GET", "/logs", None, None),

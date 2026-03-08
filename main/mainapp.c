@@ -1336,7 +1336,7 @@ static esp_err_t auth_login_post_handler(httpd_req_t *req)
     }
 
     security_set_auth_cookie_header(req);
-    char resp[128];
+    char resp[384];
     int len = snprintf(resp, sizeof(resp),
                        "{\"ok\":true,\"next\":\"%s\",\"password_set\":true}",
                        next_path);
@@ -2625,17 +2625,29 @@ static esp_err_t test_gpio_dac_mute_post_handler(httpd_req_t *req)
 
 static esp_err_t audio_test_send_state(httpd_req_t *req)
 {
-    char resp[224];
+    char resp[640];
     float freq = audio_test_current_freq();
     uint16_t amp = audio_test_current_amplitude();
     uint16_t amp_max = audio_test_max_amplitude();
     bool running = audio_test_is_running();
     bool sweep_running = audio_test_sweep_is_running();
     bool playback_active = audio_is_playing();
+    uint32_t playback_notice_seq = 0;
+    uint64_t playback_notice_time_ms = 0;
+    audio_playback_skip_reason_t playback_notice_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    char playback_notice_name[FILE_ENTRY_NAME_MAX] = {0};
+    audio_get_last_playback_skip_notice(&playback_notice_seq,
+                                        &playback_notice_time_ms,
+                                        &playback_notice_reason,
+                                        playback_notice_name,
+                                        sizeof(playback_notice_name));
+    const char *playback_notice_reason_text = audio_playback_skip_reason_text(playback_notice_reason);
     int len = snprintf(resp, sizeof(resp),
                        "{\"running\":%s,\"freq_hz\":%.1f,\"min_hz\":%.1f,\"max_hz\":%.1f,"
                        "\"amp\":%u,\"amp_max\":%u,\"volume_pct\":%.1f,"
-                       "\"playback_active\":%s,\"sweep_running\":%s}",
+                       "\"playback_active\":%s,\"sweep_running\":%s,"
+                       "\"playback_notice_seq\":%u,\"playback_notice_time_ms\":%llu,"
+                       "\"playback_notice_reason\":\"%s\",\"playback_notice_name\":\"%s\"}",
                        running ? "true" : "false",
                        (double)freq,
                        (double)AUDIO_TEST_MIN_HZ,
@@ -2644,7 +2656,11 @@ static esp_err_t audio_test_send_state(httpd_req_t *req)
                        (unsigned)amp_max,
                        amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0,
                        playback_active ? "true" : "false",
-                       sweep_running ? "true" : "false");
+                       sweep_running ? "true" : "false",
+                       (unsigned)playback_notice_seq,
+                       (unsigned long long)playback_notice_time_ms,
+                       playback_notice_reason_text ? playback_notice_reason_text : "",
+                       playback_notice_name);
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -2789,7 +2805,52 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
     return audio_test_send_state(req);
 }
 
-static esp_err_t audio_playback_handler(httpd_req_t *req)
+static esp_err_t audio_playback_send_state(httpd_req_t *req)
+{
+    bool playback_active = false;
+    audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    char playback_file[FILE_ENTRY_NAME_MAX] = {0};
+    char playback_file_esc[(FILE_ENTRY_NAME_MAX * 2) + 1];
+    char skip_reason_esc[96] = {0};
+
+    audio_get_playback_status(&playback_active,
+                              playback_file,
+                              sizeof(playback_file),
+                              &skip_reason,
+                              true);
+    json_escape_copy(playback_file, playback_file_esc, sizeof(playback_file_esc));
+    json_escape_copy(audio_playback_skip_reason_text(skip_reason),
+                     skip_reason_esc,
+                     sizeof(skip_reason_esc));
+
+    char resp[384];
+    int len = snprintf(resp,
+                       sizeof(resp),
+                       "{\"active\":%s,\"file\":\"%s\",\"skipped\":\"%s\"}",
+                       playback_active ? "true" : "false",
+                       playback_file_esc,
+                       skip_reason_esc);
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
+static esp_err_t audio_playback_get_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
+    }
+    return audio_playback_send_state(req);
+}
+
+static esp_err_t audio_playback_post_handler(httpd_req_t *req)
 {
     esp_err_t auth_err = security_require_auth(req);
     if (auth_err != ESP_OK) {
@@ -2848,7 +2909,9 @@ static esp_err_t audio_playback_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    esp_err_t err = audio_start_file(name);
+    audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
+    audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    esp_err_t err = audio_start_file(name, &start_result, &skip_reason);
     if (err != ESP_OK) {
         if (err == ESP_ERR_NOT_FOUND) {
             httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
@@ -2860,8 +2923,20 @@ static esp_err_t audio_playback_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    char resp[128];
-    int len = snprintf(resp, sizeof(resp), "{\"status\":\"started\",\"name\":\"%s\"}", name);
+    char resp[384];
+    int len = 0;
+    if (start_result == AUDIO_PLAYBACK_START_RESULT_SKIPPED) {
+        uint32_t notice_seq = 0;
+        audio_get_last_playback_skip_notice(&notice_seq, NULL, NULL, NULL, 0);
+        len = snprintf(resp,
+                       sizeof(resp),
+                       "{\"status\":\"skipped\",\"name\":\"%s\",\"skip_reason\":\"%s\",\"playback_notice_seq\":%u}",
+                       name,
+                       audio_playback_skip_reason_text(skip_reason),
+                       (unsigned)notice_seq);
+    } else {
+        len = snprintf(resp, sizeof(resp), "{\"status\":\"started\",\"name\":\"%s\"}", name);
+    }
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -3312,7 +3387,7 @@ static void maybe_play_startup_sound(void)
         return;
     }
 
-    esp_err_t err = audio_start_file(FILES_DEFAULT_SOUND_NAME);
+    esp_err_t err = audio_start_file(FILES_DEFAULT_SOUND_NAME, NULL, NULL);
     if (err != ESP_OK) {
         ESP_LOGW(TAG,
                  "Failed to start startup sound %s: %s",
@@ -3661,13 +3736,21 @@ esp_err_t start_mainapp(void)
     };
     httpd_register_uri_handler(server, &audio_test_set_uri);
 
-    httpd_uri_t audio_playback_uri = {
+    httpd_uri_t audio_playback_get_uri = {
         .uri = "/audio/playback",
-        .method = HTTP_POST,
-        .handler = audio_playback_handler,
+        .method = HTTP_GET,
+        .handler = audio_playback_get_handler,
         .user_ctx = NULL
     };
-    httpd_register_uri_handler(server, &audio_playback_uri);
+    httpd_register_uri_handler(server, &audio_playback_get_uri);
+
+    httpd_uri_t audio_playback_post_uri = {
+        .uri = "/audio/playback",
+        .method = HTTP_POST,
+        .handler = audio_playback_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &audio_playback_post_uri);
 
     httpd_uri_t settings_page = {
         .uri = "/settings",

@@ -17,6 +17,7 @@
 #include "esp_idf_version.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_vfs.h"
 #include "fatfs_stream.h"
 #include "files.h"
@@ -72,6 +73,7 @@ static SemaphoreHandle_t s_lock;
 // FS
 static char s_base_path[AUDIO_FILE_PATH_MAX] = {0};
 static char s_current_file_path[AUDIO_FILE_PATH_MAX] = {0};
+static char s_current_file_name[FILE_ENTRY_NAME_MAX] = {0};
 
 // Volumes
 static volatile uint8_t s_master_volume = 35;
@@ -88,6 +90,10 @@ static volatile bool s_playing;
 static volatile bool s_play_stop_requested;
 static size_t s_current_file_size;
 static size_t s_current_offset_bytes;
+static uint32_t s_playback_skip_notice_seq;
+static uint64_t s_playback_skip_notice_timestamp_ms;
+static audio_playback_skip_reason_t s_playback_skip_notice_reason;
+static char s_playback_skip_notice_name[FILE_ENTRY_NAME_MAX] = {0};
 static audio_pipeline_handle_t s_pipeline;
 static audio_element_handle_t s_stream_reader;
 static audio_element_handle_t s_decoder;
@@ -131,6 +137,9 @@ static esp_err_t init_playback_i2s_stream_locked(void);
 static void deinit_playback_i2s_stream_locked(void);
 static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, int *channels);
 static esp_err_t load_meta_or_stat_locked(const char *name);
+static audio_playback_skip_reason_t playback_skip_reason_locked(void);
+static void clear_playback_skip_notice_locked(void);
+static void record_playback_skip_notice_locked(const char *name, audio_playback_skip_reason_t reason);
 static void sync_lid_level_from_gpio(void);
 static void play_task(void *arg);
 static void stop_playback_task_locked(void);
@@ -843,6 +852,54 @@ static inline bool playback_should_unmute(void)
     return true;
 }
 
+const char *audio_playback_skip_reason_text(audio_playback_skip_reason_t reason)
+{
+    switch (reason) {
+        case AUDIO_PLAYBACK_SKIP_TRACK_VOLUME_ZERO:
+            return "track volume is 0%";
+        case AUDIO_PLAYBACK_SKIP_LID_CLOSED_VOLUME_ZERO:
+            return "lid-closed volume is 0%";
+        case AUDIO_PLAYBACK_SKIP_LID_OPEN_VOLUME_ZERO:
+            return "lid-open volume is 0%";
+        case AUDIO_PLAYBACK_SKIP_NONE:
+        default:
+            return "";
+    }
+}
+
+static audio_playback_skip_reason_t playback_skip_reason_locked(void)
+{
+    if (s_track_volume == 0) {
+        return AUDIO_PLAYBACK_SKIP_TRACK_VOLUME_ZERO;
+    }
+    if (!s_lid_open && s_lid_closed_volume == 0) {
+        return AUDIO_PLAYBACK_SKIP_LID_CLOSED_VOLUME_ZERO;
+    }
+    if (s_lid_open && s_lid_open_volume == 0) {
+        return AUDIO_PLAYBACK_SKIP_LID_OPEN_VOLUME_ZERO;
+    }
+    return AUDIO_PLAYBACK_SKIP_NONE;
+}
+
+static void record_playback_skip_notice_locked(const char *name, audio_playback_skip_reason_t reason)
+{
+    s_playback_skip_notice_seq++;
+    s_playback_skip_notice_timestamp_ms = (uint64_t)esp_timer_get_time() / 1000ULL;
+    s_playback_skip_notice_reason = reason;
+    if (name && name[0]) {
+        strlcpy(s_playback_skip_notice_name, name, sizeof(s_playback_skip_notice_name));
+    } else {
+        s_playback_skip_notice_name[0] = '\0';
+    }
+}
+
+static void clear_playback_skip_notice_locked(void)
+{
+    s_playback_skip_notice_timestamp_ms = 0;
+    s_playback_skip_notice_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    s_playback_skip_notice_name[0] = '\0';
+}
+
 //-------------------------------------------------------------------------
 // Volume
 //-------------------------------------------------------------------------
@@ -1311,6 +1368,7 @@ static void play_task(void *arg)
 
     s_play_stop_requested = false;
     s_playing = false;
+    s_current_file_name[0] = '\0';
     s_play_task = NULL;
     vTaskDelete(NULL);
 #else
@@ -1517,6 +1575,7 @@ exit:
 
     s_play_stop_requested = false;
     s_playing = false;
+    s_current_file_name[0] = '\0';
     s_play_task = NULL;
     vTaskDelete(NULL);
 #endif
@@ -1554,8 +1613,16 @@ static void stop_playback_task_locked(void)
 // Public
 //-------------------------------------------------------------------------
 
-esp_err_t audio_start_file(const char *name)
+esp_err_t audio_start_file(const char *name,
+                           audio_playback_start_result_t *out_result,
+                           audio_playback_skip_reason_t *out_skip_reason)
 {
+    if (out_result) {
+        *out_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
+    }
+    if (out_skip_reason) {
+        *out_skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    }
     if (!name || !name[0]) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -1602,6 +1669,21 @@ esp_err_t audio_start_file(const char *name)
     }
 
     sync_lid_level_from_gpio();
+    audio_playback_skip_reason_t skip_reason = playback_skip_reason_locked();
+    if (skip_reason != AUDIO_PLAYBACK_SKIP_NONE) {
+        record_playback_skip_notice_locked(name, skip_reason);
+        ESP_LOGW(TAG, "Skipping playback: %s (%s)", name, audio_playback_skip_reason_text(skip_reason));
+        if (out_result) {
+            *out_result = AUDIO_PLAYBACK_START_RESULT_SKIPPED;
+        }
+        if (out_skip_reason) {
+            *out_skip_reason = skip_reason;
+        }
+        audio_unlock();
+        return ESP_OK;
+    }
+
+    strlcpy(s_current_file_name, name, sizeof(s_current_file_name));
     BaseType_t res = xTaskCreate(play_task,
                                  "mp3-play",
                                  AUDIO_PLAY_TASK_STACK,
@@ -1610,10 +1692,12 @@ esp_err_t audio_start_file(const char *name)
                                  &s_play_task);
     if (res != pdPASS) {
         s_play_task = NULL;
+        s_current_file_name[0] = '\0';
         audio_unlock();
         return ESP_ERR_NO_MEM;
     }
 
+    clear_playback_skip_notice_locked();
     ESP_LOGI(TAG, "Starting playback: %s", name);
     audio_unlock();
     return ESP_OK;
@@ -1622,6 +1706,63 @@ esp_err_t audio_start_file(const char *name)
 bool audio_is_playing(void)
 {
     return s_playing;
+}
+
+void audio_get_playback_status(bool *out_active,
+                               char *out_name,
+                               size_t out_name_size,
+                               audio_playback_skip_reason_t *out_skip_reason,
+                               bool consume_skip_notice)
+{
+    audio_lock();
+
+    bool active = s_playing;
+    audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    char name[FILE_ENTRY_NAME_MAX] = {0};
+
+    if (active) {
+        strlcpy(name, s_current_file_name, sizeof(name));
+    } else if (s_playback_skip_notice_reason != AUDIO_PLAYBACK_SKIP_NONE) {
+        skip_reason = s_playback_skip_notice_reason;
+        strlcpy(name, s_playback_skip_notice_name, sizeof(name));
+        if (consume_skip_notice) {
+            clear_playback_skip_notice_locked();
+        }
+    }
+
+    if (out_active) {
+        *out_active = active;
+    }
+    if (out_name && out_name_size > 0) {
+        strlcpy(out_name, name, out_name_size);
+    }
+    if (out_skip_reason) {
+        *out_skip_reason = skip_reason;
+    }
+
+    audio_unlock();
+}
+
+void audio_get_last_playback_skip_notice(uint32_t *out_seq,
+                                         uint64_t *out_timestamp_ms,
+                                         audio_playback_skip_reason_t *out_reason,
+                                         char *out_name,
+                                         size_t out_name_size)
+{
+    audio_lock();
+    if (out_seq) {
+        *out_seq = s_playback_skip_notice_seq;
+    }
+    if (out_timestamp_ms) {
+        *out_timestamp_ms = s_playback_skip_notice_timestamp_ms;
+    }
+    if (out_reason) {
+        *out_reason = s_playback_skip_notice_reason;
+    }
+    if (out_name && out_name_size > 0) {
+        strlcpy(out_name, s_playback_skip_notice_name, out_name_size);
+    }
+    audio_unlock();
 }
 
 static void set_lid_level_internal(bool lid_open)

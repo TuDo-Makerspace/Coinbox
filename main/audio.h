@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -37,6 +38,18 @@ typedef enum {
     AUDIO_MODE_TEST,
 } audio_mode_t;
 
+typedef enum {
+    AUDIO_PLAYBACK_START_RESULT_STARTED = 0,
+    AUDIO_PLAYBACK_START_RESULT_SKIPPED,
+} audio_playback_start_result_t;
+
+typedef enum {
+    AUDIO_PLAYBACK_SKIP_NONE = 0,
+    AUDIO_PLAYBACK_SKIP_TRACK_VOLUME_ZERO,
+    AUDIO_PLAYBACK_SKIP_LID_CLOSED_VOLUME_ZERO,
+    AUDIO_PLAYBACK_SKIP_LID_OPEN_VOLUME_ZERO,
+} audio_playback_skip_reason_t;
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Interface
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -66,8 +79,21 @@ void audio_test_set_targets(float freq_hz, uint16_t amplitude);
 // Playback Mode
 //-------------------------------------------------------------------------
 
-esp_err_t audio_start_file(const char *name);
+esp_err_t audio_start_file(const char *name,
+                           audio_playback_start_result_t *out_result,
+                           audio_playback_skip_reason_t *out_skip_reason);
 bool audio_is_playing(void);
+void audio_get_playback_status(bool *out_active,
+                               char *out_name,
+                               size_t out_name_size,
+                               audio_playback_skip_reason_t *out_skip_reason,
+                               bool consume_skip_notice);
+const char *audio_playback_skip_reason_text(audio_playback_skip_reason_t reason);
+void audio_get_last_playback_skip_notice(uint32_t *out_seq,
+                                         uint64_t *out_timestamp_ms,
+                                         audio_playback_skip_reason_t *out_reason,
+                                         char *out_name,
+                                         size_t out_name_size);
 
 void audio_set_master_volume_level(uint8_t level);
 void audio_set_track_volume_level(uint8_t level);

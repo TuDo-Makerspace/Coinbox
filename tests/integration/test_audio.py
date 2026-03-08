@@ -138,6 +138,12 @@ def _audio_playback_stop(base_url: str, timeout_s: float = 3.0):
     )
 
 
+def _audio_playback_state(base_url: str) -> dict:
+    status, _, body = _http_get(base_url, "/audio/playback")
+    assert status == 200, f"GET /audio/playback failed. status={status}, body={body}"
+    return _json_object(body, "GET /audio/playback")
+
+
 def _set_sound_meta(base_url: str, filename: str, payload: dict):
     return _http_request(
         base_url=base_url,
@@ -201,6 +207,34 @@ def _set_test_gpio_level(base_url: str, name: str, level: int):
     )
     payload = _json_object(body, f"POST /test/gpio/{name}")
     assert payload.get("level") == level
+
+
+def _trigger_laser_playback(base_url: str):
+    _set_test_gpio_level(base_url, "laser", 0)
+    _set_test_gpio_level(base_url, "laser", 1)
+
+
+def _log_text_since(log_path, start_pos: int = 0) -> str:
+    if not log_path.exists():
+        return ""
+    with log_path.open("r", encoding="utf-8", errors="replace") as f:
+        if start_pos > 0:
+            f.seek(start_pos)
+        return f.read()
+
+
+def _log_since_contains_all(log_path, start_pos: int, markers: list[str]) -> bool:
+    text = _log_text_since(log_path, start_pos)
+    return all(marker in text for marker in markers)
+
+
+def _playback_stays_inactive_for(base_url: str, duration_s: float, poll_s: float = 0.05) -> bool:
+    deadline = time.monotonic() + duration_s
+    while time.monotonic() < deadline:
+        if bool(_audio_playback_state(base_url).get("active")):
+            return False
+        time.sleep(poll_s)
+    return True
 
 
 def _assert_no_panic_since(log_path, start_pos: int):
@@ -503,11 +537,11 @@ def test_sweep_blocks_other_audio_until_done_then_unblocks(qemu_mainapp_instance
     assert status == 200, f"Playback stop failed after sweep. body={body}"
 
 
-# Test: Playback unmutes during play, lasts about file duration, and blocks test/sweep.
+# Test: `GET /audio/playback` reports the active file while playback is running.
 # 1. Upload real MP3 fixture (~6s).
-# 2. Start playback and assert `playback_active=true`.
-# 3. Assert DAC/AMP unmute during active playback.
-# 4. Assert audio test start and sweep are rejected during playback.
+# 2. Start playback and poll `GET /audio/playback` until `active=true`.
+# 3. Assert `file` reports the requested filename and `skipped` is empty.
+# 4. Assert DAC/AMP unmute during active playback and test/sweep are blocked.
 # 5. Verify playback remains active for meaningful time; accept natural completion or stop fallback.
 # 6. Assert DAC/AMP muted after playback ends.
 def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_mainapp_instance):
@@ -521,12 +555,21 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
     status, _, body = _audio_playback_start(base_url, filename)
     assert status == 200, f"Failed to start playback. body={body}"
 
+    playing_state: dict[str, object] = {}
+    def _playback_for_target_file_is_active() -> bool:
+        nonlocal playing_state
+        playing_state = _audio_playback_state(base_url)
+        return bool(playing_state.get("active")) and playing_state.get("file") == filename
+
     playing = _wait_until(
-        lambda: bool(_audio_test_state(base_url).get("playback_active")),
+        _playback_for_target_file_is_active,
         timeout_s=4.0,
         poll_s=0.1,
     )
     assert playing, f"Playback did not become active.\nLog tail:\n{_tail_log(log_path)}"
+    assert playing_state.get("active") is True, playing_state
+    assert playing_state.get("file") == filename, playing_state
+    assert playing_state.get("skipped") in ("", None), playing_state
 
     unmuted = _wait_until(lambda: _outputs_are_unmuted(base_url), timeout_s=3.0, poll_s=0.1)
     assert unmuted, f"DAC/AMP did not unmute during playback.\nLog tail:\n{_tail_log(log_path)}"
@@ -547,7 +590,7 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
     assert elapsed_min_ok, "Playback did not stay active for a meaningful duration."
 
     playback_done = _wait_until(
-        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
         timeout_s=12.0,
         poll_s=0.1,
     )
@@ -556,7 +599,7 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
         status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
         assert status == 200, f"Failed to stop playback fallback. body={body}"
         playback_done = _wait_until(
-            lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+            lambda: not bool(_audio_playback_state(base_url).get("active")),
             timeout_s=3.0,
             poll_s=0.1,
         )
@@ -569,18 +612,18 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
     assert muted, f"DAC/AMP did not return to muted after playback.\nLog tail:\n{_tail_log(log_path)}"
 
 
-# Test: A track with volume 0% keeps DAC + AMP muted for the full playback duration.
+# Test: `GET /audio/playback` reports a skipped file when track volume is 0%.
 # 1. Start from main app mode and wait for any startup sound playback to finish.
 # 2. Upload the `test6165ms.mp3` fixture and set its track volume to `0`.
-# 3. Start playback and assert playback becomes active.
-# 4. Poll mute GPIOs throughout playback and assert they remain muted the whole time.
-# 5. Assert playback lasts for a meaningful duration.
-def test_playback_with_zero_track_volume_keeps_outputs_muted(qemu_mainapp_instance):
+# 3. Start playback and assert the request is accepted but playback never becomes active.
+# 4. Poll `GET /audio/playback` and assert it reports `active=false`, the target `file`, and the skip reason.
+# 5. Assert logs record the skip reason and no real playback start is attempted.
+def test_manual_playback_with_zero_track_volume_is_skipped_and_logged(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
     log_path = qemu_mainapp_instance["log_path"]
 
     idle = _wait_until(
-        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
         timeout_s=3.0,
         poll_s=0.1,
     )
@@ -593,65 +636,76 @@ def test_playback_with_zero_track_volume_keeps_outputs_muted(qemu_mainapp_instan
     assert status == 200, f"Failed to set track volume to 0. body={body}"
     assert body == "OK"
 
-    t_start = time.monotonic()
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
     status, _, body = _audio_playback_start(base_url, filename)
     assert status == 200, f"Failed to start zero-volume playback. body={body}"
 
-    playing = _wait_until(
-        lambda: bool(_audio_test_state(base_url).get("playback_active")),
-        timeout_s=4.0,
+    playback_state: dict[str, object] = {}
+    state_reported = _wait_until(
+        lambda: (
+            (playback_state := _audio_playback_state(base_url))
+            and playback_state.get("active") is False
+            and playback_state.get("file") == filename
+            and playback_state.get("skipped") == "track volume is 0%"
+        ),
+        timeout_s=3.0,
         poll_s=0.1,
     )
-    assert playing, f"Zero-volume playback did not become active.\nLog tail:\n{_tail_log(log_path)}"
+    assert state_reported, (
+        "Expected GET /audio/playback to report the skipped zero-volume file.\n"
+        f"Last state: {playback_state}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
-    initially_muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=1.0, poll_s=0.05)
-    assert initially_muted, f"DAC/AMP did not stay muted at zero track volume.\nLog tail:\n{_tail_log(log_path)}"
+    skip_logged = _wait_until(
+        lambda: _log_since_contains_all(
+            log_path,
+            log_start_pos,
+            ["Skipping playback:", filename, "track volume is 0%"],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert skip_logged, (
+        "Expected logs to show the zero-volume track playback was skipped.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
-    playback_done = False
-    deadline = time.monotonic() + 12.0
-    while time.monotonic() < deadline:
-        assert _outputs_are_muted(base_url), (
-            "DAC/AMP unexpectedly unmuted during zero-volume playback.\n"
-            f"Log tail:\n{_tail_log(log_path)}"
-        )
-        if not bool(_audio_test_state(base_url).get("playback_active")):
-            playback_done = True
-            break
-        time.sleep(0.1)
+    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+    assert stayed_inactive, (
+        "Zero-volume playback unexpectedly became active instead of being skipped.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
-    if not playback_done:
-        status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
-        assert status == 200, f"Failed to stop stalled zero-volume playback. body={body}"
-        playback_done = _wait_until(
-            lambda: not bool(_audio_test_state(base_url).get("playback_active")),
-            timeout_s=3.0,
-            poll_s=0.1,
-        )
-        assert playback_done, f"Zero-volume playback did not clear after stop fallback.\nLog tail:\n{_tail_log(log_path)}"
-
-    elapsed_s = time.monotonic() - t_start
-    assert elapsed_s >= 5.0, f"Zero-volume playback ended too quickly: {elapsed_s:.2f}s"
-    assert _outputs_are_muted(base_url), f"DAC/AMP should remain muted after zero-volume playback.\nLog tail:\n{_tail_log(log_path)}"
+    assert not _log_contains_any_since(
+        log_path,
+        log_start_pos,
+        [f"Starting playback: {filename}"],
+    ), f"Zero-volume track should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
+    assert _outputs_are_muted(base_url), (
+        f"DAC/AMP should stay muted when skipping zero-volume track playback.\nLog tail:\n{_tail_log(log_path)}"
+    )
 
 
 @pytest.mark.parametrize(
-    ("case_name", "hall_level", "audio_config"),
+    ("case_name", "hall_level", "audio_config", "skip_reason"),
     [
-        ("lid-closed", 0, {"lid_closed_volume_pct": 0, "lid_open_volume_pct": 100}),
-        ("lid-open", 1, {"lid_closed_volume_pct": 100, "lid_open_volume_pct": 0}),
+        ("lid-closed", 0, {"lid_closed_volume_pct": 0, "lid_open_volume_pct": 100}, "lid-closed volume is 0%"),
+        ("lid-open", 1, {"lid_closed_volume_pct": 100, "lid_open_volume_pct": 0}, "lid-open volume is 0%"),
     ],
 )
-def test_playback_with_zero_active_lid_volume_keeps_outputs_muted(
+def test_playback_with_zero_active_lid_volume_is_skipped_and_logged(
     qemu_mainapp_instance,
     case_name: str,
     hall_level: int,
     audio_config: dict,
+    skip_reason: str,
 ):
     base_url = qemu_mainapp_instance["base_url"]
     log_path = qemu_mainapp_instance["log_path"]
 
     idle = _wait_until(
-        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
         timeout_s=3.0,
         poll_s=0.1,
     )
@@ -673,56 +727,154 @@ def test_playback_with_zero_active_lid_volume_keeps_outputs_muted(
     assert status == 200, f"Failed to set track volume to 100. body={body}"
     assert body == "OK"
 
-    t_start = time.monotonic()
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
     status, _, body = _audio_playback_start(base_url, filename)
     assert status == 200, f"Failed to start playback for {case_name}. body={body}"
 
-    playing = _wait_until(
-        lambda: bool(_audio_test_state(base_url).get("playback_active")),
-        timeout_s=4.0,
+    playback_state: dict[str, object] = {}
+    state_reported = _wait_until(
+        lambda: (
+            (playback_state := _audio_playback_state(base_url))
+            and playback_state.get("active") is False
+            and playback_state.get("file") == filename
+            and playback_state.get("skipped") == skip_reason
+        ),
+        timeout_s=3.0,
         poll_s=0.1,
     )
-    assert playing, (
-        f"Playback did not become active for {case_name} zero-volume case.\n"
+    assert state_reported, (
+        f"Expected GET /audio/playback to report the skipped {case_name} file.\n"
+        f"Last state: {playback_state}\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
 
-    initially_muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=1.0, poll_s=0.05)
-    assert initially_muted, (
-        f"DAC/AMP did not stay muted at zero active {case_name} volume.\n"
+    skip_logged = _wait_until(
+        lambda: _log_since_contains_all(
+            log_path,
+            log_start_pos,
+            ["Skipping playback:", filename, skip_reason],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert skip_logged, (
+        f"Expected logs to show {case_name} playback was skipped because the active lid volume is 0%.\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
 
-    playback_done = False
-    deadline = time.monotonic() + 12.0
-    while time.monotonic() < deadline:
-        assert _outputs_are_muted(base_url), (
-            f"DAC/AMP unexpectedly unmuted during zero active {case_name} volume playback.\n"
-            f"Log tail:\n{_tail_log(log_path)}"
-        )
-        if not bool(_audio_test_state(base_url).get("playback_active")):
-            playback_done = True
-            break
-        time.sleep(0.1)
+    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+    assert stayed_inactive, (
+        f"{case_name} playback unexpectedly became active instead of being skipped.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
-    if not playback_done:
-        status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
-        assert status == 200, f"Failed to stop stalled {case_name} zero-volume playback. body={body}"
-        playback_done = _wait_until(
-            lambda: not bool(_audio_test_state(base_url).get("playback_active")),
-            timeout_s=3.0,
-            poll_s=0.1,
-        )
-        assert playback_done, (
-            f"{case_name} zero-volume playback did not clear after stop fallback.\n"
-            f"Log tail:\n{_tail_log(log_path)}"
-        )
-
-    elapsed_s = time.monotonic() - t_start
-    assert elapsed_s >= 5.0, f"{case_name} zero-volume playback ended too quickly: {elapsed_s:.2f}s"
+    assert not _log_contains_any_since(
+        log_path,
+        log_start_pos,
+        [f"Starting playback: {filename}"],
+    ), f"{case_name} zero active-lid-volume playback should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
     assert _outputs_are_muted(base_url), (
-        f"DAC/AMP should remain muted after {case_name} zero-volume playback.\n"
+        f"DAC/AMP should stay muted when skipping {case_name} zero active-lid-volume playback.\n"
         f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: Laser-triggered playback of a 0%-volume sound is skipped immediately.
+# 1. Start from main app mode and wait for any startup sound playback to finish.
+# 2. Upload the `test6165ms.mp3` fixture and make it the only weighted laser candidate with volume `0`.
+# 3. Trigger laser playback and assert the laser path still selects the file deterministically.
+# 4. Assert logs record that playback is skipped and no real playback start is attempted.
+# 5. Assert playback never becomes active over the early skip window.
+def test_laser_playback_with_zero_track_volume_is_skipped_and_logged(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_until(
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert idle, (
+        "Startup playback did not clear before zero-volume laser playback test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('laser-zero-volume-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    status, _, body = _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"probability": 0, "enabled": True})
+    assert status == 200, f"Failed to remove default sound from laser selection. body={body}"
+    assert body == "OK"
+
+    status, _, body = _set_sound_meta(
+        base_url,
+        filename,
+        {"enabled": True, "probability": 100, "volume": 0},
+    )
+    assert status == 200, f"Failed to configure zero-volume laser candidate. body={body}"
+    assert body == "OK"
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_laser_playback(base_url)
+
+    selected = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Coin detected! Starting playback of {filename} (candidates=1, total_weight=100)"],
+        ),
+        timeout_s=5.0,
+        poll_s=0.2,
+    )
+    assert selected, (
+        "Laser path did not deterministically select the zero-volume file before skip handling.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    playback_state: dict[str, object] = {}
+    state_reported = _wait_until(
+        lambda: (
+            (playback_state := _audio_playback_state(base_url))
+            and playback_state.get("active") is False
+            and playback_state.get("file") == filename
+            and playback_state.get("skipped") == "track volume is 0%"
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert state_reported, (
+        "Expected GET /audio/playback to report the skipped laser-selected file.\n"
+        f"Last state: {playback_state}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    skip_logged = _wait_until(
+        lambda: _log_since_contains_all(
+            log_path,
+            log_start_pos,
+            ["Skipping playback:", filename, "track volume is 0%"],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert skip_logged, (
+        "Expected logs to show the laser-triggered zero-volume playback was skipped.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+    assert stayed_inactive, (
+        "Laser-triggered zero-volume playback unexpectedly became active.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    assert not _log_contains_any_since(
+        log_path,
+        log_start_pos,
+        [f"Starting playback: {filename}"],
+    ), f"Laser-triggered zero-volume file should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
+    assert _outputs_are_muted(base_url), (
+        f"DAC/AMP should stay muted when laser-triggered zero-volume playback is skipped.\nLog tail:\n{_tail_log(log_path)}"
     )
 
 
@@ -749,7 +901,7 @@ def test_repeated_playback_restarts_keep_system_healthy(qemu_mainapp_instance):
     assert status == 200, f"Playback stop failed after restart spam. body={body}"
 
     playback_done = _wait_until(
-        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
         timeout_s=3.0,
         poll_s=0.1,
     )

@@ -240,6 +240,36 @@
       background: #fef3c7;
       color: #92400e;
     }
+    .playback-toast-note {
+      position: fixed;
+      left: 50%;
+      top: 1rem;
+      z-index: 50;
+      width: max-content;
+      max-width: calc(100vw - 2rem);
+      margin: 0;
+      padding: 0.75rem 0.9rem;
+      box-sizing: border-box;
+      border: 1px solid #fcd34d;
+      border-radius: 12px;
+      background: #fef3c7;
+      color: #92400e;
+      font-size: 1rem;
+      font-weight: 700;
+      text-align: center;
+      box-shadow: 0 16px 36px rgba(15, 23, 42, 0.2);
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(-50%, -1.15rem) scale(0.98);
+      transition:
+        transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.22s ease;
+    }
+    .playback-toast-note.is-visible {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+    .playback-toast-note[hidden] { display: none !important; }
 
     .chev {
       width: 38px;
@@ -564,9 +594,15 @@
       let playingRowId = null;
       let uploadInFlight = false;
       let playbackBlockedReason = '';
+      let playbackSkipNoticeKey = '';
+      let playbackSkipHideTimer = null;
+      let playbackSkipHideFinalizeTimer = null;
       const playbackLockNote = document.getElementById('playback-lock-note');
       const playbackSilentNote = document.getElementById('playback-silent-note');
       const playbackSoundStateNote = document.getElementById('playback-sound-state-note');
+      const playbackSkipNote = document.getElementById('playback-skip-note');
+      const PLAYBACK_SKIP_NOTICE_MS = 2400;
+      const PLAYBACK_SKIP_ANIM_MS = 280;
 
       const uploadOverlay = (() => {
         const overlay = document.createElement('div');
@@ -648,6 +684,48 @@
         playbackSoundStateNote.textContent = text;
       }
 
+      function buildPlaybackSkipMessage(skipReason) {
+        const reason = String(skipReason || '').trim();
+        if (reason === 'track volume is 0%') {
+          return 'Playback was skipped because the selected sound volume is set to 0%.';
+        }
+        if (reason === 'lid-closed volume is 0%' || reason === 'lid-open volume is 0%') {
+          return `Playback was skipped because ${reason.replace(' is 0%', ' is set to 0%')}.`;
+        }
+        return reason ? `Playback was skipped because ${reason}.` : 'Playback was skipped.';
+      }
+
+      function buildPlaybackSkipKey(fileName, skipReason) {
+        const name = String(fileName || '').trim();
+        const reason = String(skipReason || '').trim();
+        return reason ? `${name}\n${reason}` : '';
+      }
+
+      function showPlaybackSkipNotice(skipReason) {
+        if (!playbackSkipNote) return;
+        const message = buildPlaybackSkipMessage(skipReason);
+        playbackSkipNote.textContent = message;
+        if (playbackSkipHideTimer) {
+          window.clearTimeout(playbackSkipHideTimer);
+        }
+        if (playbackSkipHideFinalizeTimer) {
+          window.clearTimeout(playbackSkipHideFinalizeTimer);
+          playbackSkipHideFinalizeTimer = null;
+        }
+        playbackSkipNote.hidden = false;
+        playbackSkipNote.classList.remove('is-visible');
+        playbackSkipNote.getBoundingClientRect();
+        playbackSkipNote.classList.add('is-visible');
+        playbackSkipHideTimer = window.setTimeout(() => {
+          playbackSkipNote.classList.remove('is-visible');
+          playbackSkipHideFinalizeTimer = window.setTimeout(() => {
+            playbackSkipNote.hidden = true;
+            playbackSkipHideFinalizeTimer = null;
+          }, PLAYBACK_SKIP_ANIM_MS);
+          playbackSkipHideTimer = null;
+        }, PLAYBACK_SKIP_NOTICE_MS);
+      }
+
       function refreshSoundStateNote() {
         const rows = Array.from(document.querySelectorAll('.file-item'));
         if (rows.length === 0) {
@@ -687,7 +765,7 @@
           return;
         }
         if (lidOpen && lidOpenVolumePct === 0) {
-          setSilentPlaybackNote('Lid open volume is 0%, so playback stays silent while the lid is open.');
+          setSilentPlaybackNote('Lid open volume is set to 0%, so playback stays silent while the lid is open.');
           return;
         }
         setSilentPlaybackNote('');
@@ -730,6 +808,26 @@
         }
       }
 
+      async function refreshPlaybackStatus() {
+        try {
+          const res = await fetch('/audio/playback', { cache: 'no-store' });
+          if (!res.ok) throw new Error(`status ${res.status}`);
+          const data = await res.json();
+          const skipReason = String(data?.skipped || '').trim();
+          const skipKey = buildPlaybackSkipKey(data?.file, skipReason);
+          if (skipKey) {
+            if (skipKey !== playbackSkipNoticeKey) {
+              playbackSkipNoticeKey = skipKey;
+              showPlaybackSkipNotice(skipReason);
+            }
+            return;
+          }
+          playbackSkipNoticeKey = '';
+        } catch (e) {
+          console.warn('Failed to refresh playback status', e);
+        }
+      }
+
       async function stopRemotePlayback() {
         if (!playingRowId) return;
         try {
@@ -764,6 +862,21 @@
             try { reason = (await res.text()).trim(); } catch (_) {}
             throw new Error(reason || 'Playback failed');
           }
+          let payload = {};
+          try {
+            payload = await res.json();
+          } catch (_) {
+            payload = {};
+          }
+          const status = String(payload?.status || '').trim();
+          if (status === 'skipped') {
+            const skipReason = String(payload?.skip_reason || '').trim();
+            playbackSkipNoticeKey = buildPlaybackSkipKey(payload?.name || name, skipReason);
+            showPlaybackSkipNotice(skipReason);
+            markPlaying(null);
+            return;
+          }
+          playbackSkipNoticeKey = '';
           markPlaying(row);
         } catch (err) {
           alert(err?.message || 'Playback failed');
@@ -1177,8 +1290,10 @@
 
       refreshSoundStateNote();
       refreshPlaybackGateState();
+      refreshPlaybackStatus();
       refreshSilentPlaybackNote();
       window.setInterval(refreshPlaybackGateState, 1000);
+      window.setInterval(refreshPlaybackStatus, 1000);
       window.setInterval(refreshSilentPlaybackNote, 3000);
       document.documentElement.dataset.pageReady = '1';
     });
@@ -1206,6 +1321,7 @@
     <p id="playback-lock-note" class="playback-lock-note" hidden></p>
     <p id="playback-silent-note" class="playback-lock-note warning" hidden></p>
     <p id="playback-sound-state-note" class="playback-lock-note warning" hidden></p>
+    <p id="playback-skip-note" class="playback-toast-note" hidden aria-live="polite" aria-atomic="true"></p>
 
     <div id="file-list" class="file-list">
       <!-- rows injected by server (mainapp.c) -->

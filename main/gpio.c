@@ -319,11 +319,18 @@ static void laser_event_task(void *arg)
                  (unsigned)candidates,
                  (unsigned)total_weight);
 
-        esp_err_t err = audio_start_file(selected_name);
+        audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
+        audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+        esp_err_t err = audio_start_file(selected_name, &start_result, &skip_reason);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start audio on coin detection: %s", esp_err_to_name(err));
-        } else {
+        } else if (start_result == AUDIO_PLAYBACK_START_RESULT_STARTED) {
             ESP_LOGI(TAG, "Playback started for file: %s", selected_name);
+        } else {
+            ESP_LOGW(TAG,
+                     "Playback skipped for file: %s (%s)",
+                     selected_name,
+                     audio_playback_skip_reason_text(skip_reason));
         }
     }
 }

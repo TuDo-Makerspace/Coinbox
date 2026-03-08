@@ -32,6 +32,7 @@ try:
         _skip_to_main_app,
         _stop_process_group,
         _tail_log,
+        _test_mp3_bytes,
         _wait_for_bootstrap_countdown_threshold,
         _wait_until,
         qemu_bootstrap_instance,
@@ -52,6 +53,7 @@ except ModuleNotFoundError:
         _skip_to_main_app,
         _stop_process_group,
         _tail_log,
+        _test_mp3_bytes,
         _wait_for_bootstrap_countdown_threshold,
         _wait_until,
         qemu_bootstrap_instance,
@@ -64,6 +66,9 @@ def qemu_mainapp_instance(qemu_bootstrap_instance):
     log_path = qemu_bootstrap_instance["log_path"]
     _skip_to_main_app(base_url, log_path)
     return qemu_bootstrap_instance
+
+
+DEFAULT_SOUND_FILENAME = "default.mp3"
 
 
 def _capture_browser_state_in_headless_chrome(
@@ -161,6 +166,141 @@ def _capture_browser_state_in_headless_chrome(
                     browser.kill()
 
 
+def _capture_sounds_notice_transition_states(
+    base_url: str,
+    *,
+    ready_row_name: str,
+    trigger_expression: str | None = None,
+    after_ready=None,
+    wait_s: float = 6.0,
+) -> list[dict]:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/sounds/"
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + 8.0
+                initial_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    initial_state = state
+                    if (
+                        state.get("current_path") == "/sounds/"
+                        and state.get("page_ready") == "1"
+                        and ready_row_name in state.get("body_text", "")
+                    ):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(
+                        "Sounds page did not become interactive before playback-notice trigger.\n"
+                        f"Last state: {initial_state}"
+                    )
+
+                _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  window.alert = () => {};"
+                            "  return true;"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+
+                captured_states: list[dict] = [initial_state]
+                if after_ready is not None:
+                    after_ready()
+
+                if trigger_expression:
+                    trigger_response = _cdp_send_command(
+                        sock,
+                        next_id,
+                        "Runtime.evaluate",
+                        {
+                            "expression": trigger_expression,
+                            "returnByValue": True,
+                        },
+                    )
+                    next_id += 1
+                    trigger_value = trigger_response.get("result", {}).get("result", {}).get("value")
+                    assert trigger_value not in ("missing-row", "missing-play-button"), (
+                        f"Sounds-page playback trigger could not find the target row/button: {trigger_value!r}"
+                    )
+
+                deadline = time.time() + wait_s
+                while time.time() < deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    state["elapsed_s"] = wait_s - max(0.0, deadline - time.time())
+                    captured_states.append(state)
+                    time.sleep(0.15)
+
+                return captured_states
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
 def _browser_state_details(browser_state: dict, log_path) -> str:
     return (
         f"Browser URL: {browser_state.get('current_url')}\n"
@@ -224,6 +364,13 @@ def _body_text_matches(browser_state: dict, pattern: str) -> bool:
     return re.search(pattern, browser_state.get("body_text", ""), flags=re.IGNORECASE) is not None
 
 
+def _first_matching_state_index(states: list[dict], pattern: str) -> int | None:
+    for idx, state in enumerate(states):
+        if _body_text_matches(state, pattern):
+            return idx
+    return None
+
+
 def _http_post_json(base_url: str, path: str, payload: dict):
     return _http_request(
         base_url=base_url,
@@ -279,6 +426,21 @@ def _set_sound_meta(base_url: str, filename: str, payload: dict):
     )
     assert status == 200, (
         f"Expected 200 from POST /sounds/file-meta/{filename}, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+
+
+def _upload_sound_fixture(base_url: str, filename: str):
+    status, headers, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/sounds/{filename}",
+        timeout_s=10.0,
+        data=_test_mp3_bytes(),
+        headers={"Content-Type": "audio/mpeg"},
+    )
+    assert status == 303, (
+        f"Expected upload of {filename} to redirect, got {status}. "
         f"content-type={headers.get('Content-Type', '')} body={body}"
     )
 
@@ -1959,6 +2121,78 @@ def test_settings_browser_shows_network_mac(qemu_mainapp_instance):
         message="Settings page did not render the expected Network card MAC address.",
     )
     assert _body_text_matches(browser_state, rf"\b{re.escape(expected_mac)}\b"), details
+
+
+# Test: Sounds page shows a temporary heads-up when a 0%-volume sound is selected for playback.
+# 1. Start the main app and upload a dedicated MP3 fixture row.
+# 2. Set that row's volume to `0` while keeping at least one other sound non-zero to avoid the global warning note.
+# 3. Trigger playback either manually from the row play button or via laser injection.
+# 4. Assert the transient 0%-volume playback notice appears in the rendered DOM.
+# 5. Assert the notice disappears again after a short while.
+@pytest.mark.parametrize("trigger_mode", ["manual", "laser"])
+def test_sounds_browser_shows_and_clears_zero_volume_playback_notice(
+    qemu_mainapp_instance,
+    trigger_mode: str,
+):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+    filename = f"browser-zero-volume-{trigger_mode}.mp3"
+    notice_pattern = r"(?:volume.*0%.*(?:skip|skipped|not be played|won't play|will not play)|(?:skip|skipped).*volume.*0%)"
+
+    _upload_sound_fixture(base_url, filename)
+    _set_sound_meta(base_url, filename, {"enabled": True, "probability": 100, "volume": 0})
+
+    trigger_expression = None
+    after_ready = None
+    if trigger_mode == "manual":
+        _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"enabled": True, "probability": 100, "volume": 100})
+        trigger_expression = (
+            "((targetName) => {"
+            "  const row = Array.from(document.querySelectorAll('.file-item'))"
+            "    .find((item) => item.dataset && item.dataset.fileName === targetName);"
+            "  if (!row) return 'missing-row';"
+            "  const btn = row.querySelector('button[data-k=\"play\"]');"
+            "  if (!btn) return 'missing-play-button';"
+            "  btn.click();"
+            "  return targetName;"
+            f"}})({json.dumps(filename)})"
+        )
+    else:
+        _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"enabled": True, "probability": 0, "volume": 100})
+
+        def after_ready():
+            _set_test_gpio_level(base_url, "laser", 0)
+            _set_test_gpio_level(base_url, "laser", 1)
+
+    states = _capture_sounds_notice_transition_states(
+        base_url,
+        ready_row_name=filename,
+        trigger_expression=trigger_expression,
+        after_ready=after_ready,
+        wait_s=6.0,
+    )
+    assert states, f"Expected browser states for zero-volume playback notice test ({trigger_mode})."
+
+    appeared_idx = _first_matching_state_index(states, notice_pattern)
+    cleared_idx = None
+    if appeared_idx is not None:
+        for idx in range(appeared_idx + 1, len(states)):
+            if not _body_text_matches(states[idx], notice_pattern):
+                cleared_idx = idx
+                break
+
+    details = (
+        _browser_state_details(states[-1], log_path)
+        + f"\nTrigger mode: {trigger_mode}"
+        + f"\nNotice present flags: {[bool(_body_text_matches(state, notice_pattern)) for state in states]}"
+    )
+    assert not _body_text_matches(states[0], notice_pattern), details
+    assert appeared_idx is not None, (
+        f"Sounds page did not show the transient zero-volume playback notice for {trigger_mode} trigger.\n{details}"
+    )
+    assert cleared_idx is not None, (
+        f"Sounds page did not clear the transient zero-volume playback notice for {trigger_mode} trigger.\n{details}"
+    )
 
 
 # Test: Sounds page shows a warning note when lid-closed volume is configured to 0%.
