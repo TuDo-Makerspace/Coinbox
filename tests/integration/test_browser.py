@@ -24,6 +24,7 @@ try:
         _expected_recovery_code,
         _get_qemu_factory_mac,
         _http_get,
+        _http_request,
         _is_bootstrap_root_page,
         _log_contains_any_since,
         _restart_into_bootstrap,
@@ -43,6 +44,7 @@ except ModuleNotFoundError:
         _expected_recovery_code,
         _get_qemu_factory_mac,
         _http_get,
+        _http_request,
         _is_bootstrap_root_page,
         _log_contains_any_since,
         _restart_into_bootstrap,
@@ -220,6 +222,50 @@ def _assert_connection_lost_popup_visible(
 
 def _body_text_matches(browser_state: dict, pattern: str) -> bool:
     return re.search(pattern, browser_state.get("body_text", ""), flags=re.IGNORECASE) is not None
+
+
+def _http_post_json(base_url: str, path: str, payload: dict):
+    return _http_request(
+        base_url=base_url,
+        method="POST",
+        path=path,
+        timeout_s=4.0,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+
+
+def _set_audio_config(base_url: str, payload: dict) -> dict:
+    status, headers, body = _http_post_json(base_url, "/audio/config", payload)
+    assert status == 200, (
+        f"Expected 200 from POST /audio/config, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+    assert "application/json" in headers.get("Content-Type", ""), (
+        f"/audio/config did not return JSON. content-type={headers.get('Content-Type', '')}"
+    )
+    parsed = json.loads(body)
+    assert isinstance(parsed, dict), f"/audio/config did not return a JSON object: {parsed!r}"
+    return parsed
+
+
+def _set_test_gpio_level(base_url: str, name: str, level: int):
+    status, headers, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/test/gpio/{name}?level={level}",
+        timeout_s=4.0,
+        data=b"",
+    )
+    assert status == 200, (
+        f"Expected 200 from POST /test/gpio/{name}?level={level}, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+    assert "application/json" in headers.get("Content-Type", ""), (
+        f"/test/gpio/{name} did not return JSON. content-type={headers.get('Content-Type', '')}"
+    )
+    payload = json.loads(body)
+    assert payload.get("level") == level, f"Unexpected GPIO echo for {name}: {payload}"
 
 
 def _get_runtime_status(base_url: str, timeout_s: float = 2.0) -> dict:
@@ -1898,6 +1944,46 @@ def test_settings_browser_shows_network_mac(qemu_mainapp_instance):
         message="Settings page did not render the expected Network card MAC address.",
     )
     assert _body_text_matches(browser_state, rf"\b{re.escape(expected_mac)}\b"), details
+
+
+# Test: Sounds page shows a warning note when lid-closed volume is configured to 0%.
+# 1. Start the main app and force lid-closed state through the hall test GPIO.
+# 2. Set `lid_closed_volume_pct=0` while keeping lid-open volume non-zero.
+# 3. Open `/sounds/` in a real headless browser.
+# 4. Wait until the warning note text appears in the rendered DOM.
+def test_sounds_browser_warns_when_lid_closed_volume_is_zero(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    audio_cfg = _set_audio_config(
+        base_url,
+        {"lid_closed_volume_pct": 0, "lid_open_volume_pct": 25},
+    )
+    assert audio_cfg.get("lid_closed_volume_pct") == 0
+    assert audio_cfg.get("lid_open_volume_pct") == 25
+
+    _set_test_gpio_level(base_url, "hall", 0)
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/sounds/",
+        wait_condition=lambda state: (
+            state.get("current_path") == "/sounds/"
+            and _body_text_matches(state, r"lid\s*closed\s*volume")
+            and _body_text_matches(state, r"\b0%")
+            and _body_text_matches(state, r"warn|silent")
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_state,
+        expected_path="/sounds/",
+        expected_title_fragment="sounds",
+        log_path=log_path,
+        message="Sounds page did not render the lid-closed zero-volume warning note.",
+    )
+    assert _body_text_matches(browser_state, r"lid\s*closed\s*volume"), details
+    assert _body_text_matches(browser_state, r"\b0%"), details
+    assert _body_text_matches(browser_state, r"warn|silent"), details
 
 
 # Test: The shared runtime-status boot ID and page-root boot ID should track the active boot instance.

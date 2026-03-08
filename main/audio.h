@@ -71,5 +71,6 @@ bool audio_is_playing(void);
 
 void audio_set_master_volume_level(uint8_t level);
 void audio_set_track_volume_level(uint8_t level);
+void audio_set_lid_closed_volume_level(uint8_t level);
 void audio_set_lid_open_volume_level(uint8_t level);
 void audio_set_lid_level(bool lid_open);

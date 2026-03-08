@@ -108,6 +108,12 @@ _Static_assert(
 #define BOOT_NVS_NAMESPACE "boot"
 #define BOOT_NVS_KEY_SOUND_ENABLED "startup_sound"
 
+#define AUDIO_NVS_NAMESPACE "audio"
+#define AUDIO_NVS_KEY_LID_CLOSED_VOLUME "lid_closed_vol"
+#define AUDIO_NVS_KEY_LID_OPEN_VOLUME "lid_open_vol"
+#define AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT 100
+#define AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT 25
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Vars
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -120,6 +126,8 @@ static char s_ui_password_hash_hex[UI_PASSWORD_HASH_HEX_LEN + 1] = {0};
 static char s_auth_session_token[AUTH_TOKEN_HEX_LEN + 1] = {0};
 static char s_auth_cookie_header[160] = {0};
 static bool s_boot_sound_enabled = true;
+static uint8_t s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
+static uint8_t s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Path and Name Parsing
@@ -247,6 +255,22 @@ static bool json_get_string(const char *json, const char *key, char *out, size_t
 static bool json_has_key(const char *json, const char *key)
 {
     return json && key && strstr(json, key) != NULL;
+}
+
+static bool json_get_percent(const char *json, const char *key, uint8_t *out)
+{
+    if (!out) {
+        return false;
+    }
+    int value = 0;
+    if (!json_get_int(json, key, &value)) {
+        return false;
+    }
+    if (value < 0 || value > 100) {
+        return false;
+    }
+    *out = (uint8_t)value;
+    return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -664,6 +688,115 @@ esp_err_t mainapp_reset_boot_defaults(void)
     }
 
     s_boot_sound_enabled = true;
+    return ESP_OK;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Playback Settings
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+static void audio_config_apply(void)
+{
+    audio_set_lid_closed_volume_level(s_audio_lid_closed_volume_pct);
+    audio_set_lid_open_volume_level(s_audio_lid_open_volume_pct);
+}
+
+static esp_err_t audio_config_load_from_nvs(void)
+{
+    s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
+    s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
+
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(AUDIO_NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        audio_config_apply();
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    uint8_t lid_closed = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
+    err = nvs_get_u8(nvs, AUDIO_NVS_KEY_LID_CLOSED_VOLUME, &lid_closed);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(nvs);
+        return err;
+    }
+    if (err == ESP_OK) {
+        s_audio_lid_closed_volume_pct = lid_closed;
+    }
+
+    uint8_t lid_open = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
+    err = nvs_get_u8(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME, &lid_open);
+    nvs_close(nvs);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        return err;
+    }
+    if (err == ESP_OK) {
+        s_audio_lid_open_volume_pct = lid_open;
+    }
+
+    audio_config_apply();
+    return ESP_OK;
+}
+
+static esp_err_t audio_config_store(uint8_t lid_closed_volume_pct, uint8_t lid_open_volume_pct)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(AUDIO_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_u8(nvs, AUDIO_NVS_KEY_LID_CLOSED_VOLUME, lid_closed_volume_pct);
+    if (err == ESP_OK) {
+        err = nvs_set_u8(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME, lid_open_volume_pct);
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    s_audio_lid_closed_volume_pct = lid_closed_volume_pct;
+    s_audio_lid_open_volume_pct = lid_open_volume_pct;
+    audio_config_apply();
+    return ESP_OK;
+}
+
+esp_err_t mainapp_reset_audio_defaults(void)
+{
+    nvs_handle_t nvs = 0;
+    esp_err_t err = nvs_open(AUDIO_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        return err;
+    }
+
+    if (err == ESP_OK) {
+        err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_CLOSED_VOLUME);
+        if (err == ESP_ERR_NVS_NOT_FOUND) {
+            err = ESP_OK;
+        }
+        if (err == ESP_OK) {
+            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME);
+            if (err == ESP_ERR_NVS_NOT_FOUND) {
+                err = ESP_OK;
+            }
+        }
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+
+    s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
+    s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
+    audio_config_apply();
     return ESP_OK;
 }
 
@@ -1089,6 +1222,25 @@ static esp_err_t send_boot_config_json(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t send_audio_config_json(httpd_req_t *req)
+{
+    char resp[80];
+    int len = snprintf(resp,
+                       sizeof(resp),
+                       "{\"lid_closed_volume_pct\":%u,\"lid_open_volume_pct\":%u}",
+                       (unsigned)s_audio_lid_closed_volume_pct,
+                       (unsigned)s_audio_lid_open_volume_pct);
+    if (len < 0 || len >= (int)sizeof(resp)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_send(req, resp, len);
+    return ESP_OK;
+}
+
 static esp_err_t send_device_info_json(httpd_req_t *req)
 {
     char mac[18] = {0};
@@ -1331,6 +1483,78 @@ static esp_err_t boot_config_post_handler(httpd_req_t *req)
     }
 
     return send_boot_config_json(req);
+}
+
+static esp_err_t audio_config_get_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
+    }
+    return send_audio_config_json(req);
+}
+
+static esp_err_t audio_config_post_handler(httpd_req_t *req)
+{
+    esp_err_t auth_err = security_require_auth(req);
+    if (auth_err != ESP_OK) {
+        return auth_err;
+    }
+
+    if (req->content_len <= 0 || req->content_len > 160) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request body");
+        return ESP_FAIL;
+    }
+
+    char body[161];
+    int received = 0;
+    while (received < req->content_len) {
+        int r = httpd_req_recv(req, body + received, req->content_len - received);
+        if (r <= 0) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read body");
+            return ESP_FAIL;
+        }
+        received += r;
+    }
+    body[req->content_len] = '\0';
+
+    uint8_t lid_closed_volume_pct = s_audio_lid_closed_volume_pct;
+    uint8_t lid_open_volume_pct = s_audio_lid_open_volume_pct;
+    bool has_update = false;
+
+    if (json_has_key(body, "lid_closed_volume_pct")) {
+        if (!json_get_percent(body, "lid_closed_volume_pct", &lid_closed_volume_pct)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid closed volume");
+            return ESP_FAIL;
+        }
+        has_update = true;
+    }
+
+    if (json_has_key(body, "lid_open_volume_pct")) {
+        if (!json_get_percent(body, "lid_open_volume_pct", &lid_open_volume_pct)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid open volume");
+            return ESP_FAIL;
+        }
+        has_update = true;
+    }
+
+    if (!has_update) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Nothing to update");
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = audio_config_store(lid_closed_volume_pct, lid_open_volume_pct);
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save audio config");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG,
+             "Audio config updated: lid_closed=%u lid_open=%u",
+             (unsigned)s_audio_lid_closed_volume_pct,
+             (unsigned)s_audio_lid_open_volume_pct);
+
+    return send_audio_config_json(req);
 }
 
 static esp_err_t device_info_get_handler(httpd_req_t *req)
@@ -1588,11 +1812,22 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
         return render_err == ESP_FAIL ? ESP_FAIL : render_err;
     }
 
-    httpd_resp_send_chunk(req, page_head, HTTPD_RESP_USE_STRLEN);
-    free(page_head);
+    static const char *rows_placeholder = "<!-- rows injected by server (mainapp.c) -->";
+    char *rows_insertion = strstr(page_head, rows_placeholder);
+    if (!rows_insertion) {
+        free(page_head);
+        closedir(dir);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Sounds template missing rows placeholder");
+        return ESP_FAIL;
+    }
 
-    /* For a flat layout, advertise CURRENT_PATH as "/sounds/" */
-    httpd_resp_sendstr_chunk(req, "<script>window.CURRENT_PATH='/sounds/';</script>");
+    size_t prefix_len = (size_t)(rows_insertion - page_head);
+    const char *page_tail = rows_insertion + strlen(rows_placeholder);
+    if (httpd_resp_send_chunk(req, page_head, prefix_len) != ESP_OK) {
+        free(page_head);
+        closedir(dir);
+        return ESP_FAIL;
+    }
 
     int row_idx = 0;
     int yield_counter = 0;
@@ -1727,7 +1962,11 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
 
     closedir(dir);
 
-    httpd_resp_sendstr_chunk(req, "</div></div></body></html>");
+    if (httpd_resp_sendstr_chunk(req, page_tail) != ESP_OK) {
+        free(page_head);
+        return ESP_FAIL;
+    }
+    free(page_head);
     httpd_resp_sendstr_chunk(req, NULL);
     return ESP_OK;
 }
@@ -2095,6 +2334,13 @@ static esp_err_t reset_settings_handler(httpd_req_t *req)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to reset start-up settings: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset start-up settings");
+        return ESP_FAIL;
+    }
+
+    err = mainapp_reset_audio_defaults();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset playback settings: %s", esp_err_to_name(err));
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset playback settings");
         return ESP_FAIL;
     }
 
@@ -3093,8 +3339,18 @@ esp_err_t start_mainapp(void)
         return boot_cfg_err;
     }
 
+    esp_err_t audio_cfg_err = audio_config_load_from_nvs();
+    if (audio_cfg_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize audio settings: %s", esp_err_to_name(audio_cfg_err));
+        return audio_cfg_err;
+    }
+
     ESP_LOGI(TAG, "UI password lock: %s", s_ui_password_set ? "enabled" : "disabled");
     ESP_LOGI(TAG, "Startup sound: %s", s_boot_sound_enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG,
+             "Playback volumes: lid_closed=%u lid_open=%u",
+             (unsigned)s_audio_lid_closed_volume_pct,
+             (unsigned)s_audio_lid_open_volume_pct);
 
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
@@ -3290,6 +3546,22 @@ esp_err_t start_mainapp(void)
         .user_ctx = NULL
     };
     httpd_register_uri_handler(server, &boot_config_post_uri);
+
+    httpd_uri_t audio_config_get_uri = {
+        .uri = "/audio/config",
+        .method = HTTP_GET,
+        .handler = audio_config_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &audio_config_get_uri);
+
+    httpd_uri_t audio_config_post_uri = {
+        .uri = "/audio/config",
+        .method = HTTP_POST,
+        .handler = audio_config_post_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(server, &audio_config_post_uri);
 
     httpd_uri_t device_info_get_uri = {
         .uri = "/device/info",

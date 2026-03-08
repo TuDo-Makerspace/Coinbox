@@ -23,6 +23,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "gpio.h"
 #include "i2s_stream.h"
 #include "mp3_decoder.h"
 #include "raw_stream.h"
@@ -75,6 +76,7 @@ static char s_current_file_path[AUDIO_FILE_PATH_MAX] = {0};
 // Volumes
 static volatile uint8_t s_master_volume = 35;
 static volatile uint8_t s_track_volume = 35;
+static volatile uint8_t s_lid_closed_volume = 100;
 static volatile uint8_t s_lid_open_volume = 25;
 static volatile bool s_lid_open;
 static volatile bool s_volume_dirty = true;
@@ -129,6 +131,7 @@ static esp_err_t init_playback_i2s_stream_locked(void);
 static void deinit_playback_i2s_stream_locked(void);
 static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, int *channels);
 static esp_err_t load_meta_or_stat_locked(const char *name);
+static void sync_lid_level_from_gpio(void);
 static void play_task(void *arg);
 static void stop_playback_task_locked(void);
 
@@ -246,6 +249,7 @@ esp_err_t audio_init(void)
 
     mute_outputs();
 
+    sync_lid_level_from_gpio();
     s_initialized = true;
     s_mode = AUDIO_MODE_UNINITIALIZED;
 
@@ -820,6 +824,11 @@ static inline uint8_t clamp_track_volume(uint8_t value)
     return (value > FILE_VOLUME_MAX) ? FILE_VOLUME_MAX : value;
 }
 
+static inline uint8_t active_lid_volume_level(void)
+{
+    return s_lid_open ? s_lid_open_volume : s_lid_closed_volume;
+}
+
 static inline bool playback_should_unmute(void)
 {
     if (s_master_volume == 0) {
@@ -828,7 +837,7 @@ static inline bool playback_should_unmute(void)
     if (s_track_volume == 0) {
         return false;
     }
-    if (s_lid_open && s_lid_open_volume == 0) {
+    if (active_lid_volume_level() == 0) {
         return false;
     }
     return true;
@@ -842,7 +851,7 @@ static int compute_volume_db(void)
 {
     float master = (float)s_master_volume / 100.0f;
     float track = (float)s_track_volume / 100.0f;
-    float lid = s_lid_open ? ((float)s_lid_open_volume / 100.0f) : 1.0f;
+    float lid = (float)active_lid_volume_level() / 100.0f;
 
     float effective_pct = master * track * lid * 100.0f;
     if (effective_pct < 0.0f) {
@@ -879,11 +888,13 @@ static void set_stream_volume_db(int db, bool log_change)
 
     s_current_volume_db = db;
     if (log_change) {
-        ESP_LOGI(TAG, "Volume set to %d dB (master=%u track=%u lid_open=%u open=%s)",
+        ESP_LOGI(TAG, "Volume set to %d dB (master=%u track=%u lid_closed=%u lid_open=%u active_lid=%u open=%s)",
                  s_current_volume_db,
                  (unsigned)s_master_volume,
                  (unsigned)s_track_volume,
+                 (unsigned)s_lid_closed_volume,
                  (unsigned)s_lid_open_volume,
+                 (unsigned)active_lid_volume_level(),
                  s_lid_open ? "true" : "false");
     }
 }
@@ -1259,6 +1270,7 @@ static void play_task(void *arg)
     s_play_stop_requested = false;
     s_playing = true;
 
+    sync_lid_level_from_gpio();
     s_current_volume_db = compute_volume_db();
     s_volume_dirty = false;
     if (playback_should_unmute()) {
@@ -1277,6 +1289,7 @@ static void play_task(void *arg)
             break;
         }
 
+        sync_lid_level_from_gpio();
         if (s_volume_dirty) {
             s_current_volume_db = compute_volume_db();
             s_volume_dirty = false;
@@ -1397,6 +1410,7 @@ static void play_task(void *arg)
     s_playing = true;
 
     bool outputs_unmuted = false;
+    sync_lid_level_from_gpio();
     apply_volume_to_stream();
     if (decoder_info_ready && playback_should_unmute()) {
         unmute_outputs();
@@ -1404,6 +1418,7 @@ static void play_task(void *arg)
     }
 
     while (!s_play_stop_requested) {
+        sync_lid_level_from_gpio();
         audio_event_iface_msg_t msg;
         esp_err_t res = audio_event_iface_listen(s_evt, &msg, pdMS_TO_TICKS(AUDIO_PLAY_EVENT_WAIT_MS));
 
@@ -1586,6 +1601,7 @@ esp_err_t audio_start_file(const char *name)
         return err;
     }
 
+    sync_lid_level_from_gpio();
     BaseType_t res = xTaskCreate(play_task,
                                  "mp3-play",
                                  AUDIO_PLAY_TASK_STACK,
@@ -1608,6 +1624,19 @@ bool audio_is_playing(void)
     return s_playing;
 }
 
+static void set_lid_level_internal(bool lid_open)
+{
+    if (s_lid_open != lid_open) {
+        s_lid_open = lid_open;
+        s_volume_dirty = true;
+    }
+}
+
+static void sync_lid_level_from_gpio(void)
+{
+    set_lid_level_internal(gpio_get_hall_level() != HALL_LID_CLOSED);
+}
+
 void audio_set_master_volume_level(uint8_t level)
 {
     s_master_volume = clamp_percent(level);
@@ -1620,6 +1649,12 @@ void audio_set_track_volume_level(uint8_t level)
     s_volume_dirty = true;
 }
 
+void audio_set_lid_closed_volume_level(uint8_t level)
+{
+    s_lid_closed_volume = clamp_percent(level);
+    s_volume_dirty = true;
+}
+
 void audio_set_lid_open_volume_level(uint8_t level)
 {
     s_lid_open_volume = clamp_percent(level);
@@ -1628,6 +1663,5 @@ void audio_set_lid_open_volume_level(uint8_t level)
 
 void audio_set_lid_level(bool lid_open)
 {
-    s_lid_open = lid_open;
-    s_volume_dirty = true;
+    set_lid_level_internal(lid_open);
 }

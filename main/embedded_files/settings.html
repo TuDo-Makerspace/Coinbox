@@ -215,6 +215,14 @@
       justify-content: flex-end;
       margin-top: 0.85rem;
     }
+    .playback-actions {
+      display: flex;
+      align-items: flex-end;
+      margin-top: 0.85rem;
+    }
+    .playback-tip {
+      margin: 0;
+    }
     .settings-toggle {
       margin-top: 0.85rem;
       padding: 0.85rem;
@@ -308,6 +316,13 @@
     }
     .network-actions button:hover { background: #d7e4ff; }
     .network-actions button:active { transform: scale(0.98); }
+    .network-actions button:disabled {
+      background: #e2e8f0;
+      color: #94a3b8;
+      border-color: #cbd5e1;
+      cursor: not-allowed;
+      transform: none;
+    }
     .security-card {
       gap: 0.9rem;
     }
@@ -497,6 +512,11 @@
       grid-template-columns: 3fr 1fr;
       gap: 1.5rem;
     }
+    .playback-slider-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
     .sensor-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
@@ -544,6 +564,9 @@
         width: 100%;
         flex: none;
       }
+      .playback-actions {
+        align-items: stretch;
+      }
       .security-actions {
         flex-direction: column;
       }
@@ -556,6 +579,7 @@
       .log-box { height: 55vh; }
       .card { padding: 1rem; }
       .dual-slider { grid-template-columns: 1fr; }
+      .playback-slider-grid { grid-template-columns: 1fr; }
       .settings-toggle-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -599,6 +623,33 @@
 
   <div class="content">
     <h1>Settings</h1>
+
+    <div class="card">
+      <div class="card-header">
+        <h2>Playback</h2>
+      </div>
+      <div class="playback-slider-grid">
+        <div class="slider-row">
+          <label for="playback-lid-closed-volume">Lid closed volume</label>
+          <input type="range" id="playback-lid-closed-volume" min="0" max="100" value="100" step="1" disabled>
+          <div class="slider-meta">
+            <span id="playback-lid-closed-volume-value">100%</span>
+            <span>0-100%</span>
+          </div>
+        </div>
+        <div class="slider-row">
+          <label for="playback-lid-open-volume">Lid open volume</label>
+          <input type="range" id="playback-lid-open-volume" min="0" max="100" value="25" step="1" disabled>
+          <div class="slider-meta">
+            <span id="playback-lid-open-volume-value">25%</span>
+            <span>0-100%</span>
+          </div>
+        </div>
+      </div>
+      <div class="playback-actions">
+        <p class="note playback-tip">Tip: Set the Lid open volume to 0% to prevent sounds from playing while the lid is open.</p>
+      </div>
+    </div>
 
     <div class="card">
       <div class="card-header">
@@ -817,6 +868,10 @@
     const disableApWhenStaConnectedInput = document.getElementById('network-disable-ap-when-sta-connected');
     const networkSaveBtn = document.getElementById('network-save');
     const networkMacText = document.getElementById('network-mac');
+    const playbackLidClosedInput = document.getElementById('playback-lid-closed-volume');
+    const playbackLidClosedValue = document.getElementById('playback-lid-closed-volume-value');
+    const playbackLidOpenInput = document.getElementById('playback-lid-open-volume');
+    const playbackLidOpenValue = document.getElementById('playback-lid-open-volume-value');
     const startupSoundInput = document.getElementById('startup-sound-enabled');
     const systemFirmwareText = document.getElementById('system-firmware');
     const systemHardwareText = document.getElementById('system-hardware');
@@ -840,6 +895,9 @@
     let lastLogText = null;
     let lastRenderWasError = false;
     let lastNetworkIpsData = {};
+    let audioConfigLoaded = false;
+    let audioConfigSaving = false;
+    let audioConfigResaveRequested = false;
     let networkSaving = false;
     let networkSaveOldLabel = 'Save network settings';
     let bootConfigLoaded = false;
@@ -858,6 +916,10 @@
       sta_ssid: '',
       ap_reboot_required: false,
       sta_reboot_required: false,
+    };
+    const audioConfigSnapshot = {
+      lid_closed_volume_pct: 100,
+      lid_open_volume_pct: 25,
     };
 
     function escapeHtml(str) {
@@ -890,6 +952,118 @@
         return `<span class="log-line ${cls}">${escapeHtml(line)}</span>`;
       }).join('');
       box.scrollTop = box.scrollHeight;
+    }
+
+    function clampPercent(value, fallback = 0) {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed)) return fallback;
+      return Math.min(100, Math.max(0, parsed));
+    }
+
+    function updateAudioConfigSnapshot(data) {
+      audioConfigSnapshot.lid_closed_volume_pct = clampPercent(data?.lid_closed_volume_pct, 100);
+      audioConfigSnapshot.lid_open_volume_pct = clampPercent(data?.lid_open_volume_pct, 25);
+    }
+
+    function currentAudioConfigDraft() {
+      return {
+        lid_closed_volume_pct: clampPercent(
+          playbackLidClosedInput?.value,
+          audioConfigSnapshot.lid_closed_volume_pct,
+        ),
+        lid_open_volume_pct: clampPercent(
+          playbackLidOpenInput?.value,
+          audioConfigSnapshot.lid_open_volume_pct,
+        ),
+      };
+    }
+
+    function audioConfigHasChanges() {
+      const draft = currentAudioConfigDraft();
+      return (
+        draft.lid_closed_volume_pct !== audioConfigSnapshot.lid_closed_volume_pct ||
+        draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct
+      );
+    }
+
+    function renderAudioConfig(data) {
+      const lidClosedVolumePct = clampPercent(data?.lid_closed_volume_pct, 100);
+      const lidOpenVolumePct = clampPercent(data?.lid_open_volume_pct, 25);
+
+      if (playbackLidClosedInput) {
+        playbackLidClosedInput.value = String(lidClosedVolumePct);
+        playbackLidClosedInput.disabled = !audioConfigLoaded;
+      }
+      if (playbackLidClosedValue) {
+        playbackLidClosedValue.textContent = `${lidClosedVolumePct}%`;
+      }
+      if (playbackLidOpenInput) {
+        playbackLidOpenInput.value = String(lidOpenVolumePct);
+        playbackLidOpenInput.disabled = !audioConfigLoaded;
+      }
+      if (playbackLidOpenValue) {
+        playbackLidOpenValue.textContent = `${lidOpenVolumePct}%`;
+      }
+    }
+
+    async function fetchAudioConfig() {
+      if (!playbackLidClosedInput || !playbackLidOpenInput) return;
+      try {
+        const res = await fetch('/audio/config', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch playback settings');
+        const data = await res.json();
+        audioConfigLoaded = true;
+        updateAudioConfigSnapshot(data);
+        renderAudioConfig(data);
+      } catch (_) {
+        audioConfigLoaded = false;
+        renderAudioConfig(audioConfigSnapshot);
+      }
+    }
+
+    async function saveAudioConfig() {
+      if (!audioConfigLoaded) return;
+      if (audioConfigSaving) {
+        audioConfigResaveRequested = true;
+        return;
+      }
+      const draft = currentAudioConfigDraft();
+      const payload = {};
+      if (draft.lid_closed_volume_pct !== audioConfigSnapshot.lid_closed_volume_pct) {
+        payload.lid_closed_volume_pct = draft.lid_closed_volume_pct;
+      }
+      if (draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct) {
+        payload.lid_open_volume_pct = draft.lid_open_volume_pct;
+      }
+      if (Object.keys(payload).length === 0) return;
+
+      audioConfigSaving = true;
+      try {
+        const res = await fetch('/audio/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          let reason = '';
+          try { reason = (await res.text()).trim(); } catch (_) {}
+          throw new Error(reason || 'Failed to save playback settings');
+        }
+        const data = await res.json();
+        audioConfigLoaded = true;
+        updateAudioConfigSnapshot(data);
+      } catch (e) {
+        renderAudioConfig(audioConfigSnapshot);
+        alert(e.message || 'Failed to save playback settings');
+      } finally {
+        audioConfigSaving = false;
+        if (audioConfigResaveRequested) {
+          audioConfigResaveRequested = false;
+          saveAudioConfig();
+          return;
+        }
+        renderAudioConfig(currentAudioConfigDraft());
+      }
     }
 
     function renderNetworkIps(data) {
@@ -2165,6 +2339,14 @@
         saveBootConfig();
       });
     }
+    [playbackLidClosedInput, playbackLidOpenInput].forEach((input) => {
+      input?.addEventListener('input', () => {
+        renderAudioConfig(currentAudioConfigDraft());
+      });
+      input?.addEventListener('change', () => {
+        saveAudioConfig();
+      });
+    });
     bindMaskedNetworkPasswordInput(apPasswordInput, apPasswordState);
     bindMaskedNetworkPasswordInput(staPasswordInput, staPasswordState);
     if (securitySaveBtn) {
@@ -2188,6 +2370,7 @@
         fetchDeviceInfo();
         fetchLog();
         fetchGpioState();
+        fetchAudioConfig();
         fetchNetworkIps();
         fetchNetworkConfig();
         fetchBootConfig();
@@ -2206,6 +2389,7 @@
     fetchDeviceInfo();
     fetchLog();
     fetchGpioState();
+    fetchAudioConfig();
     fetchNetworkIps();
     fetchNetworkConfig();
     fetchBootConfig();

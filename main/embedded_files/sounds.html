@@ -235,6 +235,11 @@
       font-weight: 600;
     }
     .playback-lock-note[hidden] { display: none !important; }
+    .playback-lock-note.warning {
+      border-color: #fcd34d;
+      background: #fef3c7;
+      color: #92400e;
+    }
 
     .chev {
       width: 38px;
@@ -560,6 +565,7 @@
       let uploadInFlight = false;
       let playbackBlockedReason = '';
       const playbackLockNote = document.getElementById('playback-lock-note');
+      const playbackSilentNote = document.getElementById('playback-silent-note');
 
       const uploadOverlay = (() => {
         const overlay = document.createElement('div');
@@ -618,6 +624,55 @@
           playbackLockNote.textContent = showLockNote
             ? `Playback unavailable: ${playbackBlockedReason}.`
             : '';
+        }
+      }
+
+      function clampPercent(value, fallback = 0) {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isNaN(parsed)) return fallback;
+        return Math.min(100, Math.max(0, parsed));
+      }
+
+      function setSilentPlaybackNote(message) {
+        const text = String(message || '').trim();
+        if (!playbackSilentNote) return;
+        playbackSilentNote.hidden = text.length === 0;
+        playbackSilentNote.textContent = text;
+      }
+
+      function renderSilentPlaybackNote(audioConfig, gpioState) {
+        const lidOpen = !!gpioState?.hall?.lid_open;
+        const lidClosedVolumePct = clampPercent(audioConfig?.lid_closed_volume_pct, 100);
+        const lidOpenVolumePct = clampPercent(audioConfig?.lid_open_volume_pct, 25);
+
+        if (!lidOpen && lidClosedVolumePct === 0) {
+          setSilentPlaybackNote('Warning: The Lid closed volume setting is set to 0%. Sounds will be muted while the lid is closed!');
+          return;
+        }
+        if (lidOpen && lidOpenVolumePct === 0) {
+          setSilentPlaybackNote('Warning: lid open volume is 0%, so playback stays silent while the lid is open.');
+          return;
+        }
+        setSilentPlaybackNote('');
+      }
+
+      async function refreshSilentPlaybackNote() {
+        try {
+          const [audioConfigRes, gpioStateRes] = await Promise.all([
+            fetch('/audio/config', { cache: 'no-store' }),
+            fetch('/gpio/state', { cache: 'no-store' }),
+          ]);
+          if (!audioConfigRes.ok || !gpioStateRes.ok) {
+            throw new Error(`audio=${audioConfigRes.status} gpio=${gpioStateRes.status}`);
+          }
+          const [audioConfig, gpioState] = await Promise.all([
+            audioConfigRes.json(),
+            gpioStateRes.json(),
+          ]);
+          renderSilentPlaybackNote(audioConfig, gpioState);
+        } catch (e) {
+          console.warn('Failed to refresh playback warning note', e);
+          setSilentPlaybackNote('');
         }
       }
 
@@ -1078,7 +1133,9 @@
       });
 
       refreshPlaybackGateState();
+      refreshSilentPlaybackNote();
       window.setInterval(refreshPlaybackGateState, 1000);
+      window.setInterval(refreshSilentPlaybackNote, 3000);
       document.documentElement.dataset.pageReady = '1';
     });
   </script>
@@ -1103,6 +1160,7 @@
 
     <input id="newfile" type="file" hidden accept=".mp3,audio/mpeg">
     <p id="playback-lock-note" class="playback-lock-note" hidden></p>
+    <p id="playback-silent-note" class="playback-lock-note warning" hidden></p>
 
     <div id="file-list" class="file-list">
       <!-- rows injected by server (mainapp.c) -->

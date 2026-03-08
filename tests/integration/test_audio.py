@@ -155,6 +155,23 @@ def _get_boot_config(base_url: str) -> dict:
     return _json_object(body, "GET /boot/config")
 
 
+def _get_audio_config(base_url: str) -> dict:
+    status, _, body = _http_get(base_url, "/audio/config")
+    assert status == 200, f"GET /audio/config failed. status={status}, body={body}"
+    return _json_object(body, "GET /audio/config")
+
+
+def _set_audio_config(base_url: str, payload: dict) -> dict:
+    status, _, body = _http_post_json(
+        base_url=base_url,
+        path="/audio/config",
+        payload=payload,
+        timeout_s=4.0,
+    )
+    assert status == 200, f"POST /audio/config failed. status={status}, body={body}"
+    return _json_object(body, "POST /audio/config")
+
+
 def _set_boot_config(base_url: str, payload: dict) -> dict:
     status, _, body = _http_post_json(
         base_url=base_url,
@@ -168,6 +185,22 @@ def _set_boot_config(base_url: str, payload: dict) -> dict:
 
 def _volume_pct(state: dict) -> float:
     return float(state.get("volume_pct", -1.0))
+
+
+def _set_test_gpio_level(base_url: str, name: str, level: int):
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/test/gpio/{name}?level={level}",
+        timeout_s=3.0,
+        data=b"",
+    )
+    assert status == 200, (
+        f"Failed to set /test/gpio/{name}?level={level}. "
+        f"status={status}, body={body}"
+    )
+    payload = _json_object(body, f"POST /test/gpio/{name}")
+    assert payload.get("level") == level
 
 
 def _assert_no_panic_since(log_path, start_pos: int):
@@ -246,6 +279,48 @@ def test_entering_main_app_does_not_play_default_sound_when_boot_sound_disabled(
     )
     assert not playback_seen, (
         "Did not expect the default boot sound to play after disabling it.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: `/audio/config` updates lid-closed/open playback volumes and logs the change.
+# 1. Start from main app mode and capture baseline audio config.
+# 2. POST new lid-closed and lid-open volume values.
+# 3. Verify the response and a fresh GET both reflect the new values.
+# 4. Assert the update is recorded in logs.
+def test_audio_config_updates_lid_volumes_and_logs_change(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    baseline = _get_audio_config(base_url)
+    for key in ("lid_closed_volume_pct", "lid_open_volume_pct"):
+        value = baseline.get(key)
+        assert isinstance(value, int), f"Expected integer {key} in /audio/config, got {value!r}"
+        assert 0 <= value <= 100, f"Expected {key} within 0-100, got {value}"
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    updated = _set_audio_config(
+        base_url,
+        {"lid_closed_volume_pct": 17, "lid_open_volume_pct": 63},
+    )
+    assert updated.get("lid_closed_volume_pct") == 17
+    assert updated.get("lid_open_volume_pct") == 63
+
+    readback = _get_audio_config(base_url)
+    assert readback.get("lid_closed_volume_pct") == 17
+    assert readback.get("lid_open_volume_pct") == 63
+
+    config_logged = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Audio config updated: lid_closed=17 lid_open=63"],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert config_logged, (
+        "Expected /audio/config update to be reflected in logs.\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
 
@@ -557,6 +632,98 @@ def test_playback_with_zero_track_volume_keeps_outputs_muted(qemu_mainapp_instan
     elapsed_s = time.monotonic() - t_start
     assert elapsed_s >= 5.0, f"Zero-volume playback ended too quickly: {elapsed_s:.2f}s"
     assert _outputs_are_muted(base_url), f"DAC/AMP should remain muted after zero-volume playback.\nLog tail:\n{_tail_log(log_path)}"
+
+
+@pytest.mark.parametrize(
+    ("case_name", "hall_level", "audio_config"),
+    [
+        ("lid-closed", 0, {"lid_closed_volume_pct": 0, "lid_open_volume_pct": 100}),
+        ("lid-open", 1, {"lid_closed_volume_pct": 100, "lid_open_volume_pct": 0}),
+    ],
+)
+def test_playback_with_zero_active_lid_volume_keeps_outputs_muted(
+    qemu_mainapp_instance,
+    case_name: str,
+    hall_level: int,
+    audio_config: dict,
+):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_until(
+        lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert idle, (
+        "Startup playback did not clear before zero active-lid-volume test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    audio_cfg = _set_audio_config(base_url, audio_config)
+    assert audio_cfg.get("lid_closed_volume_pct") == audio_config["lid_closed_volume_pct"]
+    assert audio_cfg.get("lid_open_volume_pct") == audio_config["lid_open_volume_pct"]
+
+    _set_test_gpio_level(base_url, "hall", hall_level)
+
+    filename = f"{_unique_name(f'{case_name}-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    status, _, body = _set_sound_meta(base_url, filename, {"volume": 100})
+    assert status == 200, f"Failed to set track volume to 100. body={body}"
+    assert body == "OK"
+
+    t_start = time.monotonic()
+    status, _, body = _audio_playback_start(base_url, filename)
+    assert status == 200, f"Failed to start playback for {case_name}. body={body}"
+
+    playing = _wait_until(
+        lambda: bool(_audio_test_state(base_url).get("playback_active")),
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert playing, (
+        f"Playback did not become active for {case_name} zero-volume case.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    initially_muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=1.0, poll_s=0.05)
+    assert initially_muted, (
+        f"DAC/AMP did not stay muted at zero active {case_name} volume.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    playback_done = False
+    deadline = time.monotonic() + 12.0
+    while time.monotonic() < deadline:
+        assert _outputs_are_muted(base_url), (
+            f"DAC/AMP unexpectedly unmuted during zero active {case_name} volume playback.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+        if not bool(_audio_test_state(base_url).get("playback_active")):
+            playback_done = True
+            break
+        time.sleep(0.1)
+
+    if not playback_done:
+        status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
+        assert status == 200, f"Failed to stop stalled {case_name} zero-volume playback. body={body}"
+        playback_done = _wait_until(
+            lambda: not bool(_audio_test_state(base_url).get("playback_active")),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert playback_done, (
+            f"{case_name} zero-volume playback did not clear after stop fallback.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+    elapsed_s = time.monotonic() - t_start
+    assert elapsed_s >= 5.0, f"{case_name} zero-volume playback ended too quickly: {elapsed_s:.2f}s"
+    assert _outputs_are_muted(base_url), (
+        f"DAC/AMP should remain muted after {case_name} zero-volume playback.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
 
 
 # Test: Rapid repeated playback-start requests keep the control plane responsive.
