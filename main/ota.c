@@ -15,9 +15,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
-#include "mainapp.h"
 #include "recovery_code.h"
 #include "sdkconfig.h"
+#include "security.h"
 #if CONFIG_NETWORK_ETH_OPENETH
 #include "esp_private/system_internal.h"
 #endif
@@ -97,7 +97,7 @@ static bool ota_parse_recovery_code_header(const char *raw, int *out_code)
 
 static esp_err_t ota_require_auth(httpd_req_t *req)
 {
-    if (!mainapp_security_is_password_set()) {
+    if (!security_is_password_set()) {
         return ESP_OK;
     }
 
@@ -121,7 +121,7 @@ static esp_err_t ota_require_auth(httpd_req_t *req)
             ESP_LOGW(TAG, "Rejecting OTA request with invalid password header");
             return ota_send_unauthorized(req);
         }
-        if (!mainapp_security_password_matches(password)) {
+        if (!security_password_matches(password)) {
             ESP_LOGW(TAG, "Rejecting OTA request due to password auth failure");
             return ota_send_unauthorized(req);
         }

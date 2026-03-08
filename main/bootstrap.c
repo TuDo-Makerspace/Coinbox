@@ -23,6 +23,7 @@
 #include "gpio.h"
 #include "recovery_code.h"
 #include "runtime_status.h"
+#include "security.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Constants
@@ -232,7 +233,7 @@ static void bootstrap_generate_recovery_auth_token(void)
 
 static bool bootstrap_is_recovery_authenticated_request(httpd_req_t *req)
 {
-    s_recovery_auth_required = mainapp_security_is_password_set();
+    s_recovery_auth_required = security_is_password_set();
     if (!s_recovery_auth_required) {
         return true;
     }
@@ -433,7 +434,7 @@ static esp_err_t bootstrap_reset_settings_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    err = mainapp_reset_security_defaults();
+    err = security_clear_password();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to reset security settings: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset security settings");
@@ -447,7 +448,7 @@ static esp_err_t bootstrap_reset_settings_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    s_recovery_auth_required = mainapp_security_is_password_set();
+    s_recovery_auth_required = security_is_password_set();
     s_recovery_auth_token[0] = '\0';
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_sendstr(req, "Settings reset to defaults");
@@ -484,7 +485,7 @@ static void json_escape_copy(const char *src, char *dst, size_t dst_size)
 
 static esp_err_t send_device_info_json(httpd_req_t *req)
 {
-    s_recovery_auth_required = mainapp_security_is_password_set();
+    s_recovery_auth_required = security_is_password_set();
 
     char mac[18] = {0};
     if (device_info_get_mac_string(mac, sizeof(mac)) != ESP_OK) {
@@ -519,7 +520,7 @@ static esp_err_t send_security_status_text(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_sendstr(req, mainapp_security_is_password_set() ? "1" : "0");
+    httpd_resp_sendstr(req, security_is_password_set() ? "1" : "0");
     return ESP_OK;
 }
 
@@ -532,7 +533,7 @@ static esp_err_t bootstrap_recovery_auth_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    s_recovery_auth_required = mainapp_security_is_password_set();
+    s_recovery_auth_required = security_is_password_set();
     if (!s_recovery_auth_required) {
         bootstrap_generate_recovery_auth_token();
     } else {
@@ -550,12 +551,12 @@ static esp_err_t bootstrap_recovery_auth_handler(httpd_req_t *req)
 
         bool authenticated = false;
         if (password_present) {
-            char password[65];
+            char password[SECURITY_UI_PASSWORD_MAX_LEN + 1];
             if (!json_get_string(body, "password", password, sizeof(password))) {
                 httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid password");
                 return ESP_FAIL;
             }
-            authenticated = mainapp_security_password_matches(password);
+            authenticated = security_password_matches(password);
         } else {
             int recovery_code = 0;
             if (!json_get_int(body, "recovery_code", &recovery_code)) {
@@ -986,12 +987,12 @@ esp_err_t bootstrap(void)
     s_recovery_auth_token[0] = '\0';
     gpio_set_runtime_mode(GPIO_RUNTIME_BOOTSTRAP);
 
-    esp_err_t security_err = mainapp_security_init();
+    esp_err_t security_err = security_init();
     if (security_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to load security state for bootstrap: %s", esp_err_to_name(security_err));
         return security_err;
     }
-    s_recovery_auth_required = mainapp_security_is_password_set();
+    s_recovery_auth_required = security_is_password_set();
 
     esp_err_t ap_err = network_enable_recovery_ap();
     if (ap_err != ESP_OK && ap_err != ESP_ERR_NOT_SUPPORTED) {

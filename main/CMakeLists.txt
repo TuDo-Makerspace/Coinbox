@@ -54,6 +54,7 @@ idf_component_register(
         "recovery_code.c"
         "device_info.c"
         "runtime_status.c"
+        "security.c"
     INCLUDE_DIRS
         "."
     EMBED_FILES

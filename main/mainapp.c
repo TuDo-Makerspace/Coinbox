@@ -24,13 +24,12 @@
 #include "network.h"
 #include "runtime_status.h"
 #include "sdkconfig.h"
+#include "security.h"
 
 #include "esp_vfs.h"
 #include "esp_littlefs.h"
 #include "esp_http_server.h"
-#include "esp_random.h"
 #include "nvs.h"
-#include "mbedtls/sha256.h"
 
 #include "ota.h"
 #include <ctype.h>
@@ -97,14 +96,6 @@ _Static_assert(
 #define STR_VALUE_(x) #x
 #define STR_VALUE(x) STR_VALUE_(x)
 
-#define SECURITY_NVS_NAMESPACE "security"
-#define SECURITY_NVS_KEY_UI_PASSWORD_SHA "ui_pwd_sha"
-#define UI_PASSWORD_HASH_HEX_LEN 64
-#define UI_PASSWORD_MAX_LEN 64
-#define AUTH_COOKIE_NAME "coinbox_auth"
-#define AUTH_TOKEN_NUM_BYTES 16
-#define AUTH_TOKEN_HEX_LEN (AUTH_TOKEN_NUM_BYTES * 2)
-
 #define BOOT_NVS_NAMESPACE "boot"
 #define BOOT_NVS_KEY_SOUND_ENABLED "startup_sound"
 
@@ -121,10 +112,6 @@ _Static_assert(
 static const char *TAG = "file_server";
 
 static char s_http_scratch[SCRATCH_BUFSIZE];
-static bool s_ui_password_set = false;
-static char s_ui_password_hash_hex[UI_PASSWORD_HASH_HEX_LEN + 1] = {0};
-static char s_auth_session_token[AUTH_TOKEN_HEX_LEN + 1] = {0};
-static char s_auth_cookie_header[160] = {0};
 static bool s_boot_sound_enabled = true;
 static uint8_t s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
 static uint8_t s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
@@ -271,345 +258,6 @@ static bool json_get_percent(const char *json, const char *key, uint8_t *out)
     }
     *out = (uint8_t)value;
     return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////////////
-// Security
-///////////////////////////////////////////////////////////////////////////////////////////////////
-
-static void bytes_to_hex(const uint8_t *src, size_t src_len, char *dst, size_t dst_size)
-{
-    static const char hex[] = "0123456789abcdef";
-    if (!src || !dst || dst_size == 0) {
-        return;
-    }
-    if (dst_size < (src_len * 2 + 1)) {
-        dst[0] = '\0';
-        return;
-    }
-    for (size_t i = 0; i < src_len; ++i) {
-        dst[i * 2] = hex[(src[i] >> 4) & 0x0F];
-        dst[i * 2 + 1] = hex[src[i] & 0x0F];
-    }
-    dst[src_len * 2] = '\0';
-}
-
-static void security_generate_auth_session_token(void)
-{
-    uint8_t token[AUTH_TOKEN_NUM_BYTES];
-    for (size_t i = 0; i < AUTH_TOKEN_NUM_BYTES; i += sizeof(uint32_t)) {
-        uint32_t r = esp_random();
-        size_t remaining = AUTH_TOKEN_NUM_BYTES - i;
-        size_t copy_len = remaining < sizeof(uint32_t) ? remaining : sizeof(uint32_t);
-        memcpy(&token[i], &r, copy_len);
-    }
-    bytes_to_hex(token, sizeof(token), s_auth_session_token, sizeof(s_auth_session_token));
-}
-
-static bool security_hash_password(const char *password, char *out_hex, size_t out_hex_size)
-{
-    if (!password || !out_hex || out_hex_size < (UI_PASSWORD_HASH_HEX_LEN + 1)) {
-        return false;
-    }
-
-    uint8_t digest[32];
-    mbedtls_sha256_context ctx;
-    mbedtls_sha256_init(&ctx);
-
-    int rc = mbedtls_sha256_starts(&ctx, 0);
-    if (rc == 0) {
-        rc = mbedtls_sha256_update(&ctx, (const unsigned char *)password, strlen(password));
-    }
-    if (rc == 0) {
-        rc = mbedtls_sha256_finish(&ctx, digest);
-    }
-    mbedtls_sha256_free(&ctx);
-
-    if (rc != 0) {
-        return false;
-    }
-
-    bytes_to_hex(digest, sizeof(digest), out_hex, out_hex_size);
-    return true;
-}
-
-static bool security_is_valid_password_len(const char *password)
-{
-    if (!password) {
-        return false;
-    }
-    size_t len = strlen(password);
-    return len > 0 && len <= UI_PASSWORD_MAX_LEN;
-}
-
-static void security_sanitize_next_path(const char *candidate, char *out, size_t out_size)
-{
-    if (!out || out_size == 0) {
-        return;
-    }
-
-    const char *fallback = "/sounds/";
-    if (!candidate || candidate[0] != '/') {
-        strlcpy(out, fallback, out_size);
-        return;
-    }
-
-    if (strncmp(candidate, "/auth/", 6) == 0 || strncmp(candidate, "/login", 6) == 0) {
-        strlcpy(out, fallback, out_size);
-        return;
-    }
-
-    if (strlen(candidate) >= out_size) {
-        strlcpy(out, fallback, out_size);
-        return;
-    }
-
-    strlcpy(out, candidate, out_size);
-}
-
-static void security_set_auth_cookie_header(httpd_req_t *req)
-{
-    if (!req || s_auth_session_token[0] == '\0') {
-        return;
-    }
-
-    int n = snprintf(s_auth_cookie_header, sizeof(s_auth_cookie_header),
-                     AUTH_COOKIE_NAME "=%s; Path=/; HttpOnly; SameSite=Strict",
-                     s_auth_session_token);
-    if (n > 0 && n < (int)sizeof(s_auth_cookie_header)) {
-        httpd_resp_set_hdr(req, "Set-Cookie", s_auth_cookie_header);
-    }
-}
-
-static void security_clear_auth_cookie_header(httpd_req_t *req)
-{
-    if (!req) {
-        return;
-    }
-    httpd_resp_set_hdr(req, "Set-Cookie",
-                       AUTH_COOKIE_NAME "=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict");
-}
-
-static bool security_get_cookie_value(httpd_req_t *req, const char *name, char *out, size_t out_size)
-{
-    if (!req || !name || !out || out_size == 0) {
-        return false;
-    }
-    out[0] = '\0';
-    size_t value_size = out_size;
-    return httpd_req_get_cookie_val(req, name, out, &value_size) == ESP_OK;
-}
-
-static bool security_is_authenticated_request(httpd_req_t *req)
-{
-    if (!s_ui_password_set) {
-        return true;
-    }
-    if (!req || s_auth_session_token[0] == '\0') {
-        return false;
-    }
-    char token[AUTH_TOKEN_HEX_LEN + 1];
-    if (!security_get_cookie_value(req, AUTH_COOKIE_NAME, token, sizeof(token))) {
-        return false;
-    }
-    return strcmp(token, s_auth_session_token) == 0;
-}
-
-static bool security_password_matches(const char *password)
-{
-    if (!s_ui_password_set || !password) {
-        return false;
-    }
-    char hash_hex[UI_PASSWORD_HASH_HEX_LEN + 1];
-    if (!security_hash_password(password, hash_hex, sizeof(hash_hex))) {
-        return false;
-    }
-    return strcmp(hash_hex, s_ui_password_hash_hex) == 0;
-}
-
-static esp_err_t security_load_from_nvs(void)
-{
-    s_ui_password_set = false;
-    s_ui_password_hash_hex[0] = '\0';
-
-    nvs_handle_t nvs = 0;
-    esp_err_t err = nvs_open(SECURITY_NVS_NAMESPACE, NVS_READONLY, &nvs);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        return ESP_OK;
-    }
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    size_t required = sizeof(s_ui_password_hash_hex);
-    err = nvs_get_str(nvs, SECURITY_NVS_KEY_UI_PASSWORD_SHA, s_ui_password_hash_hex, &required);
-    nvs_close(nvs);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        s_ui_password_hash_hex[0] = '\0';
-        s_ui_password_set = false;
-        return ESP_OK;
-    }
-    if (err != ESP_OK) {
-        return err;
-    }
-    if (required != sizeof(s_ui_password_hash_hex)) {
-        ESP_LOGW(TAG, "Ignoring invalid stored UI password hash length: %u", (unsigned)required);
-        s_ui_password_hash_hex[0] = '\0';
-        s_ui_password_set = false;
-        return ESP_OK;
-    }
-
-    s_ui_password_set = true;
-    return ESP_OK;
-}
-
-static esp_err_t security_store_password_hash(const char *hash_hex)
-{
-    if (!hash_hex || strlen(hash_hex) != UI_PASSWORD_HASH_HEX_LEN) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    nvs_handle_t nvs = 0;
-    esp_err_t err = nvs_open(SECURITY_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = nvs_set_str(nvs, SECURITY_NVS_KEY_UI_PASSWORD_SHA, hash_hex);
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    strlcpy(s_ui_password_hash_hex, hash_hex, sizeof(s_ui_password_hash_hex));
-    s_ui_password_set = true;
-    security_generate_auth_session_token();
-    return ESP_OK;
-}
-
-static esp_err_t security_set_password(const char *password)
-{
-    if (!security_is_valid_password_len(password)) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    char hash_hex[UI_PASSWORD_HASH_HEX_LEN + 1];
-    if (!security_hash_password(password, hash_hex, sizeof(hash_hex))) {
-        return ESP_FAIL;
-    }
-
-    return security_store_password_hash(hash_hex);
-}
-
-static esp_err_t security_clear_password(void)
-{
-    nvs_handle_t nvs = 0;
-    esp_err_t err = nvs_open(SECURITY_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    err = nvs_erase_key(nvs, SECURITY_NVS_KEY_UI_PASSWORD_SHA);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        err = ESP_OK;
-    }
-    if (err == ESP_OK) {
-        err = nvs_commit(nvs);
-    }
-    nvs_close(nvs);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    s_ui_password_set = false;
-    s_ui_password_hash_hex[0] = '\0';
-    security_generate_auth_session_token();
-    return ESP_OK;
-}
-
-static bool security_is_ui_entry_uri(const char *uri)
-{
-    if (!uri) {
-        return false;
-    }
-    if (strcmp(uri, "/") == 0 ||
-        strcmp(uri, "/sounds") == 0 || strcmp(uri, "/sounds/") == 0 ||
-        strcmp(uri, "/settings") == 0 || strncmp(uri, "/settings/", 10) == 0) {
-        return true;
-    }
-    return false;
-}
-
-static esp_err_t security_redirect_to_login_for_path(httpd_req_t *req, const char *next_candidate)
-{
-    char next_path[96];
-    char location[160];
-    security_sanitize_next_path(next_candidate, next_path, sizeof(next_path));
-    int n = snprintf(location, sizeof(location), "/login?next=%s", next_path);
-    if (n <= 0 || n >= (int)sizeof(location)) {
-        strlcpy(location, "/login", sizeof(location));
-    }
-
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_set_hdr(req, "Location", location);
-    httpd_resp_sendstr(req, "Authentication required");
-    return ESP_FAIL;
-}
-
-static esp_err_t security_redirect_to_login(httpd_req_t *req)
-{
-    return security_redirect_to_login_for_path(req, req ? req->uri : NULL);
-}
-
-static esp_err_t security_send_unauthorized(httpd_req_t *req)
-{
-    httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_type(req, "text/plain");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_sendstr(req, "Unauthorized");
-    return ESP_FAIL;
-}
-
-static esp_err_t security_require_auth(httpd_req_t *req)
-{
-    if (!s_ui_password_set || security_is_authenticated_request(req)) {
-        return ESP_OK;
-    }
-
-    if (req && req->method == HTTP_GET && security_is_ui_entry_uri(req->uri)) {
-        return security_redirect_to_login(req);
-    }
-    return security_send_unauthorized(req);
-}
-
-static esp_err_t security_init(void)
-{
-    security_generate_auth_session_token();
-    return security_load_from_nvs();
-}
-
-esp_err_t mainapp_security_init(void)
-{
-    return security_init();
-}
-
-bool mainapp_security_is_password_set(void)
-{
-    return s_ui_password_set;
-}
-
-bool mainapp_security_password_matches(const char *password)
-{
-    return security_password_matches(password);
-}
-
-esp_err_t mainapp_reset_security_defaults(void)
-{
-    return security_clear_password();
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1071,7 +719,7 @@ static esp_err_t http_resp_login_html(httpd_req_t *req)
         }
     }
 
-    if (!s_ui_password_set || security_is_authenticated_request(req)) {
+    if (!security_is_password_set() || security_is_authenticated_request(req)) {
         httpd_resp_set_status(req, "302 Found");
         httpd_resp_set_hdr(req, "Cache-Control", "no-store");
         httpd_resp_set_hdr(req, "Location", next_path);
@@ -1185,7 +833,7 @@ static esp_err_t send_security_config_json(httpd_req_t *req)
     char resp[48];
     int len = snprintf(resp, sizeof(resp),
                        "{\"password_set\":%s}",
-                       s_ui_password_set ? "true" : "false");
+                       security_is_password_set() ? "true" : "false");
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -1201,7 +849,7 @@ static esp_err_t send_security_status_text(httpd_req_t *req)
 {
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_sendstr(req, s_ui_password_set ? "1" : "0");
+    httpd_resp_sendstr(req, security_is_password_set() ? "1" : "0");
     return ESP_OK;
 }
 
@@ -1266,7 +914,7 @@ static esp_err_t send_device_info_json(httpd_req_t *req)
         device_info_license_name(),
         mac,
         recovery_code,
-        s_ui_password_set ? "true" : "false");
+        security_is_password_set() ? "true" : "false");
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -1308,7 +956,7 @@ static esp_err_t auth_login_post_handler(httpd_req_t *req)
         security_sanitize_next_path(next_raw, next_path, sizeof(next_path));
     }
 
-    if (!s_ui_password_set) {
+    if (!security_is_password_set()) {
         security_clear_auth_cookie_header(req);
         char resp[128];
         int len = snprintf(resp, sizeof(resp),
@@ -1324,7 +972,7 @@ static esp_err_t auth_login_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    char password[UI_PASSWORD_MAX_LEN + 1];
+    char password[SECURITY_UI_PASSWORD_MAX_LEN + 1];
     if (!json_get_string(body, "password", password, sizeof(password))) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Password missing");
         return ESP_FAIL;
@@ -1400,7 +1048,7 @@ static esp_err_t security_config_post_handler(httpd_req_t *req)
     if (remove) {
         err = security_clear_password();
     } else if (password_key_present) {
-        char password[UI_PASSWORD_MAX_LEN + 1];
+        char password[SECURITY_UI_PASSWORD_MAX_LEN + 1];
         if (!json_get_string(body, "password", password, sizeof(password))) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid password");
             return ESP_FAIL;
@@ -1425,7 +1073,7 @@ static esp_err_t security_config_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    if (s_ui_password_set) {
+    if (security_is_password_set()) {
         security_set_auth_cookie_header(req);
     } else {
         security_clear_auth_cookie_header(req);
@@ -2323,7 +1971,7 @@ static esp_err_t reset_settings_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    err = mainapp_reset_security_defaults();
+    err = security_clear_password();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to reset security settings: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to reset security settings");
@@ -2623,10 +2271,26 @@ static esp_err_t test_gpio_dac_mute_post_handler(httpd_req_t *req)
 // Audio Endpoints
 //-------------------------------------------------------------------------
 
+static uint16_t audio_test_volume_pct_to_amp(float volume_pct, uint16_t amp_max)
+{
+    if (amp_max == 0) {
+        return 0;
+    }
+    double scaled = ((double)volume_pct / 100.0) * (double)amp_max;
+    if (scaled <= 0.0) {
+        return 0;
+    }
+    if (scaled >= (double)amp_max) {
+        return amp_max;
+    }
+    return (uint16_t)lround(scaled);
+}
+
 static esp_err_t audio_test_send_state(httpd_req_t *req)
 {
     char resp[640];
     float freq = audio_test_current_freq();
+    float volume_pct = audio_test_current_volume_pct();
     uint16_t amp = audio_test_current_amplitude();
     uint16_t amp_max = audio_test_max_amplitude();
     bool running = audio_test_is_running();
@@ -2654,7 +2318,7 @@ static esp_err_t audio_test_send_state(httpd_req_t *req)
                        (double)AUDIO_TEST_MAX_HZ,
                        (unsigned)amp,
                        (unsigned)amp_max,
-                       amp_max ? (100.0 * (double)amp / (double)amp_max) : 0.0,
+                       (double)volume_pct,
                        playback_active ? "true" : "false",
                        sweep_running ? "true" : "false",
                        (unsigned)playback_notice_seq,
@@ -2688,7 +2352,6 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
         return auth_err;
     }
 
-    uint16_t amp = audio_test_current_amplitude();
     uint16_t amp_max = audio_test_max_amplitude();
 
     char query[96] = {0};
@@ -2723,7 +2386,7 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
         }
         new_freq = parsed;
     }
-    float volume_pct = amp_max ? (100.0f * ((float)amp / (float)amp_max)) : 0.0f;
+    float volume_pct = audio_test_current_volume_pct();
     if (httpd_query_key_value(query, "volume", vol_str, sizeof(vol_str)) == ESP_OK) {
         char *end = NULL;
         float parsed = strtof(vol_str, &end);
@@ -2734,7 +2397,7 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
         }
         volume_pct = parsed;
     }
-    uint16_t new_amp = amp_max ? (uint16_t)((volume_pct / 100.0f) * (float)amp_max) : 0;
+    uint16_t new_amp = audio_test_volume_pct_to_amp(volume_pct, amp_max);
 
     if (strcmp(action, "start") == 0) {
         if (audio_is_playing()) {
@@ -2751,6 +2414,7 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
             httpd_resp_sendstr(req, "Sweep in progress");
             return ESP_FAIL;
         }
+        audio_test_set_volume_pct(volume_pct);
         audio_test_set_targets(new_freq, new_amp);
         esp_err_t err = audio_test_start(new_freq, new_amp);
         if (err != ESP_OK) {
@@ -2758,6 +2422,7 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
     } else if (strcmp(action, "stop") == 0) {
+        audio_test_set_volume_pct(volume_pct);
         audio_test_set_targets(new_freq, new_amp);
         audio_stop();
     } else if (strcmp(action, "update") == 0) {
@@ -2768,6 +2433,7 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
             httpd_resp_sendstr(req, "Sweep in progress");
             return ESP_FAIL;
         }
+        audio_test_set_volume_pct(volume_pct);
         audio_test_set_targets(new_freq, new_amp);
     } else if (strcmp(action, "sweep") == 0) {
         if (audio_is_playing()) {
@@ -2784,6 +2450,7 @@ static esp_err_t audio_test_set_handler(httpd_req_t *req)
             httpd_resp_sendstr(req, "Test tone in progress");
             return ESP_FAIL;
         }
+        audio_test_set_volume_pct(volume_pct);
         audio_test_set_targets(new_freq, new_amp);
         esp_err_t err = audio_test_start_sweep();
         if (err != ESP_OK) {
@@ -3368,7 +3035,7 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
 
 static esp_err_t redirect_to_sounds_handler(httpd_req_t *req)
 {
-    if (s_ui_password_set && !security_is_authenticated_request(req)) {
+    if (security_is_password_set() && !security_is_authenticated_request(req)) {
         return security_redirect_to_login_for_path(req, "/sounds/");
     }
 
@@ -3402,7 +3069,7 @@ static void maybe_play_startup_sound(void)
 
 esp_err_t start_mainapp(void)
 {
-    esp_err_t sec_err = mainapp_security_init();
+    esp_err_t sec_err = security_init();
     if (sec_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize security state: %s", esp_err_to_name(sec_err));
         return sec_err;
@@ -3420,7 +3087,7 @@ esp_err_t start_mainapp(void)
         return audio_cfg_err;
     }
 
-    ESP_LOGI(TAG, "UI password lock: %s", s_ui_password_set ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "UI password lock: %s", security_is_password_set() ? "enabled" : "disabled");
     ESP_LOGI(TAG, "Startup sound: %s", s_boot_sound_enabled ? "enabled" : "disabled");
     ESP_LOGI(TAG,
              "Playback volumes: lid_closed=%u lid_open=%u",

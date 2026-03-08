@@ -24,10 +24,6 @@ extern "C" {
 #endif
 
 esp_err_t start_mainapp(void);
-esp_err_t mainapp_security_init(void);
-bool mainapp_security_is_password_set(void);
-bool mainapp_security_password_matches(const char *password);
-esp_err_t mainapp_reset_security_defaults(void);
 esp_err_t mainapp_reset_boot_defaults(void);
 esp_err_t mainapp_reset_audio_defaults(void);
 
