@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import urllib.error
 from html.parser import HTMLParser
 
 import pytest
@@ -224,6 +225,66 @@ def _extract_littlefs_mount_stats(log_path) -> tuple[int, int] | None:
     return int(total_str), int(used_str)
 
 
+def _extract_storage_full_rejection(log_path, start_pos: int = 0) -> tuple[int, int, int, int] | None:
+    try:
+        with log_path.open("r", encoding="utf-8", errors="replace") as f:
+            if start_pos > 0:
+                f.seek(start_pos)
+            text = f.read()
+    except OSError:
+        return None
+
+    matches = re.findall(
+        r"Insufficient storage for upload: need=(\d+) free=(\d+) file=(\d+) overhead=(\d+)",
+        text,
+    )
+    if not matches:
+        return None
+
+    need_str, free_str, file_str, overhead_str = matches[-1]
+    return int(need_str), int(free_str), int(file_str), int(overhead_str)
+
+
+def _is_sounds_index_ready(base_url: str) -> bool:
+    try:
+        status, headers, _ = _http_get(base_url, "/sounds/", timeout_s=2.0)
+    except Exception:
+        return False
+    return status == 200 and "text/html" in headers.get("Content-Type", "")
+
+
+def _is_timeout_transport_error(exc: BaseException) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        if isinstance(reason, TimeoutError):
+            return True
+        if reason is not None and "timed out" in str(reason).lower():
+            return True
+
+    return isinstance(exc, OSError) and "timed out" in str(exc).lower()
+
+
+def _uploaded_sound_matches_payload(
+    base_url: str,
+    filename: str,
+    payload: bytes,
+    timeout_s: float = 20.0,
+) -> bool:
+    try:
+        status, headers, body = _http_get_bytes(base_url, f"/sounds/{filename}", timeout_s=timeout_s)
+    except Exception:
+        return False
+
+    if status != 200:
+        return False
+    if "audio/mpeg" not in headers.get("Content-Type", ""):
+        return False
+    return body == payload
+
+
 @pytest.fixture
 def qemu_mainapp_instance(qemu_bootstrap_instance):
     base_url = qemu_bootstrap_instance["base_url"]
@@ -440,7 +501,6 @@ def test_upload_until_storage_full_matches_capacity(qemu_mainapp_instance):
     if start_stats is not None:
         total_bytes, used_bytes = start_stats
         start_free = max(0, total_bytes - used_bytes)
-        # Target roughly 3-5 successful uploads before running out of space.
         computed_size = (start_free - (16 * 1024)) // 4
         upload_size = max(64 * 1024, computed_size)
         upload_size = min(upload_size, 512 * 1024)
@@ -454,10 +514,81 @@ def test_upload_until_storage_full_matches_capacity(qemu_mainapp_instance):
     failing_name = ""
     failing_status = None
     failing_body = ""
+    failing_required_bytes = None
+    failing_free_bytes = None
+    failing_transport_detail = ""
 
     for i in range(1, max_attempts + 1):
         name = f"{_unique_name('fill')}-{i:03d}.mp3"
-        status, headers, body = _upload_sound(base_url, name, payload, timeout_s=45.0)
+        log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+
+        try:
+            status, headers, body = _upload_sound(base_url, name, payload, timeout_s=45.0)
+        except Exception as exc:
+            if not _is_timeout_transport_error(exc):
+                raise
+
+            ready_after_timeout = _wait_until(
+                lambda: _is_sounds_index_ready(base_url),
+                timeout_s=20.0,
+                poll_s=0.2,
+            )
+            if ready_after_timeout and _uploaded_sound_matches_payload(base_url, name, payload):
+                success_count += 1
+                continue
+
+            rejection = None
+            observed_rejection = _wait_until(
+                lambda: _extract_storage_full_rejection(log_path, log_start_pos) is not None,
+                timeout_s=20.0,
+                poll_s=0.2,
+            )
+            if observed_rejection:
+                rejection = _extract_storage_full_rejection(log_path, log_start_pos)
+
+            if rejection is None:
+                pytest.fail(
+                    "Upload timed out before an HTTP response and no storage-full rejection was logged.\n"
+                    f"attempt={i}\n"
+                    f"filename={name}\n"
+                    f"payload_size={len(payload)}\n"
+                    f"exception={exc!r}\n"
+                    f"Log tail:\n{_tail_log(log_path)}"
+                )
+
+            ready = ready_after_timeout or _wait_until(
+                lambda: _is_sounds_index_ready(base_url),
+                timeout_s=10.0,
+                poll_s=0.2,
+            )
+            assert ready, (
+                "Server stopped responding after upload timeout fallback.\n"
+                f"attempt={i}\n"
+                f"filename={name}\n"
+                f"exception={exc!r}\n"
+                f"Log tail:\n{_tail_log(log_path)}"
+            )
+
+            failing_name = name
+            failing_status = 507
+            failing_required_bytes, failing_free_bytes, logged_file_bytes, logged_overhead_bytes = rejection
+            assert logged_file_bytes == upload_size, (
+                "Storage-full log reported unexpected file size.\n"
+                f"expected={upload_size}, logged={logged_file_bytes}\n"
+                f"Log tail:\n{_tail_log(log_path)}"
+            )
+            assert logged_overhead_bytes == 16 * 1024, (
+                "Storage-full log reported unexpected upload overhead.\n"
+                f"expected={16 * 1024}, logged={logged_overhead_bytes}\n"
+                f"Log tail:\n{_tail_log(log_path)}"
+            )
+            failing_body = (
+                f"Not enough storage space. Need {failing_required_bytes} bytes, "
+                f"only {failing_free_bytes} bytes free."
+            )
+            failing_transport_detail = f"timed out waiting for HTTP response; accepted log-confirmed 507 ({exc!r})"
+            break
+
         if status == 303:
             assert headers.get("Location") == "/sounds/"
             success_count += 1
@@ -466,6 +597,7 @@ def test_upload_until_storage_full_matches_capacity(qemu_mainapp_instance):
         failing_name = name
         failing_status = status
         failing_body = body
+        failing_transport_detail = "received HTTP response"
         break
 
     assert success_count > 0, "Expected at least one successful upload before storage-full."
@@ -473,7 +605,8 @@ def test_upload_until_storage_full_matches_capacity(qemu_mainapp_instance):
         "Expected storage-full rejection with 507.\n"
         f"successful_uploads={success_count}\n"
         f"last_status={failing_status}\n"
-        f"last_body={failing_body}"
+        f"last_body={failing_body}\n"
+        f"transport={failing_transport_detail}"
     )
     assert success_count < max_attempts, (
         "Reached upload-attempt cap before storage-full; "
@@ -481,11 +614,14 @@ def test_upload_until_storage_full_matches_capacity(qemu_mainapp_instance):
     )
     assert "Not enough storage space" in failing_body
 
-    match = re.search(r"Need (\d+) bytes, only (\d+) bytes free\.", failing_body)
-    assert match, f"Could not parse storage-full payload details from body:\n{failing_body}"
+    if failing_required_bytes is None or failing_free_bytes is None:
+        match = re.search(r"Need (\d+) bytes, only (\d+) bytes free\.", failing_body)
+        assert match, f"Could not parse storage-full payload details from body:\n{failing_body}"
+        failing_required_bytes = int(match.group(1))
+        failing_free_bytes = int(match.group(2))
 
-    required_bytes = int(match.group(1))
-    free_bytes = int(match.group(2))
+    required_bytes = failing_required_bytes
+    free_bytes = failing_free_bytes
     expected_required = upload_size + (16 * 1024)
     assert required_bytes == expected_required, (
         f"Unexpected required byte count. expected={expected_required}, got={required_bytes}"

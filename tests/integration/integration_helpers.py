@@ -751,9 +751,9 @@ def _idf_qemu_base_cmd() -> list[str]:
         "-B",
         TEST_BUILD_DIR,
         "-D",
-        "SDKCONFIG=sdkconfig.qemu",
+        "SDKCONFIG=sdkconfig.integration.qemu",
         "-D",
-        "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.qemu",
+        "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.qemu;sdkconfig.qemu",
     ]
 
 
