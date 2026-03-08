@@ -268,6 +268,21 @@ def _set_test_gpio_level(base_url: str, name: str, level: int):
     assert payload.get("level") == level, f"Unexpected GPIO echo for {name}: {payload}"
 
 
+def _set_sound_meta(base_url: str, filename: str, payload: dict):
+    status, headers, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/sounds/file-meta/{filename}",
+        timeout_s=4.0,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    assert status == 200, (
+        f"Expected 200 from POST /sounds/file-meta/{filename}, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+
+
 def _get_runtime_status(base_url: str, timeout_s: float = 2.0) -> dict:
     status, headers, body = _http_get(base_url, "/runtime/status", timeout_s=timeout_s)
     assert status == 200, (
@@ -1970,7 +1985,7 @@ def test_sounds_browser_warns_when_lid_closed_volume_is_zero(qemu_mainapp_instan
             state.get("current_path") == "/sounds/"
             and _body_text_matches(state, r"lid\s*closed\s*volume")
             and _body_text_matches(state, r"\b0%")
-            and _body_text_matches(state, r"warn|silent")
+            and _body_text_matches(state, r"muted|lid\s+is\s+closed")
         ),
     )
     details = _browser_state_details(browser_state, log_path)
@@ -1983,7 +1998,107 @@ def test_sounds_browser_warns_when_lid_closed_volume_is_zero(qemu_mainapp_instan
     )
     assert _body_text_matches(browser_state, r"lid\s*closed\s*volume"), details
     assert _body_text_matches(browser_state, r"\b0%"), details
-    assert _body_text_matches(browser_state, r"warn|silent"), details
+    assert _body_text_matches(browser_state, r"muted|lid\s+is\s+closed"), details
+
+
+# Test: Sounds page shows a warning note when no sounds are enabled.
+# 1. Start the main app and ensure only the built-in default sound is present.
+# 2. Disable that sound so no enabled sounds remain.
+# 3. Open `/sounds/` in a real headless browser.
+# 4. Wait until the no-enabled-sounds warning appears in the rendered DOM.
+def test_sounds_browser_warns_when_no_sounds_are_enabled(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    _set_sound_meta(base_url, "default.mp3", {"enabled": False, "probability": 100, "volume": 100})
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/sounds/",
+        wait_condition=lambda state: (
+            state.get("current_path") == "/sounds/"
+            and _body_text_matches(state, r"all\s+sounds?.*disabled|no\s+sound.*played\s+on\s+coin\s+insertion")
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_state,
+        expected_path="/sounds/",
+        expected_title_fragment="sounds",
+        log_path=log_path,
+        message="Sounds page did not render the no-enabled-sounds warning note.",
+    )
+    assert _body_text_matches(
+        browser_state,
+        r"all\s+sounds?.*disabled|no\s+sound.*played\s+on\s+coin\s+insertion",
+    ), details
+
+
+# Test: Sounds page shows a warning note when all sounds have zero weight.
+# 1. Start the main app and ensure only the built-in default sound is present.
+# 2. Set that sound's weight to `0`.
+# 3. Open `/sounds/` in a real headless browser.
+# 4. Wait until the zero-weight warning appears in the rendered DOM.
+def test_sounds_browser_warns_when_all_sounds_have_no_weight(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    _set_sound_meta(base_url, "default.mp3", {"enabled": True, "probability": 0, "volume": 100})
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/sounds/",
+        wait_condition=lambda state: (
+            state.get("current_path") == "/sounds/"
+            and _body_text_matches(state, r"all\s+sounds?.*weight|no\s+sound.*weight|weight.*0")
+            and _body_text_matches(state, r"no\s+sound.*played\s+on\s+coin\s+insertion")
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_state,
+        expected_path="/sounds/",
+        expected_title_fragment="sounds",
+        log_path=log_path,
+        message="Sounds page did not render the zero-weight warning note.",
+    )
+    assert _body_text_matches(
+        browser_state,
+        r"all\s+sounds?.*weight|no\s+sound.*weight|weight.*0",
+    ), details
+    assert _body_text_matches(browser_state, r"no\s+sound.*played\s+on\s+coin\s+insertion"), details
+
+
+# Test: Sounds page shows a warning note when all sounds have volume 0%.
+# 1. Start the main app and ensure only the built-in default sound is present.
+# 2. Set that sound's volume to `0` while keeping it enabled and weighted.
+# 3. Open `/sounds/` in a real headless browser.
+# 4. Wait until the zero-volume warning appears in the rendered DOM.
+def test_sounds_browser_warns_when_all_sounds_have_zero_volume(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    _set_sound_meta(base_url, "default.mp3", {"enabled": True, "probability": 100, "volume": 0})
+
+    browser_state = _capture_browser_state_in_headless_chrome(
+        f"{base_url}/sounds/",
+        wait_condition=lambda state: (
+            state.get("current_path") == "/sounds/"
+            and _body_text_matches(state, r"all\s+sounds?.*volume|no\s+sound.*volume|volume.*0%")
+            and _body_text_matches(state, r"no\s+sound.*played\s+on\s+coin\s+insertion")
+        ),
+    )
+    details = _browser_state_details(browser_state, log_path)
+    _assert_browser_lands_on(
+        browser_state=browser_state,
+        expected_path="/sounds/",
+        expected_title_fragment="sounds",
+        log_path=log_path,
+        message="Sounds page did not render the zero-volume warning note.",
+    )
+    assert _body_text_matches(
+        browser_state,
+        r"all\s+sounds?.*volume|no\s+sound.*volume|volume.*0%",
+    ), details
+    assert _body_text_matches(browser_state, r"no\s+sound.*played\s+on\s+coin\s+insertion"), details
 
 
 # Test: The shared runtime-status boot ID and page-root boot ID should track the active boot instance.

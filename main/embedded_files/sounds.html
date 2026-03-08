@@ -566,6 +566,7 @@
       let playbackBlockedReason = '';
       const playbackLockNote = document.getElementById('playback-lock-note');
       const playbackSilentNote = document.getElementById('playback-silent-note');
+      const playbackSoundStateNote = document.getElementById('playback-sound-state-note');
 
       const uploadOverlay = (() => {
         const overlay = document.createElement('div');
@@ -640,17 +641,53 @@
         playbackSilentNote.textContent = text;
       }
 
+      function setSoundStateNote(message) {
+        const text = String(message || '').trim();
+        if (!playbackSoundStateNote) return;
+        playbackSoundStateNote.hidden = text.length === 0;
+        playbackSoundStateNote.textContent = text;
+      }
+
+      function refreshSoundStateNote() {
+        const rows = Array.from(document.querySelectorAll('.file-item'));
+        if (rows.length === 0) {
+          setSoundStateNote('');
+          return;
+        }
+
+        const sounds = rows.map((row) => ({
+          enabled: row.dataset.enabled === '1',
+          probability: clampPercent(row.dataset.probability, 0),
+          volume: clampPercent(row.dataset.volume, 0),
+        }));
+        const enabledSounds = sounds.filter((sound) => sound.enabled);
+
+        if (enabledSounds.length === 0) {
+          setSoundStateNote('All sounds are disabled. No sound will be played on coin insertion.');
+          return;
+        }
+        if (enabledSounds.every((sound) => sound.probability === 0)) {
+          setSoundStateNote('All sounds have a weight of 0. No sound will be played on coin insertion.');
+          return;
+        }
+        if (enabledSounds.every((sound) => sound.volume === 0)) {
+          setSoundStateNote('All sounds have their volume set to 0%. No sound will be played on coin insertion.');
+          return;
+        }
+        setSoundStateNote('');
+      }
+
       function renderSilentPlaybackNote(audioConfig, gpioState) {
         const lidOpen = !!gpioState?.hall?.lid_open;
         const lidClosedVolumePct = clampPercent(audioConfig?.lid_closed_volume_pct, 100);
         const lidOpenVolumePct = clampPercent(audioConfig?.lid_open_volume_pct, 25);
 
         if (!lidOpen && lidClosedVolumePct === 0) {
-          setSilentPlaybackNote('Warning: The Lid closed volume setting is set to 0%. Sounds will be muted while the lid is closed!');
+          setSilentPlaybackNote('The Lid closed volume setting is set to 0%. Sounds will be muted while the lid is closed!');
           return;
         }
         if (lidOpen && lidOpenVolumePct === 0) {
-          setSilentPlaybackNote('Warning: lid open volume is 0%, so playback stays silent while the lid is open.');
+          setSilentPlaybackNote('Lid open volume is 0%, so playback stays silent while the lid is open.');
           return;
         }
         setSilentPlaybackNote('');
@@ -914,11 +951,15 @@
           const v = clampProbability(val);
           if (prob) prob.value = v;
           if (probNum) probNum.value = v;
+          row.dataset.probability = String(v);
+          refreshSoundStateNote();
         }
         function setVol(val) {
           const v = clampVolume(val);
           if (vol) vol.value = v;
           if (volNum) volNum.value = v;
+          row.dataset.volume = String(v);
+          refreshSoundStateNote();
         }
 
         // init from server-rendered dataset
@@ -1030,6 +1071,8 @@
         });
 
         toggle?.addEventListener('change', () => {
+          row.dataset.enabled = toggle.checked ? '1' : '0';
+          refreshSoundStateNote();
           schedulePersist(rowId, fileUri, currentMeta);
         });
 
@@ -1132,6 +1175,7 @@
         }
       });
 
+      refreshSoundStateNote();
       refreshPlaybackGateState();
       refreshSilentPlaybackNote();
       window.setInterval(refreshPlaybackGateState, 1000);
@@ -1161,6 +1205,7 @@
     <input id="newfile" type="file" hidden accept=".mp3,audio/mpeg">
     <p id="playback-lock-note" class="playback-lock-note" hidden></p>
     <p id="playback-silent-note" class="playback-lock-note warning" hidden></p>
+    <p id="playback-sound-state-note" class="playback-lock-note warning" hidden></p>
 
     <div id="file-list" class="file-list">
       <!-- rows injected by server (mainapp.c) -->
