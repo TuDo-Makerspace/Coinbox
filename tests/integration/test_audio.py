@@ -385,6 +385,39 @@ def test_audio_test_idle_allows_frequency_and_volume_updates(qemu_mainapp_instan
     assert state.get("running") is False
 
 
+# Test: Sweep keeps the requested UI volume percentage stable.
+# 1. Start from main app mode and set test volume to a non-exact hardware step like `52%`.
+# 2. Start sweep and assert the returned `volume_pct` still reports `52`.
+# 3. Poll `GET /audio/test` during the sweep and assert the same percentage is preserved.
+# 4. Stop the sweep for cleanup.
+def test_audio_test_sweep_preserves_requested_volume_pct(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    status, _, body = _audio_test_post(base_url, action="update", volume=52.0)
+    assert status == 200, f"Volume update failed before sweep. body={body}"
+    state = _json_object(body, "POST /audio/test update volume before sweep")
+    assert abs(_volume_pct(state) - 52.0) <= 0.1
+
+    status, _, body = _audio_test_post(base_url, action="sweep")
+    assert status == 200, f"Failed to start sweep. body={body}"
+    state = _json_object(body, "POST /audio/test sweep")
+    assert state.get("sweep_running") is True
+    assert abs(_volume_pct(state) - 52.0) <= 0.1
+
+    sweep_running = _wait_until(
+        lambda: bool(_audio_test_state(base_url).get("sweep_running")),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert sweep_running, "Sweep did not report running=true after start."
+
+    polled_state = _audio_test_state(base_url)
+    assert abs(_volume_pct(polled_state) - 52.0) <= 0.1
+
+    status, _, body = _audio_test_post(base_url, action="stop")
+    assert status == 200, f"Failed to stop sweep cleanup. body={body}"
+
+
 # Test: Audio test (not playing) rejects invalid frequency and volume.
 # 1. Start from main app mode.
 # 2. Send invalid/out-of-range frequency updates and assert `400`.

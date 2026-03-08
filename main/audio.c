@@ -106,6 +106,7 @@ static TaskHandle_t s_sweep_task;
 static volatile bool s_test_stop_requested;
 static volatile bool s_sweep_stop_requested;
 static volatile float s_target_freq_hz = AUDIO_TEST_DEFAULT_HZ;
+static volatile float s_target_volume_pct = AUDIO_TEST_DEFAULT_VOLUME_PCT;
 static volatile uint16_t s_target_amp = AUDIO_TEST_DEFAULT_AMPLITUDE;
 static bool s_test_i2s_configured;
 static audio_pipeline_handle_t s_test_pipeline;
@@ -308,6 +309,17 @@ static float clamp_freq(float hz)
         return AUDIO_TEST_MAX_HZ;
     }
     return hz;
+}
+
+static float clamp_volume_pct(float volume_pct)
+{
+    if (!isfinite(volume_pct) || volume_pct < 0.0f) {
+        return 0.0f;
+    }
+    if (volume_pct > 100.0f) {
+        return 100.0f;
+    }
+    return volume_pct;
 }
 
 static uint16_t clamp_amp(uint16_t amp)
@@ -678,6 +690,11 @@ void audio_test_set_targets(float freq_hz, uint16_t amplitude)
     s_target_amp = clamp_amp(amplitude);
 }
 
+void audio_test_set_volume_pct(float volume_pct)
+{
+    s_target_volume_pct = clamp_volume_pct(volume_pct);
+}
+
 esp_err_t audio_test_start(float freq_hz, uint16_t amplitude)
 {
     audio_lock();
@@ -803,6 +820,11 @@ bool audio_test_sweep_is_running(void)
 float audio_test_current_freq(void)
 {
     return s_target_freq_hz;
+}
+
+float audio_test_current_volume_pct(void)
+{
+    return s_target_volume_pct;
 }
 
 uint16_t audio_test_current_amplitude(void)

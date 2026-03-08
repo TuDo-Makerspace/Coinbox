@@ -71,9 +71,11 @@ esp_err_t audio_test_start_sweep(void);
 bool audio_test_is_running(void);
 bool audio_test_sweep_is_running(void);
 float audio_test_current_freq(void);
+float audio_test_current_volume_pct(void);
 uint16_t audio_test_current_amplitude(void);
 uint16_t audio_test_max_amplitude(void);
 void audio_test_set_targets(float freq_hz, uint16_t amplitude);
+void audio_test_set_volume_pct(float volume_pct);
 
 //-------------------------------------------------------------------------
 // Playback Mode
