@@ -115,6 +115,11 @@ static void deconfigure_test_i2s_locked(void);
 static void destroy_test_pipeline_locked(void);
 static void stop_tone_task_locked(void);
 static void stop_sweep_task_locked(void);
+static esp_err_t restart_test_pipeline_locked(void);
+static bool write_test_stream_locked(volatile bool *stop_requested,
+                                     const int16_t *buffer,
+                                     size_t size_bytes,
+                                     const char *context);
 static void tone_task(void *arg);
 static void sweep_task(void *arg);
 
@@ -343,9 +348,6 @@ static esp_err_t configure_test_i2s_locked(void)
     if (!s_test_raw_stream) {
         return ESP_ERR_NO_MEM;
     }
-    if (audio_element_set_output_timeout(s_test_raw_stream, pdMS_TO_TICKS(20)) != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set raw stream output timeout");
-    }
 
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
     s_test_pipeline = audio_pipeline_init(&pipeline_cfg);
@@ -431,9 +433,45 @@ static void destroy_test_pipeline_locked(void)
     }
 }
 
+static esp_err_t restart_test_pipeline_locked(void)
+{
+    deconfigure_test_i2s_locked();
+    return configure_test_i2s_locked();
+}
+
 //-------------------------------------------------------------------------
 // Tasks
 //-------------------------------------------------------------------------
+
+static bool write_test_stream_locked(volatile bool *stop_requested,
+                                     const int16_t *buffer,
+                                     size_t size_bytes,
+                                     const char *context)
+{
+    const char *cursor = (const char *)buffer;
+    size_t remaining = size_bytes;
+
+    while (remaining > 0 && !(*stop_requested)) {
+        int bytes_written = raw_stream_write(s_test_raw_stream, (char *)cursor, (int)remaining);
+        if (bytes_written > 0) {
+            cursor += bytes_written;
+            remaining -= (size_t)bytes_written;
+            continue;
+        }
+
+        if (bytes_written == AEL_IO_TIMEOUT) {
+            continue;
+        }
+        if (bytes_written == AEL_IO_ABORT) {
+            return false;
+        }
+
+        ESP_LOGE(TAG, "raw_stream_write failed during %s: %d", context, bytes_written);
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+
+    return remaining == 0;
+}
 
 static void tone_task(void *arg)
 {
@@ -457,10 +495,13 @@ static void tone_task(void *arg)
         float freq = s_target_freq_hz;
         fill_tone_block(block, &phase, freq);
 
-        int bytes_written = raw_stream_write(s_test_raw_stream, (char *)block, sizeof(block));
-        if (bytes_written <= 0) {
-            ESP_LOGE(TAG, "raw_stream_write failed: %d", bytes_written);
-            vTaskDelay(pdMS_TO_TICKS(50));
+        if (!write_test_stream_locked(&s_test_stop_requested,
+                                      block,
+                                      sizeof(block),
+                                      "tone")) {
+            if (!s_test_stop_requested) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
         }
     }
 
@@ -547,10 +588,13 @@ static void sweep_task(void *arg)
         s_target_freq_hz = freq;
         fill_tone_block(block, &phase, freq);
 
-        int bytes_written = raw_stream_write(s_test_raw_stream, (char *)block, sizeof(block));
-        if (bytes_written <= 0) {
-            ESP_LOGE(TAG, "raw_stream_write failed during sweep: %d", bytes_written);
-            vTaskDelay(pdMS_TO_TICKS(20));
+        if (!write_test_stream_locked(&s_sweep_stop_requested,
+                                      block,
+                                      sizeof(block),
+                                      "sweep")) {
+            if (!s_sweep_stop_requested) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
         }
     }
 
@@ -649,6 +693,14 @@ esp_err_t audio_test_start(float freq_hz, uint16_t amplitude)
         return ESP_OK;
     }
 
+#if !CONFIG_TEST_AUDIO_MOCK_BACKEND
+    err = restart_test_pipeline_locked();
+    if (err != ESP_OK) {
+        audio_unlock();
+        return err;
+    }
+#endif
+
     s_test_stop_requested = false;
     s_sweep_stop_requested = false;
     if (xTaskCreate(tone_task,
@@ -692,6 +744,14 @@ esp_err_t audio_test_start_sweep(void)
     }
 
     stop_tone_task_locked();
+
+#if !CONFIG_TEST_AUDIO_MOCK_BACKEND
+    err = restart_test_pipeline_locked();
+    if (err != ESP_OK) {
+        audio_unlock();
+        return err;
+    }
+#endif
 
     s_sweep_stop_requested = false;
     s_test_stop_requested = false;
