@@ -623,7 +623,10 @@
           tryNavigateToMainApp('/login?next=%2Fsounds%2F');
           return;
         }
-        tryNavigateToMainApp(response.responseURL);
+        // A bootstrap-server 404 for /sounds/ is not a valid handoff target yet.
+        if (response.status >= 200 && response.status < 300) {
+          tryNavigateToMainApp(response.responseURL);
+        }
       } catch (_) {
       } finally {
         handoffPollInFlight = false;

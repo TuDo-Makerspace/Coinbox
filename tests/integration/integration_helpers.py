@@ -766,7 +766,9 @@ def _ensure_qemu_firmware_built():
         if _QEMU_BUILD_DONE:
             return
 
-        build_cmd = _idf_qemu_base_cmd() + ["build"]
+        # Force CMake reconfiguration so per-service build dirs pick up newly added
+        # components and sdkconfig changes between compose runs.
+        build_cmd = _idf_qemu_base_cmd() + ["reconfigure", "build"]
         try:
             result = subprocess.run(
                 build_cmd,

@@ -32,6 +32,9 @@ except ModuleNotFoundError:
 
 
 DEFAULT_SOUND_FILENAME = "default.mp3"
+TEST_GPIO_WRITE_TIMEOUT_S = 6.0
+TEST_GPIO_WRITE_RETRIES = 3
+TEST_GPIO_RETRY_BACKOFF_S = 0.05
 
 
 @pytest.fixture
@@ -56,19 +59,42 @@ def _unique_name(prefix: str) -> str:
 
 
 def _set_test_gpio_level(base_url: str, name: str, level: int):
-    status, _, body = _http_request(
-        base_url=base_url,
-        method="POST",
-        path=f"/test/gpio/{name}?level={level}",
-        timeout_s=3.0,
-        data=b"",
+    last_error: Exception | None = None
+    last_status: int | None = None
+    last_body = ""
+
+    for attempt in range(TEST_GPIO_WRITE_RETRIES):
+        try:
+            status, _, body = _http_request(
+                base_url=base_url,
+                method="POST",
+                path=f"/test/gpio/{name}?level={level}",
+                timeout_s=TEST_GPIO_WRITE_TIMEOUT_S,
+                data=b"",
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < TEST_GPIO_WRITE_RETRIES:
+                time.sleep(TEST_GPIO_RETRY_BACKOFF_S)
+                continue
+            raise
+
+        last_status = status
+        last_body = body
+        if status == 200:
+            payload = _json_object(body, f"POST /test/gpio/{name}")
+            assert payload.get("level") == level
+            return
+
+        if attempt + 1 < TEST_GPIO_WRITE_RETRIES:
+            time.sleep(TEST_GPIO_RETRY_BACKOFF_S)
+
+    if last_error is not None:
+        raise last_error
+    assert last_status == 200, (
+        f"Failed to set /test/gpio/{name}?level={level} after {TEST_GPIO_WRITE_RETRIES} attempts. "
+        f"status={last_status}, body={last_body}"
     )
-    assert status == 200, (
-        f"Failed to set /test/gpio/{name}?level={level}. "
-        f"status={status}, body={body}"
-    )
-    payload = _json_object(body, f"POST /test/gpio/{name}")
-    assert payload.get("level") == level
 
 
 def _get_test_gpio_level(base_url: str, name: str) -> int:

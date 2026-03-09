@@ -71,6 +71,7 @@ def qemu_mainapp_instance(qemu_bootstrap_instance):
 DEFAULT_SOUND_FILENAME = "default.mp3"
 HEADLESS_PAGE_CAPTURE_TIMEOUT_S = 15.0
 HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S = 20.0
+HANDOFF_DELAY_TOLERANCE_S = 0.5
 
 
 def _capture_browser_state_in_headless_chrome(
@@ -145,7 +146,7 @@ def _capture_browser_state_in_headless_chrome(
                         next_id += 1
                         if state:
                             last_state = state
-                            if wait_paths and state.get("current_path") in wait_paths:
+                            if wait_paths and _state_matches_interactive_wait_path(state, wait_paths):
                                 break
                             if wait_condition is not None and wait_condition(state):
                                 break
@@ -601,7 +602,7 @@ def _capture_recovery_exit_transition_states(base_url: str) -> list[dict]:
                     state = _cdp_capture_page_state(sock, next_id)
                     next_id += 1
                     captured_states.append(state)
-                    if state.get("current_path") == "/sounds/":
+                    if _state_matches_interactive_wait_path(state, ("/sounds/",)):
                         break
                     time.sleep(0.05)
 
@@ -708,7 +709,7 @@ def _capture_start_now_transition_states(base_url: str) -> list[dict]:
                     state = _cdp_capture_page_state(sock, next_id)
                     next_id += 1
                     captured_states.append(state)
-                    if state.get("current_path") in ("/sounds/", "/login"):
+                    if _state_matches_interactive_wait_path(state, ("/sounds/", "/login")):
                         break
                     time.sleep(0.05)
 
@@ -1038,11 +1039,26 @@ def _transition_states_details(states: list[dict], log_path) -> str:
     return "Captured states:\n" + "\n".join(lines) + f"\nLog tail:\n{_tail_log(log_path)}"
 
 
+def _state_matches_interactive_wait_path(state: dict, wait_paths: tuple[str, ...]) -> bool:
+    if state.get("current_path") not in wait_paths:
+        return False
+
+    # Ignore transient captures taken mid-navigation before the destination page
+    # has populated its DOM and declared itself ready.
+    if not (state.get("title") or state.get("body_text") or state.get("page_source")):
+        return False
+
+    page_ready = str(state.get("page_ready", "") or "")
+    if page_ready and page_ready != "1":
+        return False
+
+    return True
+
+
 def _timed_transition_states_details(states: list[dict], log_path) -> str:
-    lines = []
-    for index, state in enumerate(states[:30], start=1):
+    def _format_state(index: int, state: dict) -> str:
         body = state.get("body_text", "").replace("\n", " | ")
-        lines.append(
+        return (
             f"{index}. t={float(state.get('elapsed_s', 0.0)):.2f}s"
             f" path={state.get('current_path')}"
             f" overlay={state.get('connection_lost_visible')}"
@@ -1054,7 +1070,43 @@ def _timed_transition_states_details(states: list[dict], log_path) -> str:
             f" ready={state.get('site_ready')}"
             f" body={body[:220]}"
         )
+
+    lines = []
+    if len(states) <= 24:
+        for index, state in enumerate(states, start=1):
+            lines.append(_format_state(index, state))
+    else:
+        for index, state in enumerate(states[:12], start=1):
+            lines.append(_format_state(index, state))
+        lines.append("...")
+        tail_offset = len(states) - 12
+        for index, state in enumerate(states[-12:], start=tail_offset + 1):
+            lines.append(_format_state(index, state))
     return "Captured states:\n" + "\n".join(lines) + f"\nLog tail:\n{_tail_log(log_path)}"
+
+
+def _extract_main_handoff_connection_monitor_delay_ms(html: str) -> int | None:
+    match = re.search(r"const\s+MAIN_HANDOFF_CONNECTION_MONITOR_DELAY_MS\s*=\s*(\d+)\s*;", html)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _state_shows_handoff_card(state: dict) -> bool:
+    body = state.get("body_text", "")
+    return (
+        state.get("current_path") == "/"
+        and "Starting main application" in body
+        and "Getting things ready..." in body
+    )
+
+
+def _state_shows_native_connection_error(state: dict) -> bool:
+    body = state.get("body_text", "")
+    return (
+        "ERR_CONNECTION_REFUSED" in body
+        or ("This site can" in body and "refused to connect" in body)
+    )
 
 
 def _find_browser_binary() -> str | None:
@@ -1519,7 +1571,7 @@ def _capture_page_load_diagnostics_in_headless_chrome(
                         next_id += 1
                         if state:
                             last_state = state
-                            if wait_paths and state.get("current_path") in wait_paths:
+                            if wait_paths and _state_matches_interactive_wait_path(state, wait_paths):
                                 break
                             if wait_condition is not None and wait_condition(state):
                                 break
@@ -2037,7 +2089,7 @@ def test_expire_browser_reaches_login_when_auth_already_enabled(qemu_bootstrap_i
     browser_state = _capture_browser_state_in_headless_chrome(
         f"{base_url}/",
         wait_paths=("/login",),
-        wait_s=10.0,
+        wait_s=15.0,
     )
     _assert_browser_lands_on(
         browser_state=browser_state,
@@ -2599,6 +2651,99 @@ def test_handoff_browser_shows_connection_lost_popup_after_disconnect(
     )
     assert "Getting things ready..." in overlay_state.get("body_text", ""), (
         f"The underlying handoff body was not still visible when the overlay appeared during the {action_label}.\n"
+        f"{details}"
+    )
+
+
+# Test: If the device disappears during handoff, the browser should keep showing the
+# "Starting main application / Getting things ready..." card until the configured
+# handoff disconnect-watch delay expires, instead of falling through to Chrome's
+# native connection error page.
+@pytest.mark.parametrize(
+    ("recovery_mode", "action_label"),
+    [
+        (False, "bootstrap start-now handoff"),
+        (True, "recovery exit handoff"),
+    ],
+)
+def test_handoff_browser_keeps_handoff_card_visible_until_disconnect_watch_delay_expires(
+    qemu_bootstrap_instance,
+    recovery_mode: bool,
+    action_label: str,
+):
+    base_url = qemu_bootstrap_instance["base_url"]
+    log_path = qemu_bootstrap_instance["log_path"]
+    proc = qemu_bootstrap_instance["process"]
+
+    status, headers, body = _http_get(base_url, "/")
+    assert _is_bootstrap_root_page(status, headers, body)
+    if recovery_mode:
+        _enter_recovery_mode(base_url, log_path)
+        status, headers, body = _http_get(base_url, "/")
+        assert _is_bootstrap_root_page(status, headers, body)
+
+    handoff_delay_ms = _extract_main_handoff_connection_monitor_delay_ms(body)
+    assert handoff_delay_ms is not None, (
+        "Bootstrap page did not expose MAIN_HANDOFF_CONNECTION_MONITOR_DELAY_MS.\n"
+        f"Body:\n{body[:1200]}"
+    )
+    handoff_delay_s = handoff_delay_ms / 1000.0
+
+    states = _capture_handoff_disconnect_states(base_url, proc, recovery_mode)
+    details = _timed_transition_states_details(states, log_path)
+    assert states, f"No browser states were captured while exercising the {action_label}.\n{details}"
+
+    handoff_state = next((state for state in states if _state_shows_handoff_card(state)), None)
+    assert handoff_state is not None, (
+        f"Did not observe the intended handoff card before disconnecting during the {action_label}.\n"
+        f"{details}"
+    )
+    overlay_state = next((state for state in states if state.get("connection_lost_visible") is True), None)
+    assert overlay_state is not None, (
+        f"The browser never showed the connection-lost overlay during the {action_label}.\n"
+        f"{details}"
+    )
+
+    handoff_index = states.index(handoff_state)
+    overlay_index = states.index(overlay_state)
+    assert overlay_index >= handoff_index, (
+        f"The connection-lost overlay appeared before the handoff card was observed during the {action_label}.\n"
+        f"{details}"
+    )
+
+    pre_overlay_states = states[handoff_index:overlay_index]
+    assert pre_overlay_states, (
+        f"The browser showed the connection-lost overlay immediately after entering handoff during the {action_label}.\n"
+        f"{details}"
+    )
+    assert not any(_state_shows_native_connection_error(state) for state in states[handoff_index : overlay_index + 1]), (
+        f"The browser fell through to Chrome's native connection error page during the {action_label}.\n"
+        f"{details}"
+    )
+
+    must_hold_until_s = float(handoff_state.get("elapsed_s", 0.0)) + max(0.0, handoff_delay_s - HANDOFF_DELAY_TOLERANCE_S)
+    sustained_handoff_states = [
+        state
+        for state in pre_overlay_states
+        if float(state.get("elapsed_s", 0.0)) <= must_hold_until_s
+    ]
+    assert sustained_handoff_states, (
+        f"Did not capture any handoff-card states covering the configured disconnect-watch delay during the {action_label}.\n"
+        f"expected_delay_s={handoff_delay_s:.2f}\n{details}"
+    )
+    assert all(_state_shows_handoff_card(state) for state in sustained_handoff_states), (
+        f"The handoff card did not stay visible throughout the configured disconnect-watch delay during the {action_label}.\n"
+        f"expected_delay_s={handoff_delay_s:.2f}\n{details}"
+    )
+    assert all(state.get("connection_lost_visible") is not True for state in sustained_handoff_states), (
+        f"The connection-lost overlay appeared before the configured disconnect-watch delay expired during the {action_label}.\n"
+        f"expected_delay_s={handoff_delay_s:.2f}\n{details}"
+    )
+
+    overlay_delay_s = float(overlay_state.get("elapsed_s", 0.0)) - float(handoff_state.get("elapsed_s", 0.0))
+    assert overlay_delay_s >= max(0.0, handoff_delay_s - HANDOFF_DELAY_TOLERANCE_S), (
+        f"The connection-lost overlay appeared before the configured disconnect-watch delay expired during the {action_label}.\n"
+        f"expected_delay_s={handoff_delay_s:.2f} actual_delay_s={overlay_delay_s:.2f}\n"
         f"{details}"
     )
 
