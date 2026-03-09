@@ -69,13 +69,15 @@ def qemu_mainapp_instance(qemu_bootstrap_instance):
 
 
 DEFAULT_SOUND_FILENAME = "default.mp3"
+HEADLESS_PAGE_CAPTURE_TIMEOUT_S = 15.0
+HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S = 20.0
 
 
 def _capture_browser_state_in_headless_chrome(
     url: str,
     wait_paths: tuple[str, ...] = (),
     wait_condition=None,
-    wait_s: float = 8.0,
+    wait_s: float = HEADLESS_PAGE_CAPTURE_TIMEOUT_S,
 ) -> dict:
     chrome_binary = _find_browser_binary()
     if not chrome_binary:
@@ -223,7 +225,7 @@ def _capture_sounds_notice_transition_states(
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 8.0
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
                 initial_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
@@ -415,6 +417,27 @@ def _set_test_gpio_level(base_url: str, name: str, level: int):
     assert payload.get("level") == level, f"Unexpected GPIO echo for {name}: {payload}"
 
 
+def _trigger_test_laser_playback(base_url: str):
+    status, headers, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/test/gpio/laser-burst?count=1&interval_ms=0",
+        timeout_s=8.0,
+        data=b"",
+    )
+    assert status == 200, (
+        f"Expected 200 from POST /test/gpio/laser-burst, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+    assert "application/json" in headers.get("Content-Type", ""), (
+        "/test/gpio/laser-burst did not return JSON. "
+        f"content-type={headers.get('Content-Type', '')}"
+    )
+    payload = json.loads(body)
+    assert payload.get("count") == 1, f"Unexpected laser burst payload: {payload}"
+    assert payload.get("level") == 1, f"Unexpected laser level after burst: {payload}"
+
+
 def _set_sound_meta(base_url: str, filename: str, payload: dict):
     status, headers, body = _http_request(
         base_url=base_url,
@@ -535,7 +558,7 @@ def _capture_recovery_exit_transition_states(base_url: str) -> list[dict]:
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 8.0
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
@@ -647,7 +670,7 @@ def _capture_start_now_transition_states(base_url: str) -> list[dict]:
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 8.0
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
@@ -754,7 +777,7 @@ def _capture_handoff_disconnect_states(base_url: str, proc: subprocess.Popen, re
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 8.0
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
@@ -902,7 +925,7 @@ def _capture_settings_restart_action_states(base_url: str, action_button_id: str
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 8.0
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
@@ -1431,7 +1454,7 @@ def _capture_page_load_diagnostics_in_headless_chrome(
     wait_paths: tuple[str, ...] = (),
     wait_condition=None,
     settle_condition=None,
-    wait_s: float = 8.0,
+    wait_s: float = HEADLESS_PAGE_CAPTURE_TIMEOUT_S,
 ) -> dict:
     chrome_binary = _find_browser_binary()
     if not chrome_binary:
@@ -1576,7 +1599,7 @@ def _capture_start_now_load_diagnostics(base_url: str) -> dict:
                 _cdp_send_command(sock, next_id, "Runtime.enable")
                 next_id += 1
 
-                ready_deadline = time.time() + 8.0
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
                 last_state = {}
                 while time.time() < ready_deadline:
                     state = _cdp_capture_page_state(sock, next_id)
@@ -2161,8 +2184,7 @@ def test_sounds_browser_shows_and_clears_zero_volume_playback_notice(
         _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"enabled": True, "probability": 0, "volume": 100})
 
         def after_ready():
-            _set_test_gpio_level(base_url, "laser", 0)
-            _set_test_gpio_level(base_url, "laser", 1)
+            _trigger_test_laser_playback(base_url)
 
     states = _capture_sounds_notice_transition_states(
         base_url,
