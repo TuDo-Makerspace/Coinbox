@@ -47,6 +47,15 @@ PANIC_LOG_MARKERS = [
     "Backtrace:",
 ]
 DEFAULT_SOUND_FILENAME = "default.mp3"
+AUDIO_CONFIG_TEST_ONLY_KEY = "test_only"
+AUDIO_CONFIG_TEST_ONLY_FIELDS = (
+    "laser_debounce_ms",
+    "hall_debounce_ms",
+    "laser_trigger_cooldown_ms",
+)
+LASER_DEBOUNCE_DEFAULT_MS = 30
+LASER_DEBOUNCE_MIN_MS = 0
+LASER_DEBOUNCE_MAX_MS = 1000
 
 
 @pytest.fixture
@@ -144,6 +153,12 @@ def _audio_playback_state(base_url: str) -> dict:
     return _json_object(body, "GET /audio/playback")
 
 
+def _gpio_state(base_url: str) -> dict:
+    status, _, body = _http_get(base_url, "/gpio/state")
+    assert status == 200, f"GET /gpio/state failed. status={status}, body={body}"
+    return _json_object(body, "GET /gpio/state")
+
+
 def _set_sound_meta(base_url: str, filename: str, payload: dict):
     return _http_request(
         base_url=base_url,
@@ -176,6 +191,22 @@ def _set_audio_config(base_url: str, payload: dict) -> dict:
     )
     assert status == 200, f"POST /audio/config failed. status={status}, body={body}"
     return _json_object(body, "POST /audio/config")
+
+
+def _set_audio_test_only_config(base_url: str, **updates) -> dict:
+    current = _get_audio_config(base_url)
+    current_test_only = current.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(current_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, "
+        f"got {current_test_only!r}"
+    )
+    next_test_only = dict(current_test_only)
+    next_test_only.update(updates)
+    return _set_audio_config(base_url, {AUDIO_CONFIG_TEST_ONLY_KEY: next_test_only})
+
+
+def _set_laser_debounce_ms(base_url: str, debounce_ms: int) -> dict:
+    return _set_audio_test_only_config(base_url, laser_debounce_ms=debounce_ms)
 
 
 def _set_boot_config(base_url: str, payload: dict) -> dict:
@@ -214,6 +245,26 @@ def _trigger_laser_playback(base_url: str):
     _set_test_gpio_level(base_url, "laser", 1)
 
 
+def _trigger_laser_playback_burst(base_url: str, count: int, interval_s: float):
+    assert count > 0, "Laser playback burst must trigger at least once."
+    interval_ms = max(0, int(round(interval_s * 1000.0)))
+    status, _, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/test/gpio/laser-burst?count={count}&interval_ms={interval_ms}",
+        timeout_s=max(12.0, (count * interval_s) + 6.0),
+        data=b"",
+    )
+    assert status == 200, (
+        f"Failed to trigger /test/gpio/laser-burst?count={count}&interval_ms={interval_ms}. "
+        f"status={status}, body={body}"
+    )
+    payload = _json_object(body, "POST /test/gpio/laser-burst")
+    assert payload.get("count") == count
+    assert payload.get("interval_ms") == interval_ms
+    assert payload.get("level") == 1
+
+
 def _log_text_since(log_path, start_pos: int = 0) -> str:
     if not log_path.exists():
         return ""
@@ -228,6 +279,10 @@ def _log_since_contains_all(log_path, start_pos: int, markers: list[str]) -> boo
     return all(marker in text for marker in markers)
 
 
+def _log_count_since(log_path, start_pos: int, marker: str) -> int:
+    return _log_text_since(log_path, start_pos).count(marker)
+
+
 def _playback_stays_inactive_for(base_url: str, duration_s: float, poll_s: float = 0.05) -> bool:
     deadline = time.monotonic() + duration_s
     while time.monotonic() < deadline:
@@ -240,6 +295,39 @@ def _playback_stays_inactive_for(base_url: str, duration_s: float, poll_s: float
 def _assert_no_panic_since(log_path, start_pos: int):
     has_panic = _log_contains_any_since(log_path, start_pos, PANIC_LOG_MARKERS)
     assert not has_panic, f"Detected panic markers after playback restart spam.\nLog tail:\n{_tail_log(log_path)}"
+
+
+def _wait_for_playback_idle(base_url: str, timeout_s: float = 3.0) -> bool:
+    return _wait_until(
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
+        timeout_s=timeout_s,
+        poll_s=0.1,
+    )
+
+
+def _stop_playback_if_active(base_url: str):
+    if not bool(_audio_playback_state(base_url).get("active")):
+        return
+    status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
+    assert status == 200, f"Failed to stop playback cleanup. body={body}"
+    stopped = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert stopped, "Playback did not clear after cleanup stop."
+
+
+def _configure_single_laser_candidate(base_url: str, filename: str):
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    status, _, body = _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"probability": 0, "enabled": True})
+    assert status == 200, f"Failed to remove default sound from laser selection. body={body}"
+    assert body == "OK"
+
+    status, _, body = _set_sound_meta(
+        base_url,
+        filename,
+        {"enabled": True, "probability": 100, "volume": 100},
+    )
+    assert status == 200, f"Failed to configure deterministic laser candidate. body={body}"
+    assert body == "OK"
 
 
 # Test: Device boots into main app with DAC + AMP muted.
@@ -357,6 +445,336 @@ def test_audio_config_updates_lid_volumes_and_logs_change(qemu_mainapp_instance)
         "Expected /audio/config update to be reflected in logs.\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
+
+
+# Test: `/audio/config` exposes writable test-only debounce settings.
+# 1. Start from main app mode and capture baseline audio config.
+# 2. Assert the test-only debounce object is present with integer timing fields.
+# 3. POST new test-only debounce values.
+# 4. Verify the response and a fresh GET both reflect the new debounce values.
+# 5. Verify regular lid-volume settings remain unchanged when omitted from the update.
+def test_audio_config_updates_test_only_debounce_settings(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    baseline = _get_audio_config(base_url)
+    baseline_test_only = baseline.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(baseline_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, "
+        f"got {baseline_test_only!r}"
+    )
+    for key in AUDIO_CONFIG_TEST_ONLY_FIELDS:
+        value = baseline_test_only.get(key)
+        assert isinstance(value, int), (
+            f"Expected integer {AUDIO_CONFIG_TEST_ONLY_KEY}.{key} in /audio/config, got {value!r}"
+        )
+        assert value >= 0, (
+            f"Expected non-negative {AUDIO_CONFIG_TEST_ONLY_KEY}.{key} in /audio/config, got {value}"
+        )
+
+    new_test_only = {
+        "laser_debounce_ms": 25,
+        "hall_debounce_ms": 750,
+        "laser_trigger_cooldown_ms": 125,
+    }
+    updated = _set_audio_config(base_url, {AUDIO_CONFIG_TEST_ONLY_KEY: new_test_only})
+    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(updated_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after POST /audio/config, "
+        f"got {updated_test_only!r}"
+    )
+    for key, expected in new_test_only.items():
+        assert updated_test_only.get(key) == expected, (
+            f"Expected {AUDIO_CONFIG_TEST_ONLY_KEY}.{key}={expected} after POST /audio/config, "
+            f"got {updated_test_only.get(key)!r}"
+        )
+
+    assert updated.get("lid_closed_volume_pct") == baseline.get("lid_closed_volume_pct")
+    assert updated.get("lid_open_volume_pct") == baseline.get("lid_open_volume_pct")
+
+    readback = _get_audio_config(base_url)
+    readback_test_only = readback.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(readback_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} on GET /audio/config readback, "
+        f"got {readback_test_only!r}"
+    )
+    for key, expected in new_test_only.items():
+        assert readback_test_only.get(key) == expected, (
+            f"Expected readback {AUDIO_CONFIG_TEST_ONLY_KEY}.{key}={expected}, "
+            f"got {readback_test_only.get(key)!r}"
+        )
+
+
+# Test: `/audio/config` reports `30ms` as the default laser debounce.
+# 1. Start from main app mode and read `/audio/config`.
+# 2. Assert the test-only object is present.
+# 3. Assert `test_only.laser_debounce_ms` equals the default `30`.
+def test_audio_config_reports_default_laser_debounce_ms(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    config = _get_audio_config(base_url)
+    test_only = config.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, got {test_only!r}"
+    )
+    assert test_only.get("laser_debounce_ms") == LASER_DEBOUNCE_DEFAULT_MS, (
+        "Expected default laser debounce to be 30ms.\n"
+        f"Config: {config}"
+    )
+
+
+# Test: `/audio/config` rejects out-of-range laser debounce values.
+# 1. Start from main app mode and capture the baseline laser debounce.
+# 2. Attempt to write laser debounce values below `0` and above `1000`.
+# 3. Assert each request is rejected with `400`.
+# 4. Assert the stored laser debounce remains unchanged afterwards.
+def test_audio_config_rejects_out_of_range_laser_debounce_values(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    baseline = _get_audio_config(base_url)
+    baseline_test_only = baseline.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(baseline_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, got {baseline_test_only!r}"
+    )
+    baseline_laser_debounce = baseline_test_only.get("laser_debounce_ms")
+    assert isinstance(baseline_laser_debounce, int), (
+        f"Expected integer {AUDIO_CONFIG_TEST_ONLY_KEY}.laser_debounce_ms, got {baseline_laser_debounce!r}"
+    )
+
+    for bad_value in (LASER_DEBOUNCE_MIN_MS - 1, LASER_DEBOUNCE_MAX_MS + 1):
+        payload = {
+            AUDIO_CONFIG_TEST_ONLY_KEY: {
+                **baseline_test_only,
+                "laser_debounce_ms": bad_value,
+            }
+        }
+        status, _, body = _http_post_json(
+            base_url=base_url,
+            path="/audio/config",
+            payload=payload,
+            timeout_s=4.0,
+        )
+        assert status == 400, (
+            f"Expected 400 for out-of-range laser debounce value {bad_value}. "
+            f"body={body}"
+        )
+
+        readback = _get_audio_config(base_url)
+        readback_test_only = readback.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+        assert isinstance(readback_test_only, dict), (
+            f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} on readback, got {readback_test_only!r}"
+        )
+        assert readback_test_only.get("laser_debounce_ms") == baseline_laser_debounce, (
+            f"Out-of-range laser debounce value {bad_value} should not change stored config.\n"
+            f"Readback: {readback}"
+        )
+
+
+# Test: Laser GPIO history remains raw even when playback debouncing is enabled.
+# 1. Start from main app mode and set laser debounce to a non-zero value.
+# 2. Clear the current `/gpio/state` laser history.
+# 3. Toggle the injected laser GPIO rapidly several times within the debounce period.
+# 4. Assert `/gpio/state` still reports every raw edge in order.
+def test_laser_gpio_history_is_exempt_from_playback_debounce(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    updated = _set_laser_debounce_ms(base_url, 200)
+    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(updated_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after debounce update, got {updated_test_only!r}"
+    )
+    assert updated_test_only.get("laser_debounce_ms") == 200
+
+    status, _, body = _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"probability": 0, "enabled": True})
+    assert status == 200, f"Failed to disable default sound for raw-history test. body={body}"
+    assert body == "OK"
+
+    _set_test_gpio_level(base_url, "laser", 0)
+    _gpio_state(base_url)
+
+    expected_levels = [1, 0, 1, 0, 1]
+    for level in expected_levels:
+        _set_test_gpio_level(base_url, "laser", level)
+        time.sleep(0.01)
+
+    state = _gpio_state(base_url)
+    laser = state.get("laser")
+    assert isinstance(laser, dict), f"Expected laser object in /gpio/state, got {laser!r}"
+    events = laser.get("events")
+    assert isinstance(events, list), f"Expected laser.events list in /gpio/state, got {events!r}"
+    assert len(events) == len(expected_levels), (
+        "Expected laser history to contain every raw GPIO event despite debounce.\n"
+        f"State: {state}"
+    )
+
+    observed_levels = [int(evt.get("level", -1)) for evt in events]
+    assert observed_levels == expected_levels, (
+        "Laser history should reflect the raw edge sequence even while playback debouncing is enabled.\n"
+        f"Observed: {observed_levels}\n"
+        f"Expected: {expected_levels}"
+    )
+
+
+# Test: Laser playback is guarded by the configured debounce value.
+# 1. Start from main app mode, wait for startup playback to clear, and set a large laser debounce.
+# 2. Make one uploaded MP3 the only laser playback candidate.
+# 3. Trigger the laser repeatedly within the debounce period.
+# 4. Assert only one real playback start is logged.
+def test_laser_playback_is_guarded_by_laser_debounce(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, f"Startup playback did not clear before debounce guard test.\nLog tail:\n{_tail_log(log_path)}"
+
+    updated = _set_laser_debounce_ms(base_url, 200)
+    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(updated_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after debounce update, got {updated_test_only!r}"
+    )
+    assert updated_test_only.get("laser_debounce_ms") == 200
+
+    filename = f"{_unique_name('laser-debounce-guard-6165ms')}.mp3"
+    _configure_single_laser_candidate(base_url, filename)
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_laser_playback_burst(base_url, count=3, interval_s=0.05)
+
+    first_start_seen = _wait_until(
+        lambda: _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}") >= 1,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert first_start_seen, (
+        "Expected at least one playback start after the laser burst.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    time.sleep(0.5)
+    start_count = _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}")
+    assert start_count == 1, (
+        "Expected laser debounce to suppress repeated playback starts within the debounce window.\n"
+        f"Observed start count: {start_count}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    _stop_playback_if_active(base_url)
+
+
+# Test: A laser debounce value of `0` disables playback guarding.
+# 1. Start from main app mode, wait for startup playback to clear, and set laser debounce to `0`.
+# 2. Make one uploaded MP3 the only laser playback candidate.
+# 3. Trigger the laser repeatedly with short gaps.
+# 4. Assert more than one playback start is logged.
+def test_zero_laser_debounce_disables_playback_guarding(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before zero-debounce playback test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    updated = _set_laser_debounce_ms(base_url, 0)
+    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(updated_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after debounce update, got {updated_test_only!r}"
+    )
+    assert updated_test_only.get("laser_debounce_ms") == 0
+
+    filename = f"{_unique_name('laser-debounce-zero-6165ms')}.mp3"
+    _configure_single_laser_candidate(base_url, filename)
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_laser_playback_burst(base_url, count=3, interval_s=0.08)
+
+    multiple_starts_seen = _wait_until(
+        lambda: _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}") >= 2,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert multiple_starts_seen, (
+        "Expected zero laser debounce to allow repeated playback starts from rapid laser toggles.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    _stop_playback_if_active(base_url)
+
+
+# Test: Changing the laser debounce value changes playback restart behavior.
+# 1. Start from main app mode and make one uploaded MP3 the only laser playback candidate.
+# 2. With a high debounce, trigger the same laser burst and record the playback-start count.
+# 3. Stop playback, lower the debounce, and trigger the identical burst again.
+# 4. Assert the lower debounce produces more playback starts than the higher debounce.
+def test_changing_laser_debounce_changes_playback_behavior(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before debounce-change behavior test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('laser-debounce-change-6165ms')}.mp3"
+    _configure_single_laser_candidate(base_url, filename)
+
+    updated = _set_laser_debounce_ms(base_url, 200)
+    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(updated_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after high-debounce update, got {updated_test_only!r}"
+    )
+    assert updated_test_only.get("laser_debounce_ms") == 200
+
+    high_log_start = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_laser_playback_burst(base_url, count=3, interval_s=0.08)
+
+    high_start_seen = _wait_until(
+        lambda: _log_count_since(log_path, high_log_start, f"Starting playback: {filename}") >= 1,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert high_start_seen, (
+        "Expected at least one playback start during the high-debounce burst.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    time.sleep(0.5)
+    high_count = _log_count_since(log_path, high_log_start, f"Starting playback: {filename}")
+    _stop_playback_if_active(base_url)
+
+    updated = _set_laser_debounce_ms(base_url, 50)
+    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
+    assert isinstance(updated_test_only, dict), (
+        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after low-debounce update, got {updated_test_only!r}"
+    )
+    assert updated_test_only.get("laser_debounce_ms") == 50
+
+    low_log_start = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_laser_playback_burst(base_url, count=3, interval_s=0.08)
+
+    low_starts_seen = _wait_until(
+        lambda: _log_count_since(log_path, low_log_start, f"Starting playback: {filename}") >= 2,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert low_starts_seen, (
+        "Expected the lower laser debounce to allow more playback restarts for the same laser burst.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    low_count = _log_count_since(log_path, low_log_start, f"Starting playback: {filename}")
+    assert high_count == 1, (
+        f"Expected high laser debounce to collapse the burst to one playback start, got {high_count}.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert low_count > high_count, (
+        "Expected lowering the laser debounce to increase playback starts for the same burst.\n"
+        f"high_count={high_count} low_count={low_count}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    _stop_playback_if_active(base_url)
 
 
 # Test: Audio test (not playing) accepts frequency and volume updates.

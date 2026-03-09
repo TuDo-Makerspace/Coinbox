@@ -124,6 +124,24 @@ static bool security_get_cookie_value(httpd_req_t *req, const char *name, char *
     return httpd_req_get_cookie_val(req, name, out, &value_size) == ESP_OK;
 }
 
+static void security_discard_request_body(httpd_req_t *req)
+{
+    if (!req || req->content_len <= 0) {
+        return;
+    }
+
+    char discard[128];
+    int remaining = req->content_len;
+    while (remaining > 0) {
+        int chunk_size = remaining < (int)sizeof(discard) ? remaining : (int)sizeof(discard);
+        int received = httpd_req_recv(req, discard, chunk_size);
+        if (received <= 0) {
+            return;
+        }
+        remaining -= received;
+    }
+}
+
 //-------------------------------------------------------------------------
 // Persistent Storage
 //-------------------------------------------------------------------------
@@ -387,6 +405,8 @@ esp_err_t security_require_auth(httpd_req_t *req)
     if (!s_ui_password_set || security_is_authenticated_request(req)) {
         return ESP_OK;
     }
+
+    security_discard_request_body(req);
 
     if (req && req->method == HTTP_GET && security_is_ui_entry_uri(req->uri)) {
         return security_redirect_to_login(req);

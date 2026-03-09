@@ -52,6 +52,7 @@ typedef struct
 static void gpio_laser_isr_handler(void *arg);
 static void gpio_hall_isr_handler(void *arg);
 static void laser_event_task(void *arg);
+static void laser_handle_blocked_trigger(TickType_t trigger_tick);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Vars
@@ -86,12 +87,14 @@ static gpio_history_t s_hall_history = {
 static volatile gpio_runtime_mode_t s_runtime_mode = GPIO_RUNTIME_BOOTSTRAP;
 
 // Laser debouncing
-static uint16_t s_debounce_time_laser_ms = 0;      // disabled for now
-static uint16_t s_debounce_time_hall_ms = 3000;
-static uint32_t s_laser_trigger_cooldown_ms = 0;    // disabled for now
+static uint16_t s_debounce_time_laser_ms = GPIO_LASER_DEBOUNCE_DEFAULT_MS;
+static uint16_t s_debounce_time_hall_ms = GPIO_HALL_DEBOUNCE_DEFAULT_MS;
+static uint32_t s_laser_trigger_cooldown_ms = GPIO_LASER_TRIGGER_COOLDOWN_DEFAULT_MS;
 
 // Laser task
 static TaskHandle_t s_laser_task;
+static TickType_t s_laser_last_play_tick;
+static TickType_t s_laser_last_trigger_tick;
 
 #if CONFIG_TEST_GPIO_INJECTION
 static volatile bool s_test_laser_override_valid;
@@ -260,9 +263,6 @@ static void IRAM_ATTR gpio_hall_isr_handler(void *arg)
 static void laser_event_task(void *arg)
 {
     (void)arg;
-    TickType_t last_play_tick = 0;
-    const TickType_t debounce_ticks = s_debounce_time_laser_ms ? pdMS_TO_TICKS(s_debounce_time_laser_ms) : 0;
-    const TickType_t cooldown_ticks = s_laser_trigger_cooldown_ms ? pdMS_TO_TICKS(s_laser_trigger_cooldown_ms) : 0;
 
     uint32_t evt_tick = 0;
     while (true) {
@@ -276,10 +276,6 @@ static void laser_event_task(void *arg)
         }
         (void)evt_tick;
 
-        if (debounce_ticks > 0) {
-            vTaskDelay(debounce_ticks);
-        }
-
         if (s_runtime_mode != GPIO_RUNTIME_MAIN_APP) {
             continue;
         }
@@ -288,50 +284,69 @@ static void laser_event_task(void *arg)
             continue; // only trigger playback for blocked-beam level
         }
 
-        if (cooldown_ticks > 0) {
-            TickType_t now = xTaskGetTickCount();
-            if ((now - last_play_tick) < cooldown_ticks) {
-                continue; // rate limit to avoid rapid retriggers
-            }
-            last_play_tick = now;
+        const TickType_t trigger_tick = evt_tick ? (TickType_t)evt_tick : xTaskGetTickCount();
+        laser_handle_blocked_trigger(trigger_tick);
+    }
+}
+
+static void laser_handle_blocked_trigger(TickType_t trigger_tick)
+{
+    const TickType_t debounce_ticks = s_debounce_time_laser_ms
+        ? pdMS_TO_TICKS(s_debounce_time_laser_ms)
+        : 0;
+    const TickType_t cooldown_ticks = s_laser_trigger_cooldown_ms
+        ? pdMS_TO_TICKS(s_laser_trigger_cooldown_ms)
+        : 0;
+
+    if (debounce_ticks > 0 &&
+        s_laser_last_trigger_tick != 0 &&
+        (trigger_tick - s_laser_last_trigger_tick) < debounce_ticks) {
+        return;
+    }
+    s_laser_last_trigger_tick = trigger_tick;
+
+    if (cooldown_ticks > 0) {
+        if ((trigger_tick - s_laser_last_play_tick) < cooldown_ticks) {
+            return;
         }
+        s_laser_last_play_tick = trigger_tick;
+    }
 
-        char selected_name[FILE_ENTRY_NAME_MAX] = {0};
-        uint32_t total_weight = 0;
-        size_t candidates = 0;
+    char selected_name[FILE_ENTRY_NAME_MAX] = {0};
+    uint32_t total_weight = 0;
+    size_t candidates = 0;
 
-        esp_err_t pick_err = files_pick_weighted_enabled(
-            selected_name,
-            sizeof(selected_name),
-            &total_weight,
-            &candidates);
-        if (pick_err != ESP_OK) {
-            ESP_LOGW(TAG,
-                     "Coin detected, but no enabled weighted sounds found (candidates=%u, total_weight=%u)",
-                     (unsigned)candidates,
-                     (unsigned)total_weight);
-            continue;
-        }
-
-        ESP_LOGI(TAG,
-                 "Coin detected! Starting playback of %s (candidates=%u, total_weight=%u)",
-                 selected_name,
+    esp_err_t pick_err = files_pick_weighted_enabled(
+        selected_name,
+        sizeof(selected_name),
+        &total_weight,
+        &candidates);
+    if (pick_err != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "Coin detected, but no enabled weighted sounds found (candidates=%u, total_weight=%u)",
                  (unsigned)candidates,
                  (unsigned)total_weight);
+        return;
+    }
 
-        audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
-        audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
-        esp_err_t err = audio_start_file(selected_name, &start_result, &skip_reason);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to start audio on coin detection: %s", esp_err_to_name(err));
-        } else if (start_result == AUDIO_PLAYBACK_START_RESULT_STARTED) {
-            ESP_LOGI(TAG, "Playback started for file: %s", selected_name);
-        } else {
-            ESP_LOGW(TAG,
-                     "Playback skipped for file: %s (%s)",
-                     selected_name,
-                     audio_playback_skip_reason_text(skip_reason));
-        }
+    ESP_LOGI(TAG,
+             "Coin detected! Starting playback of %s (candidates=%u, total_weight=%u)",
+             selected_name,
+             (unsigned)candidates,
+             (unsigned)total_weight);
+
+    audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
+    audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    esp_err_t err = audio_start_file(selected_name, &start_result, &skip_reason);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start audio on coin detection: %s", esp_err_to_name(err));
+    } else if (start_result == AUDIO_PLAYBACK_START_RESULT_STARTED) {
+        ESP_LOGI(TAG, "Playback started for file: %s", selected_name);
+    } else {
+        ESP_LOGW(TAG,
+                 "Playback skipped for file: %s (%s)",
+                 selected_name,
+                 audio_playback_skip_reason_text(skip_reason));
     }
 }
 
@@ -451,6 +466,26 @@ size_t gpio_laser_events_drain(gpio_laser_event_t *out_events, size_t max_events
     return gpio_input_events_drain(&s_laser_history, out_events, max_events, dropped_events);
 }
 
+void gpio_set_laser_debounce_ms(uint16_t debounce_ms)
+{
+    s_debounce_time_laser_ms = debounce_ms;
+}
+
+uint16_t gpio_get_laser_debounce_ms(void)
+{
+    return s_debounce_time_laser_ms;
+}
+
+void gpio_set_laser_trigger_cooldown_ms(uint32_t cooldown_ms)
+{
+    s_laser_trigger_cooldown_ms = cooldown_ms;
+}
+
+uint32_t gpio_get_laser_trigger_cooldown_ms(void)
+{
+    return s_laser_trigger_cooldown_ms;
+}
+
 //-------------------------------------------------------------------------
 // Hall/Lid detection
 //-------------------------------------------------------------------------
@@ -476,6 +511,16 @@ size_t gpio_hall_events_drain(gpio_hall_event_t *out_events, size_t max_events, 
     return gpio_input_events_drain(&s_hall_history, out_events, max_events, dropped_events);
 }
 
+void gpio_set_hall_debounce_ms(uint16_t debounce_ms)
+{
+    s_debounce_time_hall_ms = debounce_ms;
+}
+
+uint16_t gpio_get_hall_debounce_ms(void)
+{
+    return s_debounce_time_hall_ms;
+}
+
 #if CONFIG_TEST_GPIO_INJECTION
 esp_err_t gpio_test_set_laser_level(int level)
 {
@@ -490,6 +535,32 @@ esp_err_t gpio_test_set_laser_level(int level)
     if (level == LASER_BLOCKED && s_laser_task && s_runtime_mode == GPIO_RUNTIME_MAIN_APP) {
         uint32_t tick = (uint32_t)xTaskGetTickCount();
         xTaskNotify(s_laser_task, tick, eSetValueWithOverwrite);
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t gpio_test_pulse_laser(uint32_t count, uint32_t interval_ms)
+{
+    if (count == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const TickType_t interval_ticks = interval_ms ? pdMS_TO_TICKS(interval_ms) : 0;
+    TickType_t trigger_tick = xTaskGetTickCount();
+    for (uint32_t i = 0; i < count; ++i) {
+        s_test_laser_override_level = 0;
+        s_test_laser_override_valid = true;
+        gpio_input_event_push(&s_laser_history, 0);
+
+        s_test_laser_override_level = LASER_BLOCKED;
+        s_test_laser_override_valid = true;
+        gpio_input_event_push(&s_laser_history, LASER_BLOCKED);
+
+        if (s_runtime_mode == GPIO_RUNTIME_MAIN_APP) {
+            laser_handle_blocked_trigger(trigger_tick);
+        }
+        trigger_tick += interval_ticks;
     }
 
     return ESP_OK;

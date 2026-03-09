@@ -197,7 +197,13 @@
         <p>Make sure the coinbox is powered on and that your device is connected to the correct Wi-Fi network or Access Point. If you recently changed or reset the network settings, or were connected to the recovery Access Point, switch to the correct network instead.</p>
       </div>
     `;
-    document.body.appendChild(overlay);
+    if (typeof document.body.prepend === "function") {
+      document.body.prepend(overlay);
+    } else if (document.body.firstChild) {
+      document.body.insertBefore(overlay, document.body.firstChild);
+    } else {
+      document.body.appendChild(overlay);
+    }
     return overlay;
   }
 

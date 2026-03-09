@@ -300,7 +300,7 @@ def test_auth_blocks_boot_config_endpoint(qemu_mainapp_instance):
 # Test: `/audio/config` requires auth for both reads and writes.
 # 1. Start from main app mode and enable auth.
 # 2. Call unauthenticated `GET /audio/config`.
-# 3. Call unauthenticated `POST /audio/config`.
+# 3. Call unauthenticated `POST /audio/config` with lid-volume and test-only debounce data.
 # 4. Assert both requests return `401 Unauthorized`.
 def test_auth_blocks_audio_config_endpoint(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
@@ -313,7 +313,15 @@ def test_auth_blocks_audio_config_endpoint(qemu_mainapp_instance):
     post_status, _, post_body = _http_post_json(
         base_url=base_url,
         path="/audio/config",
-        payload={"lid_closed_volume_pct": 0, "lid_open_volume_pct": 25},
+        payload={
+            "lid_closed_volume_pct": 0,
+            "lid_open_volume_pct": 25,
+            "test_only": {
+                "laser_debounce_ms": 25,
+                "hall_debounce_ms": 750,
+                "laser_trigger_cooldown_ms": 125,
+            },
+        },
     )
     assert post_status == 401, f"Expected 401 for POST /audio/config, got {post_status}. body={post_body}"
     assert "Unauthorized" in post_body

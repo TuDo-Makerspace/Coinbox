@@ -216,11 +216,6 @@
       justify-content: flex-end;
       margin-top: 0.85rem;
     }
-    .playback-actions {
-      display: flex;
-      align-items: flex-end;
-      margin-top: 0.85rem;
-    }
     .playback-tip {
       margin: 0;
     }
@@ -570,10 +565,54 @@
       grid-template-columns: minmax(0, 60fr) minmax(0, 40fr);
       gap: 1.5rem;
     }
+    .playback-groups {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+    .playback-group {
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
     .playback-slider-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 1.5rem;
+    }
+    .playback-debounce-group {
+      align-self: stretch;
+      max-width: none;
+    }
+    .playback-setting-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        "title control"
+        "note control";
+      align-items: center;
+      column-gap: 0.75rem;
+      row-gap: 0.2rem;
+    }
+    .playback-setting-title {
+      grid-area: title;
+      color: var(--text);
+    }
+    .playback-setting-note {
+      grid-area: note;
+      margin: 0;
+    }
+    .playback-setting-control {
+      grid-area: control;
+      justify-self: end;
+      align-self: center;
+    }
+    .playback-setting-control.slider-number-wrap {
+      justify-self: end;
     }
     .sensor-grid {
       display: grid;
@@ -622,9 +661,6 @@
         width: 100%;
         flex: none;
       }
-      .playback-actions {
-        align-items: stretch;
-      }
       .security-actions {
         flex-direction: column;
       }
@@ -640,6 +676,15 @@
       .playback-slider-grid { grid-template-columns: 1fr; }
       .slider-control { grid-template-columns: 1fr; }
       .slider-number-wrap { justify-self: start; }
+      .playback-setting-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+          "title control"
+          "note note";
+      }
+      .playback-setting-control {
+        justify-self: end;
+      }
       .settings-toggle-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -688,38 +733,50 @@
       <div class="card-header">
         <h2>Playback</h2>
       </div>
-      <div class="playback-slider-grid">
-        <div class="slider-row">
-          <label for="playback-lid-closed-volume">Lid closed volume</label>
-          <div class="slider-control">
-            <div class="slider-wrap">
-              <button class="nudge" id="playback-lid-closed-volume-minus" type="button" disabled>-</button>
-              <input type="range" id="playback-lid-closed-volume" min="0" max="100" value="100" step="1" disabled>
-              <button class="nudge" id="playback-lid-closed-volume-plus" type="button" disabled>+</button>
+      <div class="playback-groups">
+        <div class="playback-group">
+          <div class="playback-slider-grid">
+            <div class="slider-row">
+              <label class="section-label" for="playback-lid-closed-volume">Lid closed volume</label>
+              <div class="slider-control">
+                <div class="slider-wrap">
+                  <button class="nudge" id="playback-lid-closed-volume-minus" type="button" disabled>-</button>
+                  <input type="range" id="playback-lid-closed-volume" min="0" max="100" value="100" step="1" disabled>
+                  <button class="nudge" id="playback-lid-closed-volume-plus" type="button" disabled>+</button>
+                </div>
+                <div class="slider-number-wrap">
+                  <input class="slider-number" id="playback-lid-closed-volume-number" type="number" min="0" max="100" inputmode="numeric" value="100" disabled>
+                  <span class="slider-number-unit">%</span>
+                </div>
+              </div>
             </div>
-            <div class="slider-number-wrap">
-              <input class="slider-number" id="playback-lid-closed-volume-number" type="number" min="0" max="100" inputmode="numeric" value="100" disabled>
-              <span class="slider-number-unit">%</span>
+            <div class="slider-row">
+              <label class="section-label" for="playback-lid-open-volume">Lid open volume</label>
+              <div class="slider-control">
+                <div class="slider-wrap">
+                  <button class="nudge" id="playback-lid-open-volume-minus" type="button" disabled>-</button>
+                  <input type="range" id="playback-lid-open-volume" min="0" max="100" value="25" step="1" disabled>
+                  <button class="nudge" id="playback-lid-open-volume-plus" type="button" disabled>+</button>
+                </div>
+                <div class="slider-number-wrap">
+                  <input class="slider-number" id="playback-lid-open-volume-number" type="number" min="0" max="100" inputmode="numeric" value="25" disabled>
+                  <span class="slider-number-unit">%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="note playback-tip">Tip: Set the Lid open volume to 0% to prevent sounds from playing while the lid is open.</p>
+        </div>
+        <div class="playback-group playback-debounce-group">
+          <div class="playback-setting-row">
+            <label class="section-label playback-setting-title" for="playback-laser-debounce-number">Laser Debounce</label>
+            <p class="note playback-setting-note">Prevents the laser sensor from triggering multiple sounds too quickly in a row. Increase it if one coin sometimes causes repeated playback.</p>
+            <div class="slider-number-wrap playback-setting-control">
+              <input class="slider-number" id="playback-laser-debounce-number" type="number" min="0" max="1000" step="5" inputmode="numeric" value="30" disabled>
+              <span class="slider-number-unit">ms</span>
             </div>
           </div>
         </div>
-        <div class="slider-row">
-          <label for="playback-lid-open-volume">Lid open volume</label>
-          <div class="slider-control">
-            <div class="slider-wrap">
-              <button class="nudge" id="playback-lid-open-volume-minus" type="button" disabled>-</button>
-              <input type="range" id="playback-lid-open-volume" min="0" max="100" value="25" step="1" disabled>
-              <button class="nudge" id="playback-lid-open-volume-plus" type="button" disabled>+</button>
-            </div>
-            <div class="slider-number-wrap">
-              <input class="slider-number" id="playback-lid-open-volume-number" type="number" min="0" max="100" inputmode="numeric" value="25" disabled>
-              <span class="slider-number-unit">%</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="playback-actions">
-        <p class="note playback-tip">Tip: Set the Lid open volume to 0% to prevent sounds from playing while the lid is open.</p>
       </div>
     </div>
 
@@ -962,6 +1019,7 @@
     const playbackLidOpenMinusBtn = document.getElementById('playback-lid-open-volume-minus');
     const playbackLidOpenPlusBtn = document.getElementById('playback-lid-open-volume-plus');
     const playbackLidOpenNumber = document.getElementById('playback-lid-open-volume-number');
+    const playbackLaserDebounceNumber = document.getElementById('playback-laser-debounce-number');
     const startupSoundInput = document.getElementById('startup-sound-enabled');
     const systemFirmwareText = document.getElementById('system-firmware');
     const systemHardwareText = document.getElementById('system-hardware');
@@ -1010,6 +1068,7 @@
     const audioConfigSnapshot = {
       lid_closed_volume_pct: 100,
       lid_open_volume_pct: 25,
+      laser_debounce_ms: 30,
     };
 
     function escapeHtml(str) {
@@ -1050,6 +1109,12 @@
       return Math.min(100, Math.max(0, parsed));
     }
 
+    function clampLaserDebounceMs(value, fallback = 30) {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed)) return fallback;
+      return Math.min(1000, Math.max(0, parsed));
+    }
+
     function clampValueForInput(input, value, fallback = 0) {
       const parsed = Number.parseInt(value, 10);
       if (Number.isNaN(parsed)) return fallback;
@@ -1067,17 +1132,28 @@
       return parsed;
     }
 
-    function syncPercentControl(input, numberInput, valueLabel, value, fallback = 0) {
-      const next = clampPercent(value, fallback);
+    function syncBoundedControl(input, numberInput, valueLabel, value, fallback = 0, unitSuffix = '') {
+      const next = clampValueForInput(input, value, fallback);
       if (input) input.value = String(next);
       if (numberInput) numberInput.value = String(next);
-      if (valueLabel) valueLabel.textContent = `${next}%`;
+      if (valueLabel) valueLabel.textContent = `${next}${unitSuffix}`;
+      return next;
+    }
+
+    function syncPercentControl(input, numberInput, valueLabel, value, fallback = 0) {
+      return syncBoundedControl(input, numberInput, valueLabel, value, fallback, '%');
+    }
+
+    function syncNumberOnlyControl(numberInput, value, fallback = 0) {
+      const next = clampValueForInput(numberInput, value, fallback);
+      if (numberInput) numberInput.value = String(next);
       return next;
     }
 
     function updateAudioConfigSnapshot(data) {
       audioConfigSnapshot.lid_closed_volume_pct = clampPercent(data?.lid_closed_volume_pct, 100);
       audioConfigSnapshot.lid_open_volume_pct = clampPercent(data?.lid_open_volume_pct, 25);
+      audioConfigSnapshot.laser_debounce_ms = clampLaserDebounceMs(data?.test_only?.laser_debounce_ms, 30);
     }
 
     function currentAudioConfigDraft() {
@@ -1090,6 +1166,10 @@
           playbackLidOpenInput?.value,
           audioConfigSnapshot.lid_open_volume_pct,
         ),
+        laser_debounce_ms: clampLaserDebounceMs(
+          playbackLaserDebounceNumber?.value,
+          audioConfigSnapshot.laser_debounce_ms,
+        ),
       };
     }
 
@@ -1097,13 +1177,15 @@
       const draft = currentAudioConfigDraft();
       return (
         draft.lid_closed_volume_pct !== audioConfigSnapshot.lid_closed_volume_pct ||
-        draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct
+        draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct ||
+        draft.laser_debounce_ms !== audioConfigSnapshot.laser_debounce_ms
       );
     }
 
     function renderAudioConfig(data) {
       const lidClosedVolumePct = clampPercent(data?.lid_closed_volume_pct, 100);
       const lidOpenVolumePct = clampPercent(data?.lid_open_volume_pct, 25);
+      const laserDebounceMs = clampLaserDebounceMs(data?.test_only?.laser_debounce_ms, 30);
       const controlsDisabled = !audioConfigLoaded;
 
       syncPercentControl(
@@ -1120,6 +1202,7 @@
         lidOpenVolumePct,
         25,
       );
+      syncNumberOnlyControl(playbackLaserDebounceNumber, laserDebounceMs, 30);
       [
         playbackLidClosedInput,
         playbackLidClosedNumber,
@@ -1129,29 +1212,46 @@
         playbackLidOpenNumber,
         playbackLidOpenMinusBtn,
         playbackLidOpenPlusBtn,
+        playbackLaserDebounceNumber,
       ].forEach((control) => {
         if (control) control.disabled = controlsDisabled;
       });
     }
 
-    function commitPlaybackNumberInput(rangeInput, numberInput, valueLabel) {
+    function commitPlaybackNumberInput(rangeInput, numberInput, valueLabel, fallback = 0, syncFn = syncPercentControl) {
       if (!rangeInput || !numberInput) return false;
       const raw = String(numberInput.value ?? '').trim();
       if (raw === '') {
-        syncPercentControl(rangeInput, numberInput, valueLabel, rangeInput.value, 0);
+        syncFn(rangeInput, numberInput, valueLabel, rangeInput.value, fallback);
         return false;
       }
       const parsed = Number.parseInt(raw, 10);
       if (Number.isNaN(parsed)) {
-        syncPercentControl(rangeInput, numberInput, valueLabel, rangeInput.value, 0);
+        syncFn(rangeInput, numberInput, valueLabel, rangeInput.value, fallback);
         return false;
       }
-      syncPercentControl(rangeInput, numberInput, valueLabel, parsed, 0);
+      syncFn(rangeInput, numberInput, valueLabel, parsed, fallback);
+      return true;
+    }
+
+    function commitPlaybackNumberOnlyInput(numberInput, fallback = 0) {
+      if (!numberInput) return false;
+      const raw = String(numberInput.value ?? '').trim();
+      if (raw === '') {
+        syncNumberOnlyControl(numberInput, fallback, fallback);
+        return false;
+      }
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isNaN(parsed)) {
+        syncNumberOnlyControl(numberInput, fallback, fallback);
+        return false;
+      }
+      syncNumberOnlyControl(numberInput, parsed, fallback);
       return true;
     }
 
     async function fetchAudioConfig() {
-      if (!playbackLidClosedInput || !playbackLidOpenInput) return;
+      if (!playbackLidClosedInput || !playbackLidOpenInput || !playbackLaserDebounceNumber) return;
       try {
         const res = await fetch('/audio/config', { cache: 'no-store' });
         if (!res.ok) throw new Error('Failed to fetch playback settings');
@@ -1178,6 +1278,9 @@
       }
       if (draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct) {
         payload.lid_open_volume_pct = draft.lid_open_volume_pct;
+      }
+      if (draft.laser_debounce_ms !== audioConfigSnapshot.laser_debounce_ms) {
+        payload.test_only = { laser_debounce_ms: draft.laser_debounce_ms };
       }
       if (Object.keys(payload).length === 0) return;
 
@@ -2645,6 +2748,8 @@
         valueLabel: playbackLidClosedValue,
         minusBtn: playbackLidClosedMinusBtn,
         plusBtn: playbackLidClosedPlusBtn,
+        fallback: 100,
+        syncFn: syncPercentControl,
       },
       {
         input: playbackLidOpenInput,
@@ -2652,36 +2757,44 @@
         valueLabel: playbackLidOpenValue,
         minusBtn: playbackLidOpenMinusBtn,
         plusBtn: playbackLidOpenPlusBtn,
+        fallback: 25,
+        syncFn: syncPercentControl,
       },
     ].forEach((control) => {
-      const { input, numberInput, valueLabel, minusBtn, plusBtn } = control;
+      const { input, numberInput, valueLabel, minusBtn, plusBtn, fallback, syncFn } = control;
       input?.addEventListener('input', () => {
-        syncPercentControl(input, numberInput, valueLabel, input.value, 0);
+        syncFn(input, numberInput, valueLabel, input.value, fallback);
       });
       input?.addEventListener('change', () => {
-        syncPercentControl(input, numberInput, valueLabel, input.value, 0);
+        syncFn(input, numberInput, valueLabel, input.value, fallback);
         saveAudioConfig();
       });
       minusBtn?.addEventListener('click', () => {
         if (input?.disabled) return;
-        syncPercentControl(input, numberInput, valueLabel, Number(input.value) - stepValueForInput(input, 1), 0);
+        syncFn(input, numberInput, valueLabel, Number(input.value) - stepValueForInput(input, 1), fallback);
         saveAudioConfig();
       });
       plusBtn?.addEventListener('click', () => {
         if (input?.disabled) return;
-        syncPercentControl(input, numberInput, valueLabel, Number(input.value) + stepValueForInput(input, 1), 0);
+        syncFn(input, numberInput, valueLabel, Number(input.value) + stepValueForInput(input, 1), fallback);
         saveAudioConfig();
       });
       numberInput?.addEventListener('input', () => {
         const raw = String(numberInput.value ?? '').trim();
         if (raw === '') return;
         const parsed = Number.parseInt(raw, 10);
-        if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) return;
-        syncPercentControl(input, numberInput, valueLabel, parsed, 0);
+        const min = Number.parseInt(input?.min ?? '', 10);
+        const max = Number.parseInt(input?.max ?? '', 10);
+        if (
+          Number.isNaN(parsed) ||
+          (!Number.isNaN(min) && parsed < min) ||
+          (!Number.isNaN(max) && parsed > max)
+        ) return;
+        syncFn(input, numberInput, valueLabel, parsed, fallback);
       });
       const commitNumber = () => {
         if (!numberInput) return;
-        const changed = commitPlaybackNumberInput(input, numberInput, valueLabel);
+        const changed = commitPlaybackNumberInput(input, numberInput, valueLabel, fallback, syncFn);
         if (changed) {
           saveAudioConfig();
         }
@@ -2693,6 +2806,21 @@
         event.preventDefault();
         numberInput.blur();
       });
+    });
+    playbackLaserDebounceNumber?.addEventListener('blur', () => {
+      if (commitPlaybackNumberOnlyInput(playbackLaserDebounceNumber, audioConfigSnapshot.laser_debounce_ms)) {
+        saveAudioConfig();
+      }
+    });
+    playbackLaserDebounceNumber?.addEventListener('change', () => {
+      if (commitPlaybackNumberOnlyInput(playbackLaserDebounceNumber, audioConfigSnapshot.laser_debounce_ms)) {
+        saveAudioConfig();
+      }
+    });
+    playbackLaserDebounceNumber?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      playbackLaserDebounceNumber.blur();
     });
     bindMaskedNetworkPasswordInput(apPasswordInput, apPasswordState);
     bindMaskedNetworkPasswordInput(staPasswordInput, staPasswordState);
