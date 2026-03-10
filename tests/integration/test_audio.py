@@ -405,58 +405,18 @@ def test_entering_main_app_does_not_play_default_sound_when_boot_sound_disabled(
     )
 
 
-# Test: `/audio/config` updates lid-closed/open playback volumes and logs the change.
-# 1. Start from main app mode and capture baseline audio config.
-# 2. POST new lid-closed and lid-open volume values.
-# 3. Verify the response and a fresh GET both reflect the new values.
-# 4. Assert the update is recorded in logs.
-def test_audio_config_updates_lid_volumes_and_logs_change(qemu_mainapp_instance):
-    base_url = qemu_mainapp_instance["base_url"]
-    log_path = qemu_mainapp_instance["log_path"]
-
-    baseline = _get_audio_config(base_url)
-    for key in ("lid_closed_volume_pct", "lid_open_volume_pct"):
-        value = baseline.get(key)
-        assert isinstance(value, int), f"Expected integer {key} in /audio/config, got {value!r}"
-        assert 0 <= value <= 100, f"Expected {key} within 0-100, got {value}"
-
-    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
-    updated = _set_audio_config(
-        base_url,
-        {"lid_closed_volume_pct": 17, "lid_open_volume_pct": 63},
-    )
-    assert updated.get("lid_closed_volume_pct") == 17
-    assert updated.get("lid_open_volume_pct") == 63
-
-    readback = _get_audio_config(base_url)
-    assert readback.get("lid_closed_volume_pct") == 17
-    assert readback.get("lid_open_volume_pct") == 63
-
-    config_logged = _wait_until(
-        lambda: _log_contains_any_since(
-            log_path,
-            log_start_pos,
-            ["Audio config updated: lid_closed=17 lid_open=63"],
-        ),
-        timeout_s=3.0,
-        poll_s=0.1,
-    )
-    assert config_logged, (
-        "Expected /audio/config update to be reflected in logs.\n"
-        f"Log tail:\n{_tail_log(log_path)}"
-    )
-
-
 # Test: `/audio/config` exposes writable test-only debounce settings.
 # 1. Start from main app mode and capture baseline audio config.
 # 2. Assert the test-only debounce object is present with integer timing fields.
 # 3. POST new test-only debounce values.
 # 4. Verify the response and a fresh GET both reflect the new debounce values.
-# 5. Verify regular lid-volume settings remain unchanged when omitted from the update.
+# 5. Verify the removed lid-volume fields are absent from the config payload.
 def test_audio_config_updates_test_only_debounce_settings(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
 
     baseline = _get_audio_config(base_url)
+    assert "lid_closed_volume_pct" not in baseline
+    assert "lid_open_volume_pct" not in baseline
     baseline_test_only = baseline.get(AUDIO_CONFIG_TEST_ONLY_KEY)
     assert isinstance(baseline_test_only, dict), (
         f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, "
@@ -488,10 +448,12 @@ def test_audio_config_updates_test_only_debounce_settings(qemu_mainapp_instance)
             f"got {updated_test_only.get(key)!r}"
         )
 
-    assert updated.get("lid_closed_volume_pct") == baseline.get("lid_closed_volume_pct")
-    assert updated.get("lid_open_volume_pct") == baseline.get("lid_open_volume_pct")
+    assert "lid_closed_volume_pct" not in updated
+    assert "lid_open_volume_pct" not in updated
 
     readback = _get_audio_config(base_url)
+    assert "lid_closed_volume_pct" not in readback
+    assert "lid_open_volume_pct" not in readback
     readback_test_only = readback.get(AUDIO_CONFIG_TEST_ONLY_KEY)
     assert isinstance(readback_test_only, dict), (
         f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} on GET /audio/config readback, "
@@ -1209,99 +1171,6 @@ def test_manual_playback_with_zero_track_volume_is_skipped_and_logged(qemu_maina
         f"DAC/AMP should stay muted when skipping zero-volume track playback.\nLog tail:\n{_tail_log(log_path)}"
     )
 
-
-@pytest.mark.parametrize(
-    ("case_name", "hall_level", "audio_config", "skip_reason"),
-    [
-        ("lid-closed", 0, {"lid_closed_volume_pct": 0, "lid_open_volume_pct": 100}, "lid-closed volume is 0%"),
-        ("lid-open", 1, {"lid_closed_volume_pct": 100, "lid_open_volume_pct": 0}, "lid-open volume is 0%"),
-    ],
-)
-def test_playback_with_zero_active_lid_volume_is_skipped_and_logged(
-    qemu_mainapp_instance,
-    case_name: str,
-    hall_level: int,
-    audio_config: dict,
-    skip_reason: str,
-):
-    base_url = qemu_mainapp_instance["base_url"]
-    log_path = qemu_mainapp_instance["log_path"]
-
-    idle = _wait_until(
-        lambda: not bool(_audio_playback_state(base_url).get("active")),
-        timeout_s=3.0,
-        poll_s=0.1,
-    )
-    assert idle, (
-        "Startup playback did not clear before zero active-lid-volume test.\n"
-        f"Log tail:\n{_tail_log(log_path)}"
-    )
-
-    audio_cfg = _set_audio_config(base_url, audio_config)
-    assert audio_cfg.get("lid_closed_volume_pct") == audio_config["lid_closed_volume_pct"]
-    assert audio_cfg.get("lid_open_volume_pct") == audio_config["lid_open_volume_pct"]
-
-    _set_test_gpio_level(base_url, "hall", hall_level)
-
-    filename = f"{_unique_name(f'{case_name}-6165ms')}.mp3"
-    _upload_sound_file(base_url, filename, _test_mp3_bytes())
-
-    status, _, body = _set_sound_meta(base_url, filename, {"volume": 100})
-    assert status == 200, f"Failed to set track volume to 100. body={body}"
-    assert body == "OK"
-
-    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
-    status, _, body = _audio_playback_start(base_url, filename)
-    assert status == 200, f"Failed to start playback for {case_name}. body={body}"
-
-    playback_state: dict[str, object] = {}
-    state_reported = _wait_until(
-        lambda: (
-            (playback_state := _audio_playback_state(base_url))
-            and playback_state.get("active") is False
-            and playback_state.get("file") == filename
-            and playback_state.get("skipped") == skip_reason
-        ),
-        timeout_s=3.0,
-        poll_s=0.1,
-    )
-    assert state_reported, (
-        f"Expected GET /audio/playback to report the skipped {case_name} file.\n"
-        f"Last state: {playback_state}\n"
-        f"Log tail:\n{_tail_log(log_path)}"
-    )
-
-    skip_logged = _wait_until(
-        lambda: _log_since_contains_all(
-            log_path,
-            log_start_pos,
-            ["Skipping playback:", filename, skip_reason],
-        ),
-        timeout_s=3.0,
-        poll_s=0.1,
-    )
-    assert skip_logged, (
-        f"Expected logs to show {case_name} playback was skipped because the active lid volume is 0%.\n"
-        f"Log tail:\n{_tail_log(log_path)}"
-    )
-
-    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
-    assert stayed_inactive, (
-        f"{case_name} playback unexpectedly became active instead of being skipped.\n"
-        f"Log tail:\n{_tail_log(log_path)}"
-    )
-
-    assert not _log_contains_any_since(
-        log_path,
-        log_start_pos,
-        [f"Starting playback: {filename}"],
-    ), f"{case_name} zero active-lid-volume playback should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
-    assert _outputs_are_muted(base_url), (
-        f"DAC/AMP should stay muted when skipping {case_name} zero active-lid-volume playback.\n"
-        f"Log tail:\n{_tail_log(log_path)}"
-    )
-
-
 # Test: Laser-triggered playback of a 0%-volume sound is skipped immediately.
 # 1. Start from main app mode and wait for any startup sound playback to finish.
 # 2. Upload the `test6165ms.mp3` fixture and make it the only weighted laser candidate with volume `0`.
@@ -1399,6 +1268,74 @@ def test_laser_playback_with_zero_track_volume_is_skipped_and_logged(qemu_mainap
     assert _outputs_are_muted(base_url), (
         f"DAC/AMP should stay muted when laser-triggered zero-volume playback is skipped.\nLog tail:\n{_tail_log(log_path)}"
     )
+
+
+# Test: Laser-triggered playback is suppressed while the lid is open.
+# 1. Start from main app mode and wait for any startup playback to finish.
+# 2. Force the hall sensor into the lid-open state and make one uploaded MP3 the only laser candidate.
+# 3. Trigger a laser playback attempt.
+# 4. Assert logs record the open-lid suppression and no real playback start is attempted.
+# 5. Assert playback never becomes active over the early suppression window.
+def test_laser_break_with_open_lid_does_not_start_playback(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_until(
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert idle, (
+        "Startup playback did not clear before open-lid laser playback test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('laser-open-lid-6165ms')}.mp3"
+    _configure_single_laser_candidate(base_url, filename)
+
+    _set_test_gpio_level(base_url, "hall", 1)
+    hall_state = _gpio_state(base_url).get("hall")
+    assert isinstance(hall_state, dict), f"Expected hall object in /gpio/state, got {hall_state!r}"
+    assert hall_state.get("lid_open") is True, f"Expected lid-open hall state, got {hall_state!r}"
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    try:
+        _trigger_laser_playback(base_url)
+
+        blocked_logged = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                ["Coin detected, but lid is open; playback is disabled"],
+            ),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert blocked_logged, (
+            "Expected logs to show laser-triggered playback was blocked while the lid is open.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+        assert stayed_inactive, (
+            "Laser-triggered playback unexpectedly became active while the lid was open.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        assert not _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Coin detected! Starting playback of {filename} (candidates=1, total_weight=100)",
+             f"Starting playback: {filename}"],
+        ), (
+            "Open-lid laser playback should not select or start the candidate file.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+        assert _outputs_are_muted(base_url), (
+            f"DAC/AMP should stay muted when laser playback is blocked by an open lid.\nLog tail:\n{_tail_log(log_path)}"
+        )
+    finally:
+        _set_test_gpio_level(base_url, "hall", 0)
 
 
 # Test: Rapid repeated playback-start requests keep the control plane responsive.

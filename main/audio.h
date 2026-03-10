@@ -46,8 +46,6 @@ typedef enum {
 typedef enum {
     AUDIO_PLAYBACK_SKIP_NONE = 0,
     AUDIO_PLAYBACK_SKIP_TRACK_VOLUME_ZERO,
-    AUDIO_PLAYBACK_SKIP_LID_CLOSED_VOLUME_ZERO,
-    AUDIO_PLAYBACK_SKIP_LID_OPEN_VOLUME_ZERO,
 } audio_playback_skip_reason_t;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -99,6 +97,3 @@ void audio_get_last_playback_skip_notice(uint32_t *out_seq,
 
 void audio_set_master_volume_level(uint8_t level);
 void audio_set_track_volume_level(uint8_t level);
-void audio_set_lid_closed_volume_level(uint8_t level);
-void audio_set_lid_open_volume_level(uint8_t level);
-void audio_set_lid_level(bool lid_open);

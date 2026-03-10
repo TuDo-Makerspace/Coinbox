@@ -309,6 +309,14 @@ static void laser_handle_blocked_trigger(TickType_t trigger_tick)
         if ((trigger_tick - s_laser_last_play_tick) < cooldown_ticks) {
             return;
         }
+    }
+
+    if (gpio_get_hall_level() != HALL_LID_CLOSED) {
+        ESP_LOGI(TAG, "Coin detected, but lid is open; playback is disabled");
+        return;
+    }
+
+    if (cooldown_ticks > 0) {
         s_laser_last_play_tick = trigger_tick;
     }
 

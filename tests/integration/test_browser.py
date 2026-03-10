@@ -385,20 +385,6 @@ def _http_post_json(base_url: str, path: str, payload: dict):
     )
 
 
-def _set_audio_config(base_url: str, payload: dict) -> dict:
-    status, headers, body = _http_post_json(base_url, "/audio/config", payload)
-    assert status == 200, (
-        f"Expected 200 from POST /audio/config, got {status}. "
-        f"content-type={headers.get('Content-Type', '')} body={body}"
-    )
-    assert "application/json" in headers.get("Content-Type", ""), (
-        f"/audio/config did not return JSON. content-type={headers.get('Content-Type', '')}"
-    )
-    parsed = json.loads(body)
-    assert isinstance(parsed, dict), f"/audio/config did not return a JSON object: {parsed!r}"
-    return parsed
-
-
 def _set_test_gpio_level(base_url: str, name: str, level: int):
     status, headers, body = _http_request(
         base_url=base_url,
@@ -2267,47 +2253,6 @@ def test_sounds_browser_shows_and_clears_zero_volume_playback_notice(
     assert cleared_idx is not None, (
         f"Sounds page did not clear the transient zero-volume playback notice for {trigger_mode} trigger.\n{details}"
     )
-
-
-# Test: Sounds page shows a warning note when lid-closed volume is configured to 0%.
-# 1. Start the main app and force lid-closed state through the hall test GPIO.
-# 2. Set `lid_closed_volume_pct=0` while keeping lid-open volume non-zero.
-# 3. Open `/sounds/` in a real headless browser.
-# 4. Wait until the warning note text appears in the rendered DOM.
-def test_sounds_browser_warns_when_lid_closed_volume_is_zero(qemu_mainapp_instance):
-    base_url = qemu_mainapp_instance["base_url"]
-    log_path = qemu_mainapp_instance["log_path"]
-
-    audio_cfg = _set_audio_config(
-        base_url,
-        {"lid_closed_volume_pct": 0, "lid_open_volume_pct": 25},
-    )
-    assert audio_cfg.get("lid_closed_volume_pct") == 0
-    assert audio_cfg.get("lid_open_volume_pct") == 25
-
-    _set_test_gpio_level(base_url, "hall", 0)
-
-    browser_state = _capture_browser_state_in_headless_chrome(
-        f"{base_url}/sounds/",
-        wait_condition=lambda state: (
-            state.get("current_path") == "/sounds/"
-            and _body_text_matches(state, r"lid\s*closed\s*volume")
-            and _body_text_matches(state, r"\b0%")
-            and _body_text_matches(state, r"muted|lid\s+is\s+closed")
-        ),
-    )
-    details = _browser_state_details(browser_state, log_path)
-    _assert_browser_lands_on(
-        browser_state=browser_state,
-        expected_path="/sounds/",
-        expected_title_fragment="sounds",
-        log_path=log_path,
-        message="Sounds page did not render the lid-closed zero-volume warning note.",
-    )
-    assert _body_text_matches(browser_state, r"lid\s*closed\s*volume"), details
-    assert _body_text_matches(browser_state, r"\b0%"), details
-    assert _body_text_matches(browser_state, r"muted|lid\s+is\s+closed"), details
-
 
 # Test: Sounds page shows a warning note when no sounds are enabled.
 # 1. Start the main app and ensure only the built-in default sound is present.

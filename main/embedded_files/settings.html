@@ -216,9 +216,6 @@
       justify-content: flex-end;
       margin-top: 0.85rem;
     }
-    .playback-tip {
-      margin: 0;
-    }
     .settings-toggle {
       margin-top: 0.85rem;
       padding: 0.85rem;
@@ -734,39 +731,6 @@
         <h2>Playback</h2>
       </div>
       <div class="playback-groups">
-        <div class="playback-group">
-          <div class="playback-slider-grid">
-            <div class="slider-row">
-              <label class="section-label" for="playback-lid-closed-volume">Lid closed volume</label>
-              <div class="slider-control">
-                <div class="slider-wrap">
-                  <button class="nudge" id="playback-lid-closed-volume-minus" type="button" disabled>-</button>
-                  <input type="range" id="playback-lid-closed-volume" min="0" max="100" value="100" step="1" disabled>
-                  <button class="nudge" id="playback-lid-closed-volume-plus" type="button" disabled>+</button>
-                </div>
-                <div class="slider-number-wrap">
-                  <input class="slider-number" id="playback-lid-closed-volume-number" type="number" min="0" max="100" inputmode="numeric" value="100" disabled>
-                  <span class="slider-number-unit">%</span>
-                </div>
-              </div>
-            </div>
-            <div class="slider-row">
-              <label class="section-label" for="playback-lid-open-volume">Lid open volume</label>
-              <div class="slider-control">
-                <div class="slider-wrap">
-                  <button class="nudge" id="playback-lid-open-volume-minus" type="button" disabled>-</button>
-                  <input type="range" id="playback-lid-open-volume" min="0" max="100" value="25" step="1" disabled>
-                  <button class="nudge" id="playback-lid-open-volume-plus" type="button" disabled>+</button>
-                </div>
-                <div class="slider-number-wrap">
-                  <input class="slider-number" id="playback-lid-open-volume-number" type="number" min="0" max="100" inputmode="numeric" value="25" disabled>
-                  <span class="slider-number-unit">%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <p class="note playback-tip">Tip: Set the Lid open volume to 0% to prevent sounds from playing while the lid is open.</p>
-        </div>
         <div class="playback-group playback-debounce-group">
           <div class="playback-setting-row">
             <label class="section-label playback-setting-title" for="playback-laser-debounce-number">Laser Debounce</label>
@@ -1010,16 +974,6 @@
     const disableApWhenStaConnectedInput = document.getElementById('network-disable-ap-when-sta-connected');
     const networkSaveBtn = document.getElementById('network-save');
     const networkMacText = document.getElementById('network-mac');
-    const playbackLidClosedInput = document.getElementById('playback-lid-closed-volume');
-    const playbackLidClosedValue = document.getElementById('playback-lid-closed-volume-value');
-    const playbackLidClosedMinusBtn = document.getElementById('playback-lid-closed-volume-minus');
-    const playbackLidClosedPlusBtn = document.getElementById('playback-lid-closed-volume-plus');
-    const playbackLidClosedNumber = document.getElementById('playback-lid-closed-volume-number');
-    const playbackLidOpenInput = document.getElementById('playback-lid-open-volume');
-    const playbackLidOpenValue = document.getElementById('playback-lid-open-volume-value');
-    const playbackLidOpenMinusBtn = document.getElementById('playback-lid-open-volume-minus');
-    const playbackLidOpenPlusBtn = document.getElementById('playback-lid-open-volume-plus');
-    const playbackLidOpenNumber = document.getElementById('playback-lid-open-volume-number');
     const playbackLaserDebounceNumber = document.getElementById('playback-laser-debounce-number');
     const startupSoundInput = document.getElementById('startup-sound-enabled');
     const systemFirmwareText = document.getElementById('system-firmware');
@@ -1069,8 +1023,6 @@
       sta_reboot_required: false,
     };
     const audioConfigSnapshot = {
-      lid_closed_volume_pct: 100,
-      lid_open_volume_pct: 25,
       laser_debounce_ms: 30,
     };
 
@@ -1145,12 +1097,6 @@
       box.scrollTop = box.scrollHeight;
     }
 
-    function clampPercent(value, fallback = 0) {
-      const parsed = Number.parseInt(value, 10);
-      if (Number.isNaN(parsed)) return fallback;
-      return Math.min(100, Math.max(0, parsed));
-    }
-
     function clampLaserDebounceMs(value, fallback = 30) {
       const parsed = Number.parseInt(value, 10);
       if (Number.isNaN(parsed)) return fallback;
@@ -1174,18 +1120,6 @@
       return parsed;
     }
 
-    function syncBoundedControl(input, numberInput, valueLabel, value, fallback = 0, unitSuffix = '') {
-      const next = clampValueForInput(input, value, fallback);
-      if (input) input.value = String(next);
-      if (numberInput) numberInput.value = String(next);
-      if (valueLabel) valueLabel.textContent = `${next}${unitSuffix}`;
-      return next;
-    }
-
-    function syncPercentControl(input, numberInput, valueLabel, value, fallback = 0) {
-      return syncBoundedControl(input, numberInput, valueLabel, value, fallback, '%');
-    }
-
     function syncNumberOnlyControl(numberInput, value, fallback = 0) {
       const next = clampValueForInput(numberInput, value, fallback);
       if (numberInput) numberInput.value = String(next);
@@ -1193,21 +1127,11 @@
     }
 
     function updateAudioConfigSnapshot(data) {
-      audioConfigSnapshot.lid_closed_volume_pct = clampPercent(data?.lid_closed_volume_pct, 100);
-      audioConfigSnapshot.lid_open_volume_pct = clampPercent(data?.lid_open_volume_pct, 25);
       audioConfigSnapshot.laser_debounce_ms = clampLaserDebounceMs(data?.test_only?.laser_debounce_ms, 30);
     }
 
     function currentAudioConfigDraft() {
       return {
-        lid_closed_volume_pct: clampPercent(
-          playbackLidClosedInput?.value,
-          audioConfigSnapshot.lid_closed_volume_pct,
-        ),
-        lid_open_volume_pct: clampPercent(
-          playbackLidOpenInput?.value,
-          audioConfigSnapshot.lid_open_volume_pct,
-        ),
         laser_debounce_ms: clampLaserDebounceMs(
           playbackLaserDebounceNumber?.value,
           audioConfigSnapshot.laser_debounce_ms,
@@ -1215,65 +1139,14 @@
       };
     }
 
-    function audioConfigHasChanges() {
-      const draft = currentAudioConfigDraft();
-      return (
-        draft.lid_closed_volume_pct !== audioConfigSnapshot.lid_closed_volume_pct ||
-        draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct ||
-        draft.laser_debounce_ms !== audioConfigSnapshot.laser_debounce_ms
-      );
-    }
-
     function renderAudioConfig(data) {
-      const lidClosedVolumePct = clampPercent(data?.lid_closed_volume_pct, 100);
-      const lidOpenVolumePct = clampPercent(data?.lid_open_volume_pct, 25);
       const laserDebounceMs = clampLaserDebounceMs(data?.test_only?.laser_debounce_ms, 30);
       const controlsDisabled = !audioConfigLoaded;
 
-      syncPercentControl(
-        playbackLidClosedInput,
-        playbackLidClosedNumber,
-        playbackLidClosedValue,
-        lidClosedVolumePct,
-        100,
-      );
-      syncPercentControl(
-        playbackLidOpenInput,
-        playbackLidOpenNumber,
-        playbackLidOpenValue,
-        lidOpenVolumePct,
-        25,
-      );
       syncNumberOnlyControl(playbackLaserDebounceNumber, laserDebounceMs, 30);
-      [
-        playbackLidClosedInput,
-        playbackLidClosedNumber,
-        playbackLidClosedMinusBtn,
-        playbackLidClosedPlusBtn,
-        playbackLidOpenInput,
-        playbackLidOpenNumber,
-        playbackLidOpenMinusBtn,
-        playbackLidOpenPlusBtn,
-        playbackLaserDebounceNumber,
-      ].forEach((control) => {
+      [playbackLaserDebounceNumber].forEach((control) => {
         if (control) control.disabled = controlsDisabled;
       });
-    }
-
-    function commitPlaybackNumberInput(rangeInput, numberInput, valueLabel, fallback = 0, syncFn = syncPercentControl) {
-      if (!rangeInput || !numberInput) return false;
-      const raw = String(numberInput.value ?? '').trim();
-      if (raw === '') {
-        syncFn(rangeInput, numberInput, valueLabel, rangeInput.value, fallback);
-        return false;
-      }
-      const parsed = Number.parseInt(raw, 10);
-      if (Number.isNaN(parsed)) {
-        syncFn(rangeInput, numberInput, valueLabel, rangeInput.value, fallback);
-        return false;
-      }
-      syncFn(rangeInput, numberInput, valueLabel, parsed, fallback);
-      return true;
     }
 
     function commitPlaybackNumberOnlyInput(numberInput, fallback = 0) {
@@ -1293,7 +1166,7 @@
     }
 
     async function fetchAudioConfig() {
-      if (!playbackLidClosedInput || !playbackLidOpenInput || !playbackLaserDebounceNumber) return;
+      if (!playbackLaserDebounceNumber) return;
       try {
         const res = await fetch('/audio/config', { cache: 'no-store' });
         if (!res.ok) throw new Error('Failed to fetch playback settings');
@@ -1315,12 +1188,6 @@
       }
       const draft = currentAudioConfigDraft();
       const payload = {};
-      if (draft.lid_closed_volume_pct !== audioConfigSnapshot.lid_closed_volume_pct) {
-        payload.lid_closed_volume_pct = draft.lid_closed_volume_pct;
-      }
-      if (draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct) {
-        payload.lid_open_volume_pct = draft.lid_open_volume_pct;
-      }
       if (draft.laser_debounce_ms !== audioConfigSnapshot.laser_debounce_ms) {
         payload.test_only = { laser_debounce_ms: draft.laser_debounce_ms };
       }
@@ -2784,72 +2651,6 @@
         saveBootConfig();
       });
     }
-    [
-      {
-        input: playbackLidClosedInput,
-        numberInput: playbackLidClosedNumber,
-        valueLabel: playbackLidClosedValue,
-        minusBtn: playbackLidClosedMinusBtn,
-        plusBtn: playbackLidClosedPlusBtn,
-        fallback: 100,
-        syncFn: syncPercentControl,
-      },
-      {
-        input: playbackLidOpenInput,
-        numberInput: playbackLidOpenNumber,
-        valueLabel: playbackLidOpenValue,
-        minusBtn: playbackLidOpenMinusBtn,
-        plusBtn: playbackLidOpenPlusBtn,
-        fallback: 25,
-        syncFn: syncPercentControl,
-      },
-    ].forEach((control) => {
-      const { input, numberInput, valueLabel, minusBtn, plusBtn, fallback, syncFn } = control;
-      input?.addEventListener('input', () => {
-        syncFn(input, numberInput, valueLabel, input.value, fallback);
-      });
-      input?.addEventListener('change', () => {
-        syncFn(input, numberInput, valueLabel, input.value, fallback);
-        saveAudioConfig();
-      });
-      minusBtn?.addEventListener('click', () => {
-        if (input?.disabled) return;
-        syncFn(input, numberInput, valueLabel, Number(input.value) - stepValueForInput(input, 1), fallback);
-        saveAudioConfig();
-      });
-      plusBtn?.addEventListener('click', () => {
-        if (input?.disabled) return;
-        syncFn(input, numberInput, valueLabel, Number(input.value) + stepValueForInput(input, 1), fallback);
-        saveAudioConfig();
-      });
-      numberInput?.addEventListener('input', () => {
-        const raw = String(numberInput.value ?? '').trim();
-        if (raw === '') return;
-        const parsed = Number.parseInt(raw, 10);
-        const min = Number.parseInt(input?.min ?? '', 10);
-        const max = Number.parseInt(input?.max ?? '', 10);
-        if (
-          Number.isNaN(parsed) ||
-          (!Number.isNaN(min) && parsed < min) ||
-          (!Number.isNaN(max) && parsed > max)
-        ) return;
-        syncFn(input, numberInput, valueLabel, parsed, fallback);
-      });
-      const commitNumber = () => {
-        if (!numberInput) return;
-        const changed = commitPlaybackNumberInput(input, numberInput, valueLabel, fallback, syncFn);
-        if (changed) {
-          saveAudioConfig();
-        }
-      };
-      numberInput?.addEventListener('blur', commitNumber);
-      numberInput?.addEventListener('change', commitNumber);
-      numberInput?.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter') return;
-        event.preventDefault();
-        numberInput.blur();
-      });
-    });
     playbackLaserDebounceNumber?.addEventListener('blur', () => {
       if (commitPlaybackNumberOnlyInput(playbackLaserDebounceNumber, audioConfigSnapshot.laser_debounce_ms)) {
         saveAudioConfig();

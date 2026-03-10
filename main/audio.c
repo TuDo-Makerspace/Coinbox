@@ -79,9 +79,6 @@ static char s_current_file_name[FILE_ENTRY_NAME_MAX] = {0};
 // Volumes
 static volatile uint8_t s_master_volume = 35;
 static volatile uint8_t s_track_volume = 35;
-static volatile uint8_t s_lid_closed_volume = 100;
-static volatile uint8_t s_lid_open_volume = 25;
-static volatile bool s_lid_open;
 static volatile bool s_volume_dirty = true;
 static int s_current_volume_db = AUDIO_TEST_QUIET_DB;
 
@@ -142,7 +139,6 @@ static esp_err_t load_meta_or_stat_locked(const char *name);
 static audio_playback_skip_reason_t playback_skip_reason_locked(void);
 static void clear_playback_skip_notice_locked(void);
 static void record_playback_skip_notice_locked(const char *name, audio_playback_skip_reason_t reason);
-static void sync_lid_level_from_gpio(void);
 static void play_task(void *arg);
 static void stop_playback_task_locked(void);
 
@@ -260,7 +256,6 @@ esp_err_t audio_init(void)
 
     mute_outputs();
 
-    sync_lid_level_from_gpio();
     s_initialized = true;
     s_mode = AUDIO_MODE_UNINITIALIZED;
 
@@ -856,20 +851,12 @@ static inline uint8_t clamp_track_volume(uint8_t value)
     return (value > FILE_VOLUME_MAX) ? FILE_VOLUME_MAX : value;
 }
 
-static inline uint8_t active_lid_volume_level(void)
-{
-    return s_lid_open ? s_lid_open_volume : s_lid_closed_volume;
-}
-
 static inline bool playback_should_unmute(void)
 {
     if (s_master_volume == 0) {
         return false;
     }
     if (s_track_volume == 0) {
-        return false;
-    }
-    if (active_lid_volume_level() == 0) {
         return false;
     }
     return true;
@@ -880,10 +867,6 @@ const char *audio_playback_skip_reason_text(audio_playback_skip_reason_t reason)
     switch (reason) {
         case AUDIO_PLAYBACK_SKIP_TRACK_VOLUME_ZERO:
             return "track volume is 0%";
-        case AUDIO_PLAYBACK_SKIP_LID_CLOSED_VOLUME_ZERO:
-            return "lid-closed volume is 0%";
-        case AUDIO_PLAYBACK_SKIP_LID_OPEN_VOLUME_ZERO:
-            return "lid-open volume is 0%";
         case AUDIO_PLAYBACK_SKIP_NONE:
         default:
             return "";
@@ -894,12 +877,6 @@ static audio_playback_skip_reason_t playback_skip_reason_locked(void)
 {
     if (s_track_volume == 0) {
         return AUDIO_PLAYBACK_SKIP_TRACK_VOLUME_ZERO;
-    }
-    if (!s_lid_open && s_lid_closed_volume == 0) {
-        return AUDIO_PLAYBACK_SKIP_LID_CLOSED_VOLUME_ZERO;
-    }
-    if (s_lid_open && s_lid_open_volume == 0) {
-        return AUDIO_PLAYBACK_SKIP_LID_OPEN_VOLUME_ZERO;
     }
     return AUDIO_PLAYBACK_SKIP_NONE;
 }
@@ -931,9 +908,7 @@ static int compute_volume_db(void)
 {
     float master = (float)s_master_volume / 100.0f;
     float track = (float)s_track_volume / 100.0f;
-    float lid = (float)active_lid_volume_level() / 100.0f;
-
-    float effective_pct = master * track * lid * 100.0f;
+    float effective_pct = master * track * 100.0f;
     if (effective_pct < 0.0f) {
         effective_pct = 0.0f;
     }
@@ -968,14 +943,10 @@ static void set_stream_volume_db(int db, bool log_change)
 
     s_current_volume_db = db;
     if (log_change) {
-        ESP_LOGI(TAG, "Volume set to %d dB (master=%u track=%u lid_closed=%u lid_open=%u active_lid=%u open=%s)",
+        ESP_LOGI(TAG, "Volume set to %d dB (master=%u track=%u)",
                  s_current_volume_db,
                  (unsigned)s_master_volume,
-                 (unsigned)s_track_volume,
-                 (unsigned)s_lid_closed_volume,
-                 (unsigned)s_lid_open_volume,
-                 (unsigned)active_lid_volume_level(),
-                 s_lid_open ? "true" : "false");
+                 (unsigned)s_track_volume);
     }
 }
 
@@ -1508,7 +1479,6 @@ static void play_task(void *arg)
     s_play_stop_requested = false;
     s_playing = true;
 
-    sync_lid_level_from_gpio();
     s_current_volume_db = compute_volume_db();
     s_volume_dirty = false;
     if (playback_should_unmute()) {
@@ -1527,7 +1497,6 @@ static void play_task(void *arg)
             break;
         }
 
-        sync_lid_level_from_gpio();
         if (s_volume_dirty) {
             s_current_volume_db = compute_volume_db();
             s_volume_dirty = false;
@@ -1652,7 +1621,6 @@ static void play_task(void *arg)
     s_playing = true;
 
     bool outputs_unmuted = false;
-    sync_lid_level_from_gpio();
     apply_volume_to_stream();
     if (decoder_info_ready && playback_should_unmute()) {
         unmute_outputs();
@@ -1660,7 +1628,6 @@ static void play_task(void *arg)
     }
 
     while (!s_play_stop_requested) {
-        sync_lid_level_from_gpio();
         audio_event_iface_msg_t msg;
         esp_err_t res = audio_event_iface_listen(s_evt, &msg, pdMS_TO_TICKS(AUDIO_PLAY_EVENT_WAIT_MS));
 
@@ -1852,7 +1819,6 @@ esp_err_t audio_start_file(const char *name,
         return err;
     }
 
-    sync_lid_level_from_gpio();
     audio_playback_skip_reason_t skip_reason = playback_skip_reason_locked();
     if (skip_reason != AUDIO_PLAYBACK_SKIP_NONE) {
         record_playback_skip_notice_locked(name, skip_reason);
@@ -1949,19 +1915,6 @@ void audio_get_last_playback_skip_notice(uint32_t *out_seq,
     audio_unlock();
 }
 
-static void set_lid_level_internal(bool lid_open)
-{
-    if (s_lid_open != lid_open) {
-        s_lid_open = lid_open;
-        s_volume_dirty = true;
-    }
-}
-
-static void sync_lid_level_from_gpio(void)
-{
-    set_lid_level_internal(gpio_get_hall_level() != HALL_LID_CLOSED);
-}
-
 void audio_set_master_volume_level(uint8_t level)
 {
     s_master_volume = clamp_percent(level);
@@ -1972,21 +1925,4 @@ void audio_set_track_volume_level(uint8_t level)
 {
     s_track_volume = clamp_track_volume(level);
     s_volume_dirty = true;
-}
-
-void audio_set_lid_closed_volume_level(uint8_t level)
-{
-    s_lid_closed_volume = clamp_percent(level);
-    s_volume_dirty = true;
-}
-
-void audio_set_lid_open_volume_level(uint8_t level)
-{
-    s_lid_open_volume = clamp_percent(level);
-    s_volume_dirty = true;
-}
-
-void audio_set_lid_level(bool lid_open)
-{
-    set_lid_level_internal(lid_open);
 }

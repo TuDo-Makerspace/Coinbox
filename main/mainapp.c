@@ -100,13 +100,9 @@ _Static_assert(
 #define BOOT_NVS_KEY_SOUND_ENABLED "startup_sound"
 
 #define AUDIO_NVS_NAMESPACE "audio"
-#define AUDIO_NVS_KEY_LID_CLOSED_VOLUME "lid_closed_vol"
-#define AUDIO_NVS_KEY_LID_OPEN_VOLUME "lid_open_vol"
 #define AUDIO_NVS_KEY_LASER_DEBOUNCE_MS "laser_db_ms"
 #define AUDIO_NVS_KEY_HALL_DEBOUNCE_MS "hall_db_ms"
 #define AUDIO_NVS_KEY_LASER_COOLDOWN_MS "laser_cd_ms"
-#define AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT 100
-#define AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT 25
 #define AUDIO_DEFAULT_LASER_DEBOUNCE_MS GPIO_LASER_DEBOUNCE_DEFAULT_MS
 #define AUDIO_DEFAULT_HALL_DEBOUNCE_MS GPIO_HALL_DEBOUNCE_DEFAULT_MS
 #define AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS GPIO_LASER_TRIGGER_COOLDOWN_DEFAULT_MS
@@ -121,8 +117,6 @@ static const char *TAG = "file_server";
 
 static char s_http_scratch[SCRATCH_BUFSIZE];
 static bool s_boot_sound_enabled = true;
-static uint8_t s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
-static uint8_t s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
 static uint16_t s_audio_laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
 static uint16_t s_audio_hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
 static uint32_t s_audio_laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
@@ -273,22 +267,6 @@ static bool json_has_key(const char *json, const char *key)
     return json && key && strstr(json, key) != NULL;
 }
 
-static bool json_get_percent(const char *json, const char *key, uint8_t *out)
-{
-    if (!out) {
-        return false;
-    }
-    int value = 0;
-    if (!json_get_int(json, key, &value)) {
-        return false;
-    }
-    if (value < 0 || value > 100) {
-        return false;
-    }
-    *out = (uint8_t)value;
-    return true;
-}
-
 static bool json_get_uint16_in_range(const char *json,
                                      const char *key,
                                      uint16_t min_value,
@@ -423,8 +401,6 @@ esp_err_t mainapp_reset_boot_defaults(void)
 
 static void audio_config_apply(void)
 {
-    audio_set_lid_closed_volume_level(s_audio_lid_closed_volume_pct);
-    audio_set_lid_open_volume_level(s_audio_lid_open_volume_pct);
     gpio_set_laser_debounce_ms(s_audio_laser_debounce_ms);
     gpio_set_hall_debounce_ms(s_audio_hall_debounce_ms);
     gpio_set_laser_trigger_cooldown_ms(s_audio_laser_trigger_cooldown_ms);
@@ -432,8 +408,6 @@ static void audio_config_apply(void)
 
 static esp_err_t audio_config_load_from_nvs(void)
 {
-    s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
-    s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
     s_audio_laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
     s_audio_hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
     s_audio_laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
@@ -446,26 +420,6 @@ static esp_err_t audio_config_load_from_nvs(void)
     }
     if (err != ESP_OK) {
         return err;
-    }
-
-    uint8_t lid_closed = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
-    err = nvs_get_u8(nvs, AUDIO_NVS_KEY_LID_CLOSED_VOLUME, &lid_closed);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        nvs_close(nvs);
-        return err;
-    }
-    if (err == ESP_OK) {
-        s_audio_lid_closed_volume_pct = lid_closed;
-    }
-
-    uint8_t lid_open = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
-    err = nvs_get_u8(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME, &lid_open);
-    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        nvs_close(nvs);
-        return err;
-    }
-    if (err == ESP_OK) {
-        s_audio_lid_open_volume_pct = lid_open;
     }
 
     uint16_t laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
@@ -502,9 +456,7 @@ static esp_err_t audio_config_load_from_nvs(void)
     return ESP_OK;
 }
 
-static esp_err_t audio_config_store(uint8_t lid_closed_volume_pct,
-                                    uint8_t lid_open_volume_pct,
-                                    uint16_t laser_debounce_ms,
+static esp_err_t audio_config_store(uint16_t laser_debounce_ms,
                                     uint16_t hall_debounce_ms,
                                     uint32_t laser_trigger_cooldown_ms)
 {
@@ -514,13 +466,7 @@ static esp_err_t audio_config_store(uint8_t lid_closed_volume_pct,
         return err;
     }
 
-    err = nvs_set_u8(nvs, AUDIO_NVS_KEY_LID_CLOSED_VOLUME, lid_closed_volume_pct);
-    if (err == ESP_OK) {
-        err = nvs_set_u8(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME, lid_open_volume_pct);
-    }
-    if (err == ESP_OK) {
-        err = nvs_set_u16(nvs, AUDIO_NVS_KEY_LASER_DEBOUNCE_MS, laser_debounce_ms);
-    }
+    err = nvs_set_u16(nvs, AUDIO_NVS_KEY_LASER_DEBOUNCE_MS, laser_debounce_ms);
     if (err == ESP_OK) {
         err = nvs_set_u16(nvs, AUDIO_NVS_KEY_HALL_DEBOUNCE_MS, hall_debounce_ms);
     }
@@ -535,8 +481,6 @@ static esp_err_t audio_config_store(uint8_t lid_closed_volume_pct,
         return err;
     }
 
-    s_audio_lid_closed_volume_pct = lid_closed_volume_pct;
-    s_audio_lid_open_volume_pct = lid_open_volume_pct;
     s_audio_laser_debounce_ms = laser_debounce_ms;
     s_audio_hall_debounce_ms = hall_debounce_ms;
     s_audio_laser_trigger_cooldown_ms = laser_trigger_cooldown_ms;
@@ -553,21 +497,9 @@ esp_err_t mainapp_reset_audio_defaults(void)
     }
 
     if (err == ESP_OK) {
-        err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_CLOSED_VOLUME);
+        err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LASER_DEBOUNCE_MS);
         if (err == ESP_ERR_NVS_NOT_FOUND) {
             err = ESP_OK;
-        }
-        if (err == ESP_OK) {
-            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME);
-            if (err == ESP_ERR_NVS_NOT_FOUND) {
-                err = ESP_OK;
-            }
-        }
-        if (err == ESP_OK) {
-            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LASER_DEBOUNCE_MS);
-            if (err == ESP_ERR_NVS_NOT_FOUND) {
-                err = ESP_OK;
-            }
         }
         if (err == ESP_OK) {
             err = nvs_erase_key(nvs, AUDIO_NVS_KEY_HALL_DEBOUNCE_MS);
@@ -590,8 +522,6 @@ esp_err_t mainapp_reset_audio_defaults(void)
         }
     }
 
-    s_audio_lid_closed_volume_pct = AUDIO_DEFAULT_LID_CLOSED_VOLUME_PCT;
-    s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
     s_audio_laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
     s_audio_hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
     s_audio_laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
@@ -983,14 +913,11 @@ static esp_err_t send_boot_config_json(httpd_req_t *req)
 
 static esp_err_t send_audio_config_json(httpd_req_t *req)
 {
-    char resp[224];
+    char resp[160];
     int len = snprintf(resp,
                        sizeof(resp),
-                       "{\"lid_closed_volume_pct\":%u,\"lid_open_volume_pct\":%u,"
-                       "\"test_only\":{\"laser_debounce_ms\":%u,\"hall_debounce_ms\":%u,"
+                       "{\"test_only\":{\"laser_debounce_ms\":%u,\"hall_debounce_ms\":%u,"
                        "\"laser_trigger_cooldown_ms\":%u}}",
-                       (unsigned)s_audio_lid_closed_volume_pct,
-                       (unsigned)s_audio_lid_open_volume_pct,
                        (unsigned)s_audio_laser_debounce_ms,
                        (unsigned)s_audio_hall_debounce_ms,
                        (unsigned)s_audio_laser_trigger_cooldown_ms);
@@ -1282,28 +1209,10 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
     }
     body[req->content_len] = '\0';
 
-    uint8_t lid_closed_volume_pct = s_audio_lid_closed_volume_pct;
-    uint8_t lid_open_volume_pct = s_audio_lid_open_volume_pct;
     uint16_t laser_debounce_ms = s_audio_laser_debounce_ms;
     uint16_t hall_debounce_ms = s_audio_hall_debounce_ms;
     uint32_t laser_trigger_cooldown_ms = s_audio_laser_trigger_cooldown_ms;
     bool has_update = false;
-
-    if (json_has_key(body, "lid_closed_volume_pct")) {
-        if (!json_get_percent(body, "lid_closed_volume_pct", &lid_closed_volume_pct)) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid closed volume");
-            return ESP_FAIL;
-        }
-        has_update = true;
-    }
-
-    if (json_has_key(body, "lid_open_volume_pct")) {
-        if (!json_get_percent(body, "lid_open_volume_pct", &lid_open_volume_pct)) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid open volume");
-            return ESP_FAIL;
-        }
-        has_update = true;
-    }
 
     if (json_has_key(body, "laser_debounce_ms")) {
         if (!json_get_uint16_in_range(body,
@@ -1346,9 +1255,7 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    esp_err_t err = audio_config_store(lid_closed_volume_pct,
-                                       lid_open_volume_pct,
-                                       laser_debounce_ms,
+    esp_err_t err = audio_config_store(laser_debounce_ms,
                                        hall_debounce_ms,
                                        laser_trigger_cooldown_ms);
     if (err != ESP_OK) {
@@ -1357,9 +1264,7 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
     }
 
     ESP_LOGI(TAG,
-             "Audio config updated: lid_closed=%u lid_open=%u laser_debounce=%u hall_debounce=%u laser_cooldown=%u",
-             (unsigned)s_audio_lid_closed_volume_pct,
-             (unsigned)s_audio_lid_open_volume_pct,
+             "Audio config updated: laser_debounce=%u hall_debounce=%u laser_cooldown=%u",
              (unsigned)s_audio_laser_debounce_ms,
              (unsigned)s_audio_hall_debounce_ms,
              (unsigned)s_audio_laser_trigger_cooldown_ms);
@@ -3370,9 +3275,7 @@ esp_err_t start_mainapp(void)
     ESP_LOGI(TAG, "UI password lock: %s", security_is_password_set() ? "enabled" : "disabled");
     ESP_LOGI(TAG, "Startup sound: %s", s_boot_sound_enabled ? "enabled" : "disabled");
     ESP_LOGI(TAG,
-             "Playback volumes: lid_closed=%u lid_open=%u laser_debounce=%u hall_debounce=%u laser_cooldown=%u",
-             (unsigned)s_audio_lid_closed_volume_pct,
-             (unsigned)s_audio_lid_open_volume_pct,
+             "Playback settings: laser_debounce=%u hall_debounce=%u laser_cooldown=%u",
              (unsigned)s_audio_laser_debounce_ms,
              (unsigned)s_audio_hall_debounce_ms,
              (unsigned)s_audio_laser_trigger_cooldown_ms);
