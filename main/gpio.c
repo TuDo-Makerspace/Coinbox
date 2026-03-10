@@ -25,6 +25,7 @@
 #define GPIO_HALL_LID_SENSOR 2
 #define GPIO_INPUT_PIN_SEL ((1ULL << GPIO_LASER_RECEIVER) | (1ULL << GPIO_HALL_LID_SENSOR))
 #define LASER_EVENT_TASK_STACK (6144)
+#define HALL_EVENT_TASK_STACK  (6144)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Structs
@@ -53,6 +54,8 @@ static void gpio_laser_isr_handler(void *arg);
 static void gpio_hall_isr_handler(void *arg);
 static void laser_event_task(void *arg);
 static void laser_handle_blocked_trigger(TickType_t trigger_tick);
+static void hall_event_task(void *arg);
+static void hall_handle_open_trigger(TickType_t trigger_tick);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Vars
@@ -93,14 +96,20 @@ static uint32_t s_laser_trigger_cooldown_ms = GPIO_LASER_TRIGGER_COOLDOWN_DEFAUL
 
 // Laser task
 static TaskHandle_t s_laser_task;
+static TaskHandle_t s_hall_task;
 static TickType_t s_laser_last_play_tick;
 static TickType_t s_laser_last_trigger_tick;
+static TickType_t s_hall_last_open_tick;
+static TickType_t s_hall_last_close_tick;
+static char s_lid_open_sound[FILE_ENTRY_NAME_MAX] = {0};
+static uint8_t s_lid_open_volume_pct = 100;
 
 #if CONFIG_TEST_GPIO_INJECTION
 static volatile bool s_test_laser_override_valid;
 static volatile uint8_t s_test_laser_override_level;
 static volatile bool s_test_hall_override_valid;
 static volatile uint8_t s_test_hall_override_level;
+static TickType_t s_test_hall_synthetic_tick;
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -254,6 +263,17 @@ static void IRAM_ATTR gpio_hall_isr_handler(void *arg)
     const int level = gpio_get_level(GPIO_HALL_LID_SENSOR);
 
     gpio_input_event_push_from_isr(&s_hall_history, (uint8_t)(level ? 1 : 0));
+
+    if (!s_hall_task || s_runtime_mode != GPIO_RUNTIME_MAIN_APP) {
+        return;
+    }
+
+    uint32_t tick = (uint32_t)xTaskGetTickCountFromISR();
+    BaseType_t hp_task_woken = pdFALSE;
+    xTaskNotifyFromISR(s_hall_task, tick, eSetValueWithOverwrite, &hp_task_woken);
+    if (hp_task_woken == pdTRUE) {
+        portYIELD_FROM_ISR();
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -286,6 +306,35 @@ static void laser_event_task(void *arg)
 
         const TickType_t trigger_tick = evt_tick ? (TickType_t)evt_tick : xTaskGetTickCount();
         laser_handle_blocked_trigger(trigger_tick);
+    }
+}
+
+static void hall_event_task(void *arg)
+{
+    (void)arg;
+
+    uint32_t evt_tick = 0;
+    while (true) {
+        if (xTaskNotifyWait(0, UINT32_MAX, &evt_tick, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        uint32_t latest_tick = evt_tick;
+        while (xTaskNotifyWait(0, UINT32_MAX, &latest_tick, 0) == pdTRUE) {
+            evt_tick = latest_tick;
+        }
+        (void)evt_tick;
+
+        if (s_runtime_mode != GPIO_RUNTIME_MAIN_APP) {
+            continue;
+        }
+
+        const TickType_t trigger_tick = evt_tick ? (TickType_t)evt_tick : xTaskGetTickCount();
+        if (gpio_get_hall_level() == HALL_LID_CLOSED) {
+            s_hall_last_close_tick = trigger_tick;
+            continue;
+        }
+
+        hall_handle_open_trigger(trigger_tick);
     }
 }
 
@@ -358,6 +407,64 @@ static void laser_handle_blocked_trigger(TickType_t trigger_tick)
     }
 }
 
+static void hall_handle_open_trigger(TickType_t trigger_tick)
+{
+    const TickType_t debounce_ticks = s_debounce_time_hall_ms
+        ? pdMS_TO_TICKS(s_debounce_time_hall_ms)
+        : 0;
+
+    if (debounce_ticks > 0 &&
+        s_hall_last_open_tick != 0 &&
+        (trigger_tick - s_hall_last_open_tick) < debounce_ticks) {
+        return;
+    }
+    if (debounce_ticks > 0 &&
+        s_hall_last_open_tick != 0 &&
+        s_hall_last_close_tick != 0 &&
+        s_hall_last_close_tick > s_hall_last_open_tick &&
+        (trigger_tick - s_hall_last_close_tick) < debounce_ticks) {
+        return;
+    }
+    s_hall_last_open_tick = trigger_tick;
+
+    if (s_lid_open_sound[0] == '\0') {
+        ESP_LOGI(TAG, "Lid opened, but no lid-open sound is configured");
+        return;
+    }
+
+    if (s_lid_open_volume_pct == 0) {
+        ESP_LOGI(TAG, "Lid opened, but lid-open volume is 0%%");
+        return;
+    }
+
+    file_properties_t meta;
+    if (files_read_meta(s_lid_open_sound, &meta) != ESP_OK) {
+        ESP_LOGW(TAG, "Configured lid-open sound does not exist: %s", s_lid_open_sound);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Lid opened! Starting playback of %s", s_lid_open_sound);
+
+    audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
+    audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    esp_err_t err = audio_start_file_with_volume(s_lid_open_sound,
+                                                 s_lid_open_volume_pct,
+                                                 &start_result,
+                                                 &skip_reason);
+    if (err == ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "Configured lid-open sound does not exist: %s", s_lid_open_sound);
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start lid-open audio: %s", esp_err_to_name(err));
+    } else if (start_result == AUDIO_PLAYBACK_START_RESULT_STARTED) {
+        ESP_LOGI(TAG, "Playback started for lid-open sound: %s", s_lid_open_sound);
+    } else {
+        ESP_LOGW(TAG,
+                 "Lid-open playback skipped for file: %s (%s)",
+                 s_lid_open_sound,
+                 audio_playback_skip_reason_text(skip_reason));
+    }
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public Interface
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -401,6 +508,15 @@ esp_err_t gpio_init(void)
         if (res != pdPASS) {
             ESP_LOGE(TAG, "Failed to create laser event task");
             s_laser_task = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (!s_hall_task) {
+        BaseType_t res = xTaskCreate(hall_event_task, "hall-events", HALL_EVENT_TASK_STACK, NULL, tskIDLE_PRIORITY + 5, &s_hall_task);
+        if (res != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create hall event task");
+            s_hall_task = NULL;
             return ESP_ERR_NO_MEM;
         }
     }
@@ -529,6 +645,27 @@ uint16_t gpio_get_hall_debounce_ms(void)
     return s_debounce_time_hall_ms;
 }
 
+esp_err_t gpio_set_lid_open_sound(const char *name)
+{
+    if (!name || name[0] == '\0') {
+        s_lid_open_sound[0] = '\0';
+        return ESP_OK;
+    }
+    if (strchr(name, '/') || strchr(name, '\\')) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlcpy(s_lid_open_sound, name, sizeof(s_lid_open_sound)) >= sizeof(s_lid_open_sound)) {
+        s_lid_open_sound[0] = '\0';
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return ESP_OK;
+}
+
+void gpio_set_lid_open_volume_pct(uint8_t volume_pct)
+{
+    s_lid_open_volume_pct = (volume_pct > 100U) ? 100U : volume_pct;
+}
+
 #if CONFIG_TEST_GPIO_INJECTION
 esp_err_t gpio_test_set_laser_level(int level)
 {
@@ -583,6 +720,16 @@ esp_err_t gpio_test_set_hall_level(int level)
     s_test_hall_override_level = (uint8_t)level;
     s_test_hall_override_valid = true;
     gpio_input_event_push(&s_hall_history, (uint8_t)level);
+
+    if (s_hall_task && s_runtime_mode == GPIO_RUNTIME_MAIN_APP) {
+        TickType_t step = pdMS_TO_TICKS(25);
+        if (step == 0) {
+            step = 1;
+        }
+        s_test_hall_synthetic_tick += step;
+        uint32_t tick = (uint32_t)s_test_hall_synthetic_tick;
+        xTaskNotify(s_hall_task, tick, eSetValueWithOverwrite);
+    }
 
     return ESP_OK;
 }

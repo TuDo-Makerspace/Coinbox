@@ -82,6 +82,10 @@ void audio_test_set_volume_pct(float volume_pct);
 esp_err_t audio_start_file(const char *name,
                            audio_playback_start_result_t *out_result,
                            audio_playback_skip_reason_t *out_skip_reason);
+esp_err_t audio_start_file_with_volume(const char *name,
+                                       uint8_t volume_pct,
+                                       audio_playback_start_result_t *out_result,
+                                       audio_playback_skip_reason_t *out_skip_reason);
 bool audio_is_playing(void);
 void audio_get_playback_status(bool *out_active,
                                char *out_name,

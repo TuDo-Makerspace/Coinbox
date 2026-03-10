@@ -139,6 +139,10 @@ static esp_err_t load_meta_or_stat_locked(const char *name);
 static audio_playback_skip_reason_t playback_skip_reason_locked(void);
 static void clear_playback_skip_notice_locked(void);
 static void record_playback_skip_notice_locked(const char *name, audio_playback_skip_reason_t reason);
+static esp_err_t audio_start_file_internal(const char *name,
+                                           const uint8_t *override_volume_pct,
+                                           audio_playback_start_result_t *out_result,
+                                           audio_playback_skip_reason_t *out_skip_reason);
 static void play_task(void *arg);
 static void stop_playback_task_locked(void);
 
@@ -1764,9 +1768,10 @@ static void stop_playback_task_locked(void)
 // Public
 //-------------------------------------------------------------------------
 
-esp_err_t audio_start_file(const char *name,
-                           audio_playback_start_result_t *out_result,
-                           audio_playback_skip_reason_t *out_skip_reason)
+static esp_err_t audio_start_file_internal(const char *name,
+                                           const uint8_t *override_volume_pct,
+                                           audio_playback_start_result_t *out_result,
+                                           audio_playback_skip_reason_t *out_skip_reason)
 {
     if (out_result) {
         *out_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
@@ -1819,6 +1824,11 @@ esp_err_t audio_start_file(const char *name,
         return err;
     }
 
+    if (override_volume_pct) {
+        s_track_volume = clamp_percent(*override_volume_pct);
+        s_volume_dirty = true;
+    }
+
     audio_playback_skip_reason_t skip_reason = playback_skip_reason_locked();
     if (skip_reason != AUDIO_PLAYBACK_SKIP_NONE) {
         record_playback_skip_notice_locked(name, skip_reason);
@@ -1851,6 +1861,22 @@ esp_err_t audio_start_file(const char *name,
     ESP_LOGI(TAG, "Starting playback: %s", name);
     audio_unlock();
     return ESP_OK;
+}
+
+esp_err_t audio_start_file(const char *name,
+                           audio_playback_start_result_t *out_result,
+                           audio_playback_skip_reason_t *out_skip_reason)
+{
+    return audio_start_file_internal(name, NULL, out_result, out_skip_reason);
+}
+
+esp_err_t audio_start_file_with_volume(const char *name,
+                                       uint8_t volume_pct,
+                                       audio_playback_start_result_t *out_result,
+                                       audio_playback_skip_reason_t *out_skip_reason)
+{
+    uint8_t clamped_volume_pct = clamp_percent(volume_pct);
+    return audio_start_file_internal(name, &clamped_volume_pct, out_result, out_skip_reason);
 }
 
 bool audio_is_playing(void)

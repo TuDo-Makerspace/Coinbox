@@ -47,8 +47,7 @@ PANIC_LOG_MARKERS = [
     "Backtrace:",
 ]
 DEFAULT_SOUND_FILENAME = "default.mp3"
-AUDIO_CONFIG_TEST_ONLY_KEY = "test_only"
-AUDIO_CONFIG_TEST_ONLY_FIELDS = (
+AUDIO_CONFIG_DEBOUNCE_FIELDS = (
     "laser_debounce_ms",
     "hall_debounce_ms",
     "laser_trigger_cooldown_ms",
@@ -56,6 +55,11 @@ AUDIO_CONFIG_TEST_ONLY_FIELDS = (
 LASER_DEBOUNCE_DEFAULT_MS = 30
 LASER_DEBOUNCE_MIN_MS = 0
 LASER_DEBOUNCE_MAX_MS = 1000
+HALL_DEBOUNCE_DEFAULT_MS = 1000
+HALL_DEBOUNCE_MIN_MS = 0
+HALL_DEBOUNCE_MAX_MS = 5000
+LID_OPEN_VOLUME_MIN_PCT = 0
+LID_OPEN_VOLUME_MAX_PCT = 100
 
 
 @pytest.fixture
@@ -193,20 +197,30 @@ def _set_audio_config(base_url: str, payload: dict) -> dict:
     return _json_object(body, "POST /audio/config")
 
 
-def _set_audio_test_only_config(base_url: str, **updates) -> dict:
-    current = _get_audio_config(base_url)
-    current_test_only = current.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(current_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, "
-        f"got {current_test_only!r}"
-    )
-    next_test_only = dict(current_test_only)
-    next_test_only.update(updates)
-    return _set_audio_config(base_url, {AUDIO_CONFIG_TEST_ONLY_KEY: next_test_only})
-
-
 def _set_laser_debounce_ms(base_url: str, debounce_ms: int) -> dict:
-    return _set_audio_test_only_config(base_url, laser_debounce_ms=debounce_ms)
+    return _set_audio_config(base_url, {"laser_debounce_ms": debounce_ms})
+
+
+def _set_hall_debounce_ms(base_url: str, debounce_ms: int) -> dict:
+    return _set_audio_config(base_url, {"hall_debounce_ms": debounce_ms})
+
+
+def _set_lid_open_sound_config(
+    base_url: str,
+    *,
+    sound: str | None = None,
+    volume_pct: int | None = None,
+    hall_debounce_ms: int | None = None,
+) -> dict:
+    payload: dict[str, object] = {}
+    if sound is not None:
+        payload["lid_open_sound"] = sound
+    if volume_pct is not None:
+        payload["lid_open_volume_pct"] = volume_pct
+    if hall_debounce_ms is not None:
+        payload["hall_debounce_ms"] = hall_debounce_ms
+    assert payload, "Expected at least one lid-open sound config update."
+    return _set_audio_config(base_url, payload)
 
 
 def _set_boot_config(base_url: str, payload: dict) -> dict:
@@ -243,6 +257,12 @@ def _set_test_gpio_level(base_url: str, name: str, level: int):
 def _trigger_laser_playback(base_url: str):
     _set_test_gpio_level(base_url, "laser", 0)
     _set_test_gpio_level(base_url, "laser", 1)
+
+
+def _trigger_lid_open(base_url: str, settle_s: float = 0.02):
+    _set_test_gpio_level(base_url, "hall", 0)
+    time.sleep(settle_s)
+    _set_test_gpio_level(base_url, "hall", 1)
 
 
 def _trigger_laser_playback_burst(base_url: str, count: int, interval_s: float):
@@ -330,6 +350,20 @@ def _configure_single_laser_candidate(base_url: str, filename: str):
     assert body == "OK"
 
 
+def _delete_sound_file(base_url: str, filename: str):
+    return _http_get(base_url, f"/sounds/{filename}?delete=1", timeout_s=4.0)
+
+
+def _format_storage(base_url: str):
+    return _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=4.0,
+        data=b"",
+    )
+
+
 # Test: Device boots into main app with DAC + AMP muted.
 # 1. Start from main app mode.
 # 2. Poll test GPIO mute endpoints.
@@ -405,80 +439,56 @@ def test_entering_main_app_does_not_play_default_sound_when_boot_sound_disabled(
     )
 
 
-# Test: `/audio/config` exposes writable test-only debounce settings.
+# Test: `/audio/config` exposes writable top-level debounce settings.
 # 1. Start from main app mode and capture baseline audio config.
-# 2. Assert the test-only debounce object is present with integer timing fields.
-# 3. POST new test-only debounce values.
+# 2. Assert the top-level debounce fields are present with integer values.
+# 3. POST new debounce values.
 # 4. Verify the response and a fresh GET both reflect the new debounce values.
-# 5. Verify the removed lid-volume fields are absent from the config payload.
-def test_audio_config_updates_test_only_debounce_settings(qemu_mainapp_instance):
+# 5. Verify the legacy `test_only` nesting is gone from the config payload.
+def test_audio_config_updates_top_level_debounce_settings(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
 
     baseline = _get_audio_config(base_url)
-    assert "lid_closed_volume_pct" not in baseline
-    assert "lid_open_volume_pct" not in baseline
-    baseline_test_only = baseline.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(baseline_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, "
-        f"got {baseline_test_only!r}"
-    )
-    for key in AUDIO_CONFIG_TEST_ONLY_FIELDS:
-        value = baseline_test_only.get(key)
+    assert "test_only" not in baseline, f"Did not expect legacy test_only key in /audio/config. got {baseline}"
+    for key in AUDIO_CONFIG_DEBOUNCE_FIELDS:
+        value = baseline.get(key)
         assert isinstance(value, int), (
-            f"Expected integer {AUDIO_CONFIG_TEST_ONLY_KEY}.{key} in /audio/config, got {value!r}"
+            f"Expected integer {key} in /audio/config, got {value!r}"
         )
         assert value >= 0, (
-            f"Expected non-negative {AUDIO_CONFIG_TEST_ONLY_KEY}.{key} in /audio/config, got {value}"
+            f"Expected non-negative {key} in /audio/config, got {value}"
         )
 
-    new_test_only = {
+    new_values = {
         "laser_debounce_ms": 25,
         "hall_debounce_ms": 750,
         "laser_trigger_cooldown_ms": 125,
     }
-    updated = _set_audio_config(base_url, {AUDIO_CONFIG_TEST_ONLY_KEY: new_test_only})
-    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(updated_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after POST /audio/config, "
-        f"got {updated_test_only!r}"
-    )
-    for key, expected in new_test_only.items():
-        assert updated_test_only.get(key) == expected, (
-            f"Expected {AUDIO_CONFIG_TEST_ONLY_KEY}.{key}={expected} after POST /audio/config, "
-            f"got {updated_test_only.get(key)!r}"
+    updated = _set_audio_config(base_url, new_values)
+    assert "test_only" not in updated, f"Did not expect legacy test_only key after POST /audio/config. got {updated}"
+    for key, expected in new_values.items():
+        assert updated.get(key) == expected, (
+            f"Expected {key}={expected} after POST /audio/config, got {updated.get(key)!r}"
         )
 
-    assert "lid_closed_volume_pct" not in updated
-    assert "lid_open_volume_pct" not in updated
-
     readback = _get_audio_config(base_url)
-    assert "lid_closed_volume_pct" not in readback
-    assert "lid_open_volume_pct" not in readback
-    readback_test_only = readback.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(readback_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} on GET /audio/config readback, "
-        f"got {readback_test_only!r}"
-    )
-    for key, expected in new_test_only.items():
-        assert readback_test_only.get(key) == expected, (
-            f"Expected readback {AUDIO_CONFIG_TEST_ONLY_KEY}.{key}={expected}, "
-            f"got {readback_test_only.get(key)!r}"
+    assert "test_only" not in readback, f"Did not expect legacy test_only key on GET /audio/config readback. got {readback}"
+    for key, expected in new_values.items():
+        assert readback.get(key) == expected, (
+            f"Expected readback {key}={expected}, got {readback.get(key)!r}"
         )
 
 
 # Test: `/audio/config` reports `30ms` as the default laser debounce.
 # 1. Start from main app mode and read `/audio/config`.
-# 2. Assert the test-only object is present.
-# 3. Assert `test_only.laser_debounce_ms` equals the default `30`.
+# 2. Assert the top-level laser debounce field is present.
+# 3. Assert `laser_debounce_ms` equals the default `30`.
 def test_audio_config_reports_default_laser_debounce_ms(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
 
     config = _get_audio_config(base_url)
-    test_only = config.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, got {test_only!r}"
-    )
-    assert test_only.get("laser_debounce_ms") == LASER_DEBOUNCE_DEFAULT_MS, (
+    assert "test_only" not in config, f"Did not expect legacy test_only key in /audio/config. got {config}"
+    assert config.get("laser_debounce_ms") == LASER_DEBOUNCE_DEFAULT_MS, (
         "Expected default laser debounce to be 30ms.\n"
         f"Config: {config}"
     )
@@ -493,26 +503,17 @@ def test_audio_config_rejects_out_of_range_laser_debounce_values(qemu_mainapp_in
     base_url = qemu_mainapp_instance["base_url"]
 
     baseline = _get_audio_config(base_url)
-    baseline_test_only = baseline.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(baseline_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} in /audio/config, got {baseline_test_only!r}"
-    )
-    baseline_laser_debounce = baseline_test_only.get("laser_debounce_ms")
+    assert "test_only" not in baseline, f"Did not expect legacy test_only key in /audio/config. got {baseline}"
+    baseline_laser_debounce = baseline.get("laser_debounce_ms")
     assert isinstance(baseline_laser_debounce, int), (
-        f"Expected integer {AUDIO_CONFIG_TEST_ONLY_KEY}.laser_debounce_ms, got {baseline_laser_debounce!r}"
+        f"Expected integer laser_debounce_ms, got {baseline_laser_debounce!r}"
     )
 
     for bad_value in (LASER_DEBOUNCE_MIN_MS - 1, LASER_DEBOUNCE_MAX_MS + 1):
-        payload = {
-            AUDIO_CONFIG_TEST_ONLY_KEY: {
-                **baseline_test_only,
-                "laser_debounce_ms": bad_value,
-            }
-        }
         status, _, body = _http_post_json(
             base_url=base_url,
             path="/audio/config",
-            payload=payload,
+            payload={"laser_debounce_ms": bad_value},
             timeout_s=4.0,
         )
         assert status == 400, (
@@ -521,12 +522,111 @@ def test_audio_config_rejects_out_of_range_laser_debounce_values(qemu_mainapp_in
         )
 
         readback = _get_audio_config(base_url)
-        readback_test_only = readback.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-        assert isinstance(readback_test_only, dict), (
-            f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} on readback, got {readback_test_only!r}"
-        )
-        assert readback_test_only.get("laser_debounce_ms") == baseline_laser_debounce, (
+        assert readback.get("laser_debounce_ms") == baseline_laser_debounce, (
             f"Out-of-range laser debounce value {bad_value} should not change stored config.\n"
+            f"Readback: {readback}"
+        )
+
+
+# Test: `/audio/config` rejects lid-open sounds that do not exist on storage.
+# 1. Start from main app mode and capture the current lid-open sound selection.
+# 2. Attempt to save a non-existing MP3 as the lid-open sound.
+# 3. Assert the request is rejected with a lid-open-sound-specific error.
+# 4. Assert the stored lid-open sound selection remains empty afterwards.
+def test_audio_config_rejects_nonexistent_lid_open_sound(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    missing_name = f"{_unique_name('missing-lid-open')}.mp3"
+
+    status, _, body = _http_post_json(
+        base_url=base_url,
+        path="/audio/config",
+        payload={"lid_open_sound": missing_name},
+        timeout_s=4.0,
+    )
+    assert status == 400, f"Expected 400 when selecting a missing lid-open sound. body={body}"
+    body_lower = body.lower()
+    assert "lid" in body_lower and "open" in body_lower, (
+        "Expected rejection body to mention the lid-open sound field.\n"
+        f"body={body}"
+    )
+    assert ("does not exist" in body_lower) or ("not found" in body_lower), (
+        "Expected rejection body to explain that the lid-open sound file does not exist.\n"
+        f"body={body}"
+    )
+
+    readback = _get_audio_config(base_url)
+    assert readback.get("lid_open_sound") == "", (
+        "Missing lid-open sound should not be persisted into /audio/config.\n"
+        f"Readback: {readback}"
+    )
+
+
+# Test: `/audio/config` rejects lid-open volume values outside `0-100`.
+# 1. Upload a valid MP3 and configure it as the lid-open sound candidate.
+# 2. Attempt to save lid-open volumes below `0` and above `100`.
+# 3. Assert each request is rejected with a lid-open-volume-specific error.
+# 4. Assert the stored lid-open volume remains unchanged afterwards.
+def test_audio_config_rejects_invalid_lid_open_volume_values(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    filename = f"{_unique_name('lid-open-volume-valid')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    baseline = _get_audio_config(base_url)
+    baseline_volume = baseline.get("lid_open_volume_pct", 100)
+
+    for bad_value in (LID_OPEN_VOLUME_MIN_PCT - 1, LID_OPEN_VOLUME_MAX_PCT + 1):
+        status, _, body = _http_post_json(
+            base_url=base_url,
+            path="/audio/config",
+            payload={"lid_open_sound": filename, "lid_open_volume_pct": bad_value},
+            timeout_s=4.0,
+        )
+        assert status == 400, (
+            f"Expected 400 for invalid lid-open volume {bad_value}. body={body}"
+        )
+        body_lower = body.lower()
+        assert "lid" in body_lower and "volume" in body_lower, (
+            "Expected rejection body to mention the lid-open volume field.\n"
+            f"body={body}"
+        )
+
+        readback = _get_audio_config(base_url)
+        assert readback.get("lid_open_volume_pct", baseline_volume) == baseline_volume, (
+            f"Invalid lid-open volume {bad_value} should not change stored config.\n"
+            f"Readback: {readback}"
+        )
+
+
+# Test: `/audio/config` rejects hall/lid debounce values outside `0-5000`.
+# 1. Start from main app mode and capture the current hall debounce.
+# 2. Attempt to save hall debounce values below `0` and above `5000`.
+# 3. Assert each request is rejected with `400`.
+# 4. Assert the stored hall debounce remains unchanged afterwards.
+def test_audio_config_rejects_out_of_range_hall_debounce_values(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    baseline = _get_audio_config(base_url)
+    baseline_hall_debounce = baseline.get("hall_debounce_ms")
+    assert isinstance(baseline_hall_debounce, int), (
+        f"Expected integer hall_debounce_ms, got {baseline_hall_debounce!r}"
+    )
+
+    for bad_value in (HALL_DEBOUNCE_MIN_MS - 1, HALL_DEBOUNCE_MAX_MS + 1):
+        status, _, body = _http_post_json(
+            base_url=base_url,
+            path="/audio/config",
+            payload={"hall_debounce_ms": bad_value},
+            timeout_s=4.0,
+        )
+        assert status == 400, (
+            f"Expected 400 for invalid hall debounce {bad_value}. body={body}"
+        )
+
+        readback = _get_audio_config(base_url)
+        assert readback.get("hall_debounce_ms") == baseline_hall_debounce, (
+            f"Invalid hall debounce {bad_value} should not change stored config.\n"
             f"Readback: {readback}"
         )
 
@@ -540,11 +640,7 @@ def test_laser_gpio_history_is_exempt_from_playback_debounce(qemu_mainapp_instan
     base_url = qemu_mainapp_instance["base_url"]
 
     updated = _set_laser_debounce_ms(base_url, 200)
-    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(updated_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after debounce update, got {updated_test_only!r}"
-    )
-    assert updated_test_only.get("laser_debounce_ms") == 200
+    assert updated.get("laser_debounce_ms") == 200, updated
 
     status, _, body = _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"probability": 0, "enabled": True})
     assert status == 200, f"Failed to disable default sound for raw-history test. body={body}"
@@ -589,11 +685,7 @@ def test_laser_playback_is_guarded_by_laser_debounce(qemu_mainapp_instance):
     assert idle, f"Startup playback did not clear before debounce guard test.\nLog tail:\n{_tail_log(log_path)}"
 
     updated = _set_laser_debounce_ms(base_url, 200)
-    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(updated_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after debounce update, got {updated_test_only!r}"
-    )
-    assert updated_test_only.get("laser_debounce_ms") == 200
+    assert updated.get("laser_debounce_ms") == 200, updated
 
     filename = f"{_unique_name('laser-debounce-guard-6165ms')}.mp3"
     _configure_single_laser_candidate(base_url, filename)
@@ -638,11 +730,7 @@ def test_zero_laser_debounce_disables_playback_guarding(qemu_mainapp_instance):
     )
 
     updated = _set_laser_debounce_ms(base_url, 0)
-    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(updated_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after debounce update, got {updated_test_only!r}"
-    )
-    assert updated_test_only.get("laser_debounce_ms") == 0
+    assert updated.get("laser_debounce_ms") == 0, updated
 
     filename = f"{_unique_name('laser-debounce-zero-6165ms')}.mp3"
     _configure_single_laser_candidate(base_url, filename)
@@ -682,11 +770,7 @@ def test_changing_laser_debounce_changes_playback_behavior(qemu_mainapp_instance
     _configure_single_laser_candidate(base_url, filename)
 
     updated = _set_laser_debounce_ms(base_url, 200)
-    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(updated_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after high-debounce update, got {updated_test_only!r}"
-    )
-    assert updated_test_only.get("laser_debounce_ms") == 200
+    assert updated.get("laser_debounce_ms") == 200, updated
 
     high_log_start = log_path.stat().st_size if log_path.exists() else 0
     _trigger_laser_playback_burst(base_url, count=3, interval_s=0.08)
@@ -706,11 +790,7 @@ def test_changing_laser_debounce_changes_playback_behavior(qemu_mainapp_instance
     _stop_playback_if_active(base_url)
 
     updated = _set_laser_debounce_ms(base_url, 50)
-    updated_test_only = updated.get(AUDIO_CONFIG_TEST_ONLY_KEY)
-    assert isinstance(updated_test_only, dict), (
-        f"Expected object {AUDIO_CONFIG_TEST_ONLY_KEY!r} after low-debounce update, got {updated_test_only!r}"
-    )
-    assert updated_test_only.get("laser_debounce_ms") == 50
+    assert updated.get("laser_debounce_ms") == 50, updated
 
     low_log_start = log_path.stat().st_size if log_path.exists() else 0
     _trigger_laser_playback_burst(base_url, count=3, interval_s=0.08)
@@ -1334,6 +1414,326 @@ def test_laser_break_with_open_lid_does_not_start_playback(qemu_mainapp_instance
         assert _outputs_are_muted(base_url), (
             f"DAC/AMP should stay muted when laser playback is blocked by an open lid.\nLog tail:\n{_tail_log(log_path)}"
         )
+    finally:
+        _set_test_gpio_level(base_url, "hall", 0)
+
+
+# Test: Opening the lid starts playback of the configured lid-open sound.
+# 1. Upload a timed MP3 and configure it as the lid-open sound with non-zero volume and zero hall debounce.
+# 2. Force the hall sensor from closed to open.
+# 3. Assert `/audio/playback` reports the configured file active.
+# 4. Assert logs show the lid-open event selected that file for playback.
+def test_lid_open_event_starts_configured_playback(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, f"Startup playback did not clear before lid-open playback test.\nLog tail:\n{_tail_log(log_path)}"
+
+    filename = f"{_unique_name('lid-open-start-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_open_sound_config(
+        base_url,
+        sound=filename,
+        volume_pct=100,
+        hall_debounce_ms=0,
+    )
+    assert config.get("lid_open_sound") == filename, config
+    assert config.get("lid_open_volume_pct") == 100, config
+    assert config.get("hall_debounce_ms") == 0, config
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    try:
+        _trigger_lid_open(base_url)
+
+        playback_state: dict[str, object] = {}
+
+        def _configured_lid_open_file_is_active() -> bool:
+            nonlocal playback_state
+            playback_state = _audio_playback_state(base_url)
+            return bool(playback_state.get("active")) and playback_state.get("file") == filename
+
+        playing = _wait_until(
+            _configured_lid_open_file_is_active,
+            timeout_s=4.0,
+            poll_s=0.1,
+        )
+        assert playing, (
+            "Expected lid-open event to start playback of the configured file.\n"
+            f"Last state: {playback_state}\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        lid_open_logged = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                [f"Lid opened! Starting playback of {filename}"],
+            ),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert lid_open_logged, (
+            "Expected logs to show the lid-open event selected the configured file.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+    finally:
+        _audio_playback_stop(base_url, timeout_s=8.0)
+        _wait_for_playback_idle(base_url, timeout_s=3.0)
+        _set_test_gpio_level(base_url, "hall", 0)
+
+
+# Test: Lid-open playback honors the configured hall debounce.
+# 1. Upload a non-timed MP3 and configure it as the lid-open sound.
+# 2. Set a hall debounce of `200ms`.
+# 3. Toggle the hall sensor open -> closed -> open within the debounce window.
+# 4. Assert only one playback start is logged for the configured file.
+def test_lid_open_event_honors_hall_debounce(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, f"Startup playback did not clear before lid-open debounce test.\nLog tail:\n{_tail_log(log_path)}"
+
+    filename = f"{_unique_name('lid-open-debounce')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_open_sound_config(
+        base_url,
+        sound=filename,
+        volume_pct=100,
+        hall_debounce_ms=200,
+    )
+    assert config.get("lid_open_sound") == filename, config
+    assert config.get("lid_open_volume_pct") == 100, config
+    assert config.get("hall_debounce_ms") == 200, config
+
+    _set_test_gpio_level(base_url, "hall", 0)
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+
+    _set_test_gpio_level(base_url, "hall", 1)
+    time.sleep(0.05)
+    _set_test_gpio_level(base_url, "hall", 0)
+    time.sleep(0.05)
+    _set_test_gpio_level(base_url, "hall", 1)
+
+    first_start_seen = _wait_until(
+        lambda: _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}") >= 1,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert first_start_seen, (
+        "Expected at least one playback start after opening the lid.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    time.sleep(0.5)
+    start_count = _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}")
+    assert start_count == 1, (
+        "Expected hall debounce to suppress repeated lid-open playback within the debounce window.\n"
+        f"Observed start count: {start_count}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    _set_test_gpio_level(base_url, "hall", 0)
+
+
+# Test: Lid-open playback is skipped when the configured lid-open volume is `0%`.
+# 1. Upload an MP3 and configure it as the lid-open sound with volume `0`.
+# 2. Open the lid.
+# 3. Assert logs explain that lid-open playback is skipped because the configured volume is `0%`.
+# 4. Assert playback never becomes active and outputs stay muted.
+def test_lid_open_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before lid-open zero-volume test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('lid-open-zero-volume-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_open_sound_config(
+        base_url,
+        sound=filename,
+        volume_pct=0,
+        hall_debounce_ms=0,
+    )
+    assert config.get("lid_open_sound") == filename, config
+    assert config.get("lid_open_volume_pct") == 0, config
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    try:
+        _trigger_lid_open(base_url)
+
+        skip_logged = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                ["Lid opened, but lid-open volume is 0%"],
+            ),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert skip_logged, (
+            "Expected logs to show lid-open playback was skipped because the configured volume is 0%.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+        assert stayed_inactive, (
+            "Lid-open zero-volume playback unexpectedly became active.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        assert not _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Starting playback: {filename}"],
+        ), f"Lid-open volume 0% should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
+        assert _outputs_are_muted(base_url), (
+            f"DAC/AMP should stay muted when lid-open playback is skipped for 0% volume.\nLog tail:\n{_tail_log(log_path)}"
+        )
+    finally:
+        _set_test_gpio_level(base_url, "hall", 0)
+
+
+# Test: Lid-open playback is skipped when no lid-open sound is configured.
+# 1. Clear the lid-open sound selection and set hall debounce to `0`.
+# 2. Open the lid.
+# 3. Assert logs explain that no lid-open sound is configured.
+# 4. Assert playback never becomes active and outputs stay muted.
+def test_lid_open_event_is_skipped_when_no_sound_is_configured(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before lid-open no-sound test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    config = _set_lid_open_sound_config(base_url, sound="", hall_debounce_ms=0)
+    assert config.get("lid_open_sound") == "", config
+    assert config.get("hall_debounce_ms") == 0, config
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    try:
+        _trigger_lid_open(base_url)
+
+        skip_logged = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                ["Lid opened, but no lid-open sound is configured"],
+            ),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert skip_logged, (
+            "Expected logs to show lid-open playback was skipped because no sound is configured.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+        assert stayed_inactive, (
+            "Lid-open event unexpectedly started playback even though no sound is configured.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+        assert _outputs_are_muted(base_url), (
+            f"DAC/AMP should stay muted when no lid-open sound is configured.\nLog tail:\n{_tail_log(log_path)}"
+        )
+    finally:
+        _set_test_gpio_level(base_url, "hall", 0)
+
+
+# Test: Deleting the selected lid-open sound clears the saved lid-open sound setting.
+# 1. Upload an MP3 and configure it as the lid-open sound.
+# 2. Delete that sound through the normal `/sounds/<name>?delete=1` endpoint.
+# 3. Assert `/audio/config` clears `lid_open_sound` afterwards.
+def test_deleting_selected_lid_open_sound_clears_audio_config(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    filename = f"{_unique_name('lid-open-delete-clear')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_open_sound_config(base_url, sound=filename, volume_pct=84, hall_debounce_ms=0)
+    assert config.get("lid_open_sound") == filename, config
+    assert config.get("lid_open_volume_pct") == 84, config
+
+    delete_status, delete_headers, delete_body = _delete_sound_file(base_url, filename)
+    assert delete_status == 303, (
+        f"Deleting the selected lid-open sound should still succeed normally. body={delete_body}"
+    )
+    assert delete_headers.get("Location") == "/sounds/"
+    assert "File deleted successfully" in delete_body
+
+    readback = _get_audio_config(base_url)
+    assert readback.get("lid_open_sound") == "", (
+        "Deleting the selected lid-open sound should clear the saved lid-open sound selection.\n"
+        f"Readback: {readback}"
+    )
+
+
+# Test: A stale configured lid-open sound fails in a controlled manner if the file disappears.
+# 1. Upload an MP3 and configure it as the lid-open sound.
+# 2. Format storage so the selected file disappears while the config remains.
+# 3. Open the lid.
+# 4. Assert playback stays inactive and logs report the missing configured file without a panic.
+def test_stale_configured_lid_open_sound_fails_cleanly(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before stale lid-open sound test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('lid-open-stale-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_open_sound_config(base_url, sound=filename, volume_pct=100, hall_debounce_ms=0)
+    assert config.get("lid_open_sound") == filename, config
+
+    status, _, body = _format_storage(base_url)
+    assert status == 200, f"Failed to format storage while preparing stale lid-open sound test. body={body}"
+    assert "Formatted" in body
+
+    missing_status, _, _ = _http_get(base_url, f"/sounds/{filename}", timeout_s=4.0)
+    assert missing_status == 404, f"Expected stale lid-open sound file to be gone after format, got status={missing_status}"
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    try:
+        _trigger_lid_open(base_url)
+
+        missing_logged = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                [f"Configured lid-open sound does not exist: {filename}"],
+            ),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert missing_logged, (
+            "Expected logs to report the missing configured lid-open sound file.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+        assert stayed_inactive, (
+            "Stale configured lid-open sound unexpectedly became active.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+        assert _outputs_are_muted(base_url), (
+            f"DAC/AMP should stay muted when the configured lid-open sound file is missing.\nLog tail:\n{_tail_log(log_path)}"
+        )
+        _assert_no_panic_since(log_path, log_start_pos)
     finally:
         _set_test_gpio_level(base_url, "hall", 0)
 

@@ -581,10 +581,6 @@
       grid-template-columns: 1fr 1fr;
       gap: 1.5rem;
     }
-    .playback-debounce-group {
-      align-self: stretch;
-      max-width: none;
-    }
     .playback-setting-row {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -610,6 +606,20 @@
     }
     .playback-setting-control.slider-number-wrap {
       justify-self: end;
+    }
+    .playback-select {
+      min-width: min(320px, 70vw);
+      padding: 0.55rem 0.7rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      font: inherit;
+      background: #fff;
+      color: var(--text);
+    }
+    .playback-select:disabled {
+      background: #eef2f7;
+      color: #64748b;
+      cursor: not-allowed;
     }
     .sensor-grid {
       display: grid;
@@ -731,12 +741,44 @@
         <h2>Playback</h2>
       </div>
       <div class="playback-groups">
-        <div class="playback-group playback-debounce-group">
+        <div class="playback-group">
           <div class="playback-setting-row">
-            <label class="section-label playback-setting-title" for="playback-laser-debounce-number">Laser Debounce</label>
-            <p class="note playback-setting-note">Prevents the laser sensor from triggering multiple sounds too quickly in a row. Increase it if one coin sometimes causes repeated playback.</p>
+            <label class="playback-setting-title" for="playback-laser-debounce-number">Coin detection debounce</label>
+            <p class="note playback-setting-note">Prevents coin detection from triggering multiple sounds too quickly in a row. Increase it if one coin sometimes causes repeated playback. Range: 0-1000 ms. Default: 30 ms.</p>
             <div class="slider-number-wrap playback-setting-control">
               <input class="slider-number" id="playback-laser-debounce-number" type="number" min="0" max="1000" step="5" inputmode="numeric" value="30" disabled>
+              <span class="slider-number-unit">ms</span>
+            </div>
+          </div>
+        </div>
+        <div class="playback-group">
+          <div class="playback-setting-row">
+            <label class="playback-setting-title" for="playback-lid-open-sound">Lid opening sound</label>
+            <p class="note playback-setting-note">Play a selected sound whenever the lid is opened. Choose None to disable this event.</p>
+            <select class="playback-select playback-setting-control" id="playback-lid-open-sound" disabled>
+              <option value="">Loading sounds...</option>
+            </select>
+          </div>
+          <div class="slider-row">
+            <label for="playback-lid-open-volume">Lid opening volume</label>
+            <p class="note">Volume of the lid open sound.</p>
+            <div class="slider-control">
+              <div class="slider-wrap">
+                <button class="nudge" id="playback-lid-open-volume-minus" type="button">-</button>
+                <input type="range" id="playback-lid-open-volume" min="0" max="100" value="100" step="1" disabled>
+                <button class="nudge" id="playback-lid-open-volume-plus" type="button">+</button>
+              </div>
+              <div class="slider-number-wrap">
+                <input class="slider-number" id="playback-lid-open-volume-number" type="number" min="0" max="100" step="1" inputmode="numeric" value="100" disabled>
+                <span class="slider-number-unit">%</span>
+              </div>
+            </div>
+          </div>
+          <div class="playback-setting-row">
+            <label class="playback-setting-title" for="playback-hall-debounce-number">Lid opening debounce</label>
+            <p class="note playback-setting-note">Minimum time before the lid open sound can play again. Range: 0-5000 ms. Default: 1000 ms.</p>
+            <div class="slider-number-wrap playback-setting-control">
+              <input class="slider-number" id="playback-hall-debounce-number" type="number" min="0" max="5000" step="25" inputmode="numeric" value="1000" disabled>
               <span class="slider-number-unit">ms</span>
             </div>
           </div>
@@ -974,6 +1016,12 @@
     const disableApWhenStaConnectedInput = document.getElementById('network-disable-ap-when-sta-connected');
     const networkSaveBtn = document.getElementById('network-save');
     const networkMacText = document.getElementById('network-mac');
+    const playbackLidOpenSoundSelect = document.getElementById('playback-lid-open-sound');
+    const playbackLidOpenVolumeSlider = document.getElementById('playback-lid-open-volume');
+    const playbackLidOpenVolumeMinusBtn = document.getElementById('playback-lid-open-volume-minus');
+    const playbackLidOpenVolumePlusBtn = document.getElementById('playback-lid-open-volume-plus');
+    const playbackLidOpenVolumeNumber = document.getElementById('playback-lid-open-volume-number');
+    const playbackHallDebounceNumber = document.getElementById('playback-hall-debounce-number');
     const playbackLaserDebounceNumber = document.getElementById('playback-laser-debounce-number');
     const startupSoundInput = document.getElementById('startup-sound-enabled');
     const systemFirmwareText = document.getElementById('system-firmware');
@@ -989,7 +1037,7 @@
     const securityPasswordConfirmInput = document.getElementById('security-password-confirm');
     const securitySaveBtn = document.getElementById('security-save');
     const securityRemoveBtn = document.getElementById('security-remove');
-    const DEVICE_INFO_TIMEOUT_MS = 1500;
+    const DEVICE_INFO_TIMEOUT_MS = 5000;
     const RUNTIME_STATUS_TIMEOUT_MS = 5000;
     const LOG_POLL_MS = 2000;
     const IP_POLL_MS = 5000;
@@ -1002,12 +1050,16 @@
     let audioConfigLoaded = false;
     let audioConfigSaving = false;
     let audioConfigResaveRequested = false;
+    let soundOptionsLoaded = false;
+    let soundOptionsLoading = false;
+    let playbackSoundOptions = [];
     let networkSaving = false;
     let networkSaveOldLabel = 'Save network settings';
     let bootConfigLoaded = false;
     let bootConfigSaving = false;
     let bootSoundEnabledSnapshot = true;
     let deviceInfoLoading = false;
+    let deviceInfoPromise = null;
     let runtimeStatusPromise = null;
     let securitySaving = false;
     const NETWORK_PASSWORD_MASK_VALUE = 'xxxxxxxxxxxx';
@@ -1024,6 +1076,9 @@
     };
     const audioConfigSnapshot = {
       laser_debounce_ms: 30,
+      hall_debounce_ms: 1000,
+      lid_open_sound: '',
+      lid_open_volume_pct: 100,
     };
 
     function getPageBootId() {
@@ -1062,7 +1117,14 @@
     async function ensurePageBootId() {
       const bootId = getPageBootId();
       if (bootId) return bootId;
-      return fetchRuntimeStatus();
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const fetchedBootId = await fetchRuntimeStatus();
+        if (fetchedBootId) return fetchedBootId;
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
+      }
+      return '';
     }
 
     function escapeHtml(str) {
@@ -1103,6 +1165,18 @@
       return Math.min(1000, Math.max(0, parsed));
     }
 
+    function clampHallDebounceMs(value, fallback = 1000) {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed)) return fallback;
+      return Math.min(5000, Math.max(0, parsed));
+    }
+
+    function clampLidOpenVolumePct(value, fallback = 100) {
+      const parsed = Number.parseInt(value, 10);
+      if (Number.isNaN(parsed)) return fallback;
+      return Math.min(100, Math.max(0, parsed));
+    }
+
     function clampValueForInput(input, value, fallback = 0) {
       const parsed = Number.parseInt(value, 10);
       if (Number.isNaN(parsed)) return fallback;
@@ -1126,8 +1200,60 @@
       return next;
     }
 
+    function syncRangeNumberControl(rangeInput, numberInput, value, fallback = 0) {
+      const inputForClamp = numberInput || rangeInput;
+      const next = clampValueForInput(inputForClamp, value, fallback);
+      if (rangeInput) rangeInput.value = String(next);
+      if (numberInput) numberInput.value = String(next);
+      return next;
+    }
+
+    function commitPlaybackRangeNumberInput(rangeInput, numberInput, fallback = 0) {
+      if (!numberInput) return false;
+      const raw = String(numberInput.value ?? '').trim();
+      if (raw === '') {
+        syncRangeNumberControl(rangeInput, numberInput, fallback, fallback);
+        return false;
+      }
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isNaN(parsed)) {
+        syncRangeNumberControl(rangeInput, numberInput, fallback, fallback);
+        return false;
+      }
+      syncRangeNumberControl(rangeInput, numberInput, parsed, fallback);
+      return true;
+    }
+
+    function renderLidOpenSoundOptions(selectedValue) {
+      if (!playbackLidOpenSoundSelect) return;
+
+      const selected = typeof selectedValue === 'string' ? selectedValue : '';
+      const options = [{ name: '', label: 'None' }];
+      const seen = new Set(['']);
+
+      playbackSoundOptions.forEach((entry) => {
+        const name = typeof entry?.name === 'string' ? entry.name : '';
+        const label = typeof entry?.label === 'string' ? entry.label : name;
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        options.push({ name, label: label || name });
+      });
+
+      if (selected && !seen.has(selected)) {
+        options.push({ name: selected, label: `Missing: ${selected}` });
+      }
+
+      playbackLidOpenSoundSelect.innerHTML = options
+        .map((entry) => `<option value="${escapeHtml(entry.name)}">${escapeHtml(entry.label)}</option>`)
+        .join('');
+      playbackLidOpenSoundSelect.value = selected;
+    }
+
     function updateAudioConfigSnapshot(data) {
-      audioConfigSnapshot.laser_debounce_ms = clampLaserDebounceMs(data?.test_only?.laser_debounce_ms, 30);
+      audioConfigSnapshot.laser_debounce_ms = clampLaserDebounceMs(data?.laser_debounce_ms, 30);
+      audioConfigSnapshot.hall_debounce_ms = clampHallDebounceMs(data?.hall_debounce_ms, 1000);
+      audioConfigSnapshot.lid_open_sound = typeof data?.lid_open_sound === 'string' ? data.lid_open_sound : '';
+      audioConfigSnapshot.lid_open_volume_pct = clampLidOpenVolumePct(data?.lid_open_volume_pct, 100);
     }
 
     function currentAudioConfigDraft() {
@@ -1136,17 +1262,42 @@
           playbackLaserDebounceNumber?.value,
           audioConfigSnapshot.laser_debounce_ms,
         ),
+        hall_debounce_ms: clampHallDebounceMs(
+          playbackHallDebounceNumber?.value,
+          audioConfigSnapshot.hall_debounce_ms,
+        ),
+        lid_open_sound: playbackLidOpenSoundSelect?.value ?? audioConfigSnapshot.lid_open_sound,
+        lid_open_volume_pct: clampLidOpenVolumePct(
+          playbackLidOpenVolumeNumber?.value,
+          audioConfigSnapshot.lid_open_volume_pct,
+        ),
       };
     }
 
     function renderAudioConfig(data) {
-      const laserDebounceMs = clampLaserDebounceMs(data?.test_only?.laser_debounce_ms, 30);
+      const laserDebounceMs = clampLaserDebounceMs(data?.laser_debounce_ms, 30);
+      const hallDebounceMs = clampHallDebounceMs(data?.hall_debounce_ms, 1000);
+      const lidOpenSound = typeof data?.lid_open_sound === 'string' ? data.lid_open_sound : '';
+      const lidOpenVolumePct = clampLidOpenVolumePct(data?.lid_open_volume_pct, 100);
       const controlsDisabled = !audioConfigLoaded;
 
       syncNumberOnlyControl(playbackLaserDebounceNumber, laserDebounceMs, 30);
-      [playbackLaserDebounceNumber].forEach((control) => {
+      syncNumberOnlyControl(playbackHallDebounceNumber, hallDebounceMs, 1000);
+      syncRangeNumberControl(playbackLidOpenVolumeSlider, playbackLidOpenVolumeNumber, lidOpenVolumePct, 100);
+      renderLidOpenSoundOptions(lidOpenSound);
+      [
+        playbackLaserDebounceNumber,
+        playbackHallDebounceNumber,
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        playbackLidOpenVolumeMinusBtn,
+        playbackLidOpenVolumePlusBtn,
+      ].forEach((control) => {
         if (control) control.disabled = controlsDisabled;
       });
+      if (playbackLidOpenSoundSelect) {
+        playbackLidOpenSoundSelect.disabled = controlsDisabled || !soundOptionsLoaded;
+      }
     }
 
     function commitPlaybackNumberOnlyInput(numberInput, fallback = 0) {
@@ -1180,6 +1331,26 @@
       }
     }
 
+    async function fetchSoundOptions() {
+      if (!playbackLidOpenSoundSelect || soundOptionsLoading) return;
+      soundOptionsLoading = true;
+      try {
+        const res = await fetch('/sounds/list', { cache: 'no-store' });
+        if (!res.ok) throw new Error('Failed to fetch sound options');
+        const data = await res.json();
+        playbackSoundOptions = Array.isArray(data?.files)
+          ? data.files.filter((entry) => typeof entry?.name === 'string' && entry.name)
+          : [];
+        soundOptionsLoaded = true;
+      } catch (_) {
+        playbackSoundOptions = [];
+        soundOptionsLoaded = false;
+      } finally {
+        soundOptionsLoading = false;
+        renderAudioConfig(audioConfigSnapshot);
+      }
+    }
+
     async function saveAudioConfig() {
       if (!audioConfigLoaded) return;
       if (audioConfigSaving) {
@@ -1189,7 +1360,16 @@
       const draft = currentAudioConfigDraft();
       const payload = {};
       if (draft.laser_debounce_ms !== audioConfigSnapshot.laser_debounce_ms) {
-        payload.test_only = { laser_debounce_ms: draft.laser_debounce_ms };
+        payload.laser_debounce_ms = draft.laser_debounce_ms;
+      }
+      if (draft.hall_debounce_ms !== audioConfigSnapshot.hall_debounce_ms) {
+        payload.hall_debounce_ms = draft.hall_debounce_ms;
+      }
+      if (draft.lid_open_sound !== audioConfigSnapshot.lid_open_sound) {
+        payload.lid_open_sound = draft.lid_open_sound;
+      }
+      if (draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct) {
+        payload.lid_open_volume_pct = draft.lid_open_volume_pct;
       }
       if (Object.keys(payload).length === 0) return;
 
@@ -1544,21 +1724,27 @@
     }
 
     async function fetchDeviceInfo() {
-      if (deviceInfoLoading) return;
+      if (deviceInfoPromise) return deviceInfoPromise;
       deviceInfoLoading = true;
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), DEVICE_INFO_TIMEOUT_MS);
-      try {
-        const res = await fetch('/device/info', { cache: 'no-store', signal: controller.signal });
-        if (!res.ok) throw new Error('Failed to load device info');
-        const data = await res.json();
-        renderDeviceInfo(data);
-      } catch (_) {
-        renderDeviceInfo({});
-      } finally {
-        clearTimeout(timeoutId);
-        deviceInfoLoading = false;
-      }
+      deviceInfoPromise = (async () => {
+        try {
+          const res = await fetch('/device/info', { cache: 'no-store', signal: controller.signal });
+          if (!res.ok) throw new Error('Failed to load device info');
+          const data = await res.json();
+          renderDeviceInfo(data);
+          return data;
+        } catch (_) {
+          renderDeviceInfo({});
+          return null;
+        } finally {
+          clearTimeout(timeoutId);
+          deviceInfoLoading = false;
+          deviceInfoPromise = null;
+        }
+      })();
+      return deviceInfoPromise;
     }
 
     function renderSecurityConfig(data) {
@@ -2651,6 +2837,90 @@
         saveBootConfig();
       });
     }
+    playbackLidOpenSoundSelect?.addEventListener('change', () => {
+      saveAudioConfig();
+    });
+    playbackLidOpenVolumeSlider?.addEventListener('input', () => {
+      syncRangeNumberControl(
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        playbackLidOpenVolumeSlider.value,
+        audioConfigSnapshot.lid_open_volume_pct,
+      );
+    });
+    playbackLidOpenVolumeSlider?.addEventListener('change', () => {
+      saveAudioConfig();
+    });
+    playbackLidOpenVolumeMinusBtn?.addEventListener('click', () => {
+      const next = Number(playbackLidOpenVolumeSlider.value) - stepValueForInput(playbackLidOpenVolumeSlider, 1);
+      syncRangeNumberControl(
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        next,
+        audioConfigSnapshot.lid_open_volume_pct,
+      );
+      saveAudioConfig();
+    });
+    playbackLidOpenVolumePlusBtn?.addEventListener('click', () => {
+      const next = Number(playbackLidOpenVolumeSlider.value) + stepValueForInput(playbackLidOpenVolumeSlider, 1);
+      syncRangeNumberControl(
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        next,
+        audioConfigSnapshot.lid_open_volume_pct,
+      );
+      saveAudioConfig();
+    });
+    playbackLidOpenVolumeNumber?.addEventListener('input', () => {
+      const raw = String(playbackLidOpenVolumeNumber.value ?? '').trim();
+      if (raw === '') return;
+      const parsed = Number.parseInt(raw, 10);
+      if (Number.isNaN(parsed)) return;
+      syncRangeNumberControl(
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        parsed,
+        audioConfigSnapshot.lid_open_volume_pct,
+      );
+    });
+    playbackLidOpenVolumeNumber?.addEventListener('blur', () => {
+      if (commitPlaybackRangeNumberInput(
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        audioConfigSnapshot.lid_open_volume_pct,
+      )) {
+        saveAudioConfig();
+      }
+    });
+    playbackLidOpenVolumeNumber?.addEventListener('change', () => {
+      if (commitPlaybackRangeNumberInput(
+        playbackLidOpenVolumeSlider,
+        playbackLidOpenVolumeNumber,
+        audioConfigSnapshot.lid_open_volume_pct,
+      )) {
+        saveAudioConfig();
+      }
+    });
+    playbackLidOpenVolumeNumber?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      playbackLidOpenVolumeNumber.blur();
+    });
+    playbackHallDebounceNumber?.addEventListener('blur', () => {
+      if (commitPlaybackNumberOnlyInput(playbackHallDebounceNumber, audioConfigSnapshot.hall_debounce_ms)) {
+        saveAudioConfig();
+      }
+    });
+    playbackHallDebounceNumber?.addEventListener('change', () => {
+      if (commitPlaybackNumberOnlyInput(playbackHallDebounceNumber, audioConfigSnapshot.hall_debounce_ms)) {
+        saveAudioConfig();
+      }
+    });
+    playbackHallDebounceNumber?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      playbackHallDebounceNumber.blur();
+    });
     playbackLaserDebounceNumber?.addEventListener('blur', () => {
       if (commitPlaybackNumberOnlyInput(playbackLaserDebounceNumber, audioConfigSnapshot.laser_debounce_ms)) {
         saveAudioConfig();
@@ -2690,6 +2960,7 @@
         fetchDeviceInfo();
         fetchLog();
         fetchGpioState();
+        fetchSoundOptions();
         fetchAudioConfig();
         fetchNetworkIps();
         fetchNetworkConfig();
@@ -2707,9 +2978,10 @@
     renderEventChart(laserChart, laserEvents, '#2563eb');
     renderEventChart(hallChart, hallEvents, '#f97316');
     const initialBootIdReady = ensurePageBootId();
-    fetchDeviceInfo();
+    const initialDeviceInfoReady = fetchDeviceInfo();
     fetchLog();
     fetchGpioState();
+    fetchSoundOptions();
     fetchAudioConfig();
     fetchNetworkIps();
     fetchNetworkConfig();
@@ -2720,7 +2992,7 @@
     startIpAutoRefresh();
     fetchToneStatus();
     startToneAutoRefresh();
-    initialBootIdReady.finally(() => {
+    Promise.allSettled([initialBootIdReady, initialDeviceInfoReady]).finally(() => {
       rootElement.dataset.pageReady = '1';
     });
   </script>
