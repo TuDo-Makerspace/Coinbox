@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-boot-id="{{BOOT_ID}}">
+<html lang="en" data-boot-id="">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -800,7 +800,7 @@
     <div class="card">
       <div class="card-header">
         <h2>Network</h2>
-        <div class="card-meta" id="network-mac">{{DEVICE_MAC}}</div>
+        <div class="card-meta" id="network-mac">Loading...</div>
       </div>
       <p class="note network-note">Changes will be applied after reboot</p>
       <div class="network-grid">
@@ -968,12 +968,12 @@
       </div>
       <div class="info-subcard">
         <div class="info-list">
-          <p class="note" id="system-firmware">Firmware: {{FIRMWARE_VERSION}}</p>
-          <p class="note" id="system-hardware">Hardware: {{HARDWARE_VERSION}}</p>
-          <p class="note" id="system-recovery-code">Recovery Code: {{RECOVERY_CODE}}</p>
-          <p class="note" id="system-vendor">Vendor: {{VENDOR_NAME}}</p>
-          <p class="note">Source Code: <a id="system-source-code" href="{{SOURCE_CODE_URL}}" target="_blank" rel="noopener noreferrer">{{SOURCE_CODE_URL}}</a></p>
-          <p class="note" id="system-license">License: {{LICENSE_NAME}}</p>
+          <p class="note" id="system-firmware">Firmware: Loading...</p>
+          <p class="note" id="system-hardware">Hardware: Loading...</p>
+          <p class="note" id="system-recovery-code">Recovery Code: Loading...</p>
+          <p class="note" id="system-vendor">Vendor: Loading...</p>
+          <p class="note">Source Code: <a id="system-source-code" href="#" target="_blank" rel="noopener noreferrer">Loading...</a></p>
+          <p class="note" id="system-license">License: Loading...</p>
         </div>
       </div>
       <div class="actions">
@@ -996,6 +996,7 @@
       window.COINBOX_GLYPHS.sprinkleBackgroundGlyphs();
     }
 
+    const rootElement = document.documentElement;
     const box = document.getElementById('log-box');
     const apIpText = document.getElementById('network-ap-ip');
     const staIpText = document.getElementById('network-sta-ip');
@@ -1035,6 +1036,7 @@
     const securitySaveBtn = document.getElementById('security-save');
     const securityRemoveBtn = document.getElementById('security-remove');
     const DEVICE_INFO_TIMEOUT_MS = 1500;
+    const RUNTIME_STATUS_TIMEOUT_MS = 5000;
     const LOG_POLL_MS = 2000;
     const IP_POLL_MS = 5000;
     let logIntervalId;
@@ -1052,6 +1054,7 @@
     let bootConfigSaving = false;
     let bootSoundEnabledSnapshot = true;
     let deviceInfoLoading = false;
+    let runtimeStatusPromise = null;
     let securitySaving = false;
     const NETWORK_PASSWORD_MASK_VALUE = 'xxxxxxxxxxxx';
     const apPasswordState = { masked: false, edited: false };
@@ -1070,6 +1073,45 @@
       lid_open_volume_pct: 25,
       laser_debounce_ms: 30,
     };
+
+    function getPageBootId() {
+      if (!rootElement || !rootElement.dataset) return '';
+      return String(rootElement.dataset.bootId || '');
+    }
+
+    function setPageBootId(bootId) {
+      if (!rootElement || !rootElement.dataset) return;
+      rootElement.dataset.bootId = typeof bootId === 'string' ? bootId : '';
+    }
+
+    function fetchRuntimeStatus() {
+      if (runtimeStatusPromise) return runtimeStatusPromise;
+      runtimeStatusPromise = (async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), RUNTIME_STATUS_TIMEOUT_MS);
+        try {
+          const res = await fetch('/runtime/status', { cache: 'no-store', signal: controller.signal });
+          if (!res.ok) throw new Error('Failed to load runtime status');
+          const data = await res.json();
+          const bootId = typeof data?.boot_id === 'string' ? data.boot_id : '';
+          setPageBootId(bootId);
+          return bootId;
+        } catch (_) {
+          return getPageBootId();
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      })().finally(() => {
+        runtimeStatusPromise = null;
+      });
+      return runtimeStatusPromise;
+    }
+
+    async function ensurePageBootId() {
+      const bootId = getPageBootId();
+      if (bootId) return bootId;
+      return fetchRuntimeStatus();
+    }
 
     function escapeHtml(str) {
       return str
@@ -2686,9 +2728,10 @@
       return res;
     }
 
-    function showRestartPendingOverlay() {
+    async function showRestartPendingOverlay() {
       const monitor = window.COINBOX_CONNECTION_MONITOR;
       if (monitor && typeof monitor.expectDisconnect === 'function') {
+        await ensurePageBootId();
         monitor.expectDisconnect();
       }
     }
@@ -2703,7 +2746,7 @@
     document.getElementById('download-log').addEventListener('click', downloadLog);
     document.getElementById('restart-device').addEventListener('click', async () => {
       if (!confirm('Restart the device?')) return;
-      showRestartPendingOverlay();
+      await showRestartPendingOverlay();
       try {
         await postSystemAction('/restart', 'Restart failed', { coinboxAllowDuringExpectedDisconnect: true });
       } catch (e) {
@@ -2713,7 +2756,7 @@
     });
     document.getElementById('reset-settings').addEventListener('click', async () => {
       if (!confirm('Reset all settings to defaults? This will remove the UI password, restore network settings, and restart the device.')) return;
-      showRestartPendingOverlay();
+      await showRestartPendingOverlay();
       try {
         await postSystemAction('/settings/reset', 'Reset settings failed', { coinboxAllowDuringExpectedDisconnect: true });
       } catch (e) {
@@ -2842,6 +2885,7 @@
     }
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
+        fetchRuntimeStatus();
         fetchDeviceInfo();
         fetchLog();
         fetchGpioState();
@@ -2861,6 +2905,7 @@
     }
     renderEventChart(laserChart, laserEvents, '#2563eb');
     renderEventChart(hallChart, hallEvents, '#f97316');
+    const initialBootIdReady = ensurePageBootId();
     fetchDeviceInfo();
     fetchLog();
     fetchGpioState();
@@ -2874,7 +2919,9 @@
     startIpAutoRefresh();
     fetchToneStatus();
     startToneAutoRefresh();
-    document.documentElement.dataset.pageReady = '1';
+    initialBootIdReady.finally(() => {
+      rootElement.dataset.pageReady = '1';
+    });
   </script>
 </body>
 </html>

@@ -809,49 +809,9 @@ static esp_err_t http_resp_settings_html(httpd_req_t *req)
     extern const unsigned char settings_html_start[] asm("_binary_settings_html_start");
     extern const unsigned char settings_html_end[] asm("_binary_settings_html_end");
     const size_t settings_html_size = (settings_html_end - settings_html_start);
-    const size_t render_headroom = 512;
-    if (settings_html_size >= (SIZE_MAX - (render_headroom + 1))) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Template size overflow");
-        return ESP_ERR_NO_MEM;
-    }
-
-    const size_t page_capacity = settings_html_size + render_headroom + 1;
-    char *page = malloc(page_capacity);
-    if (!page) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
-        return ESP_ERR_NO_MEM;
-    }
-
-    memcpy(page, settings_html_start, settings_html_size);
-    page[settings_html_size] = '\0';
-
-    char mac[18] = {0};
-    if (device_info_get_mac_string(mac, sizeof(mac)) != ESP_OK) {
-        strlcpy(mac, "unknown", sizeof(mac));
-    }
-    char recovery_code[8] = {0};
-    if (device_info_get_recovery_code_string(recovery_code, sizeof(recovery_code)) != ESP_OK) {
-        strlcpy(recovery_code, "unknown", sizeof(recovery_code));
-    }
-
-    if (!replace_placeholder(page, page_capacity, "{{BOOT_ID}}", runtime_status_boot_id()) ||
-        !replace_placeholder(page, page_capacity, "{{DEVICE_MAC}}", mac) ||
-        !replace_placeholder(page, page_capacity, "{{RECOVERY_CODE}}", recovery_code) ||
-        !replace_placeholder(page, page_capacity, "{{FIRMWARE_VERSION}}", device_info_firmware_version()) ||
-        !replace_placeholder(page, page_capacity, "{{HARDWARE_VERSION}}", device_info_hardware_version()) ||
-        !replace_placeholder(page, page_capacity, "{{VENDOR_NAME}}", device_info_vendor()) ||
-        !replace_placeholder(page, page_capacity, "{{SOURCE_CODE_URL}}", device_info_source_code_url()) ||
-        !replace_placeholder(page, page_capacity, "{{LICENSE_NAME}}", device_info_license_name())) {
-        free(page);
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
-        return ESP_FAIL;
-    }
-
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
-    free(page);
-    return ESP_OK;
+    return httpd_resp_send(req, (const char *)settings_html_start, settings_html_size);
 }
 
 static esp_err_t http_resp_login_html(httpd_req_t *req)
