@@ -14,6 +14,7 @@
 #include "audio_pipeline.h"
 #include "board.h"
 #include "driver/i2s.h"
+#include "esp_heap_caps.h"
 #include "esp_idf_version.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
@@ -1280,6 +1281,162 @@ static esp_err_t load_meta_or_stat_locked(const char *name)
 }
 
 #if CONFIG_TEST_AUDIO_MOCK_BACKEND
+// See notes/playback_memory_mock.md for the measured hardware footprint and
+// why the timed mock playback path reserves heap in this shape.
+#define MOCK_PLAYBACK_HEAP_TARGET_BYTES              (82 * 1024)
+#define MOCK_PLAYBACK_HEAP_MAX_BYTES                 (192 * 1024)
+#define MOCK_PLAYBACK_HEAP_MIN_FREE_BYTES            (48 * 1024)
+#define MOCK_PLAYBACK_TARGET_FREE_BYTES              (76 * 1024)
+#define MOCK_PLAYBACK_TARGET_LARGEST_FREE_BYTES      (96 * 1024)
+#define MOCK_PLAYBACK_HEAP_BLOCK_SLOTS               32
+
+typedef struct {
+    void *blocks[MOCK_PLAYBACK_HEAP_BLOCK_SLOTS];
+    size_t sizes[MOCK_PLAYBACK_HEAP_BLOCK_SLOTS];
+    size_t block_count;
+    size_t total_size;
+} mock_playback_heap_profile_t;
+
+static size_t mock_playback_heap_target_bytes(void)
+{
+    size_t reserve_target = MOCK_PLAYBACK_HEAP_TARGET_BYTES;
+    size_t free8 = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+    if (free8 > MOCK_PLAYBACK_TARGET_FREE_BYTES) {
+        size_t free_target = free8 - MOCK_PLAYBACK_TARGET_FREE_BYTES;
+        if (free_target > reserve_target) {
+            reserve_target = free_target;
+        }
+    }
+
+    size_t largest_free = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    if (largest_free > MOCK_PLAYBACK_TARGET_LARGEST_FREE_BYTES) {
+        size_t collapse_target = largest_free - MOCK_PLAYBACK_TARGET_LARGEST_FREE_BYTES;
+        if (collapse_target > reserve_target) {
+            reserve_target = collapse_target;
+        }
+    }
+
+    if (free8 <= MOCK_PLAYBACK_HEAP_MIN_FREE_BYTES) {
+        return 0;
+    }
+
+    size_t max_reserve = free8 - MOCK_PLAYBACK_HEAP_MIN_FREE_BYTES;
+    if (reserve_target > max_reserve) {
+        reserve_target = max_reserve;
+    }
+    if (reserve_target > MOCK_PLAYBACK_HEAP_MAX_BYTES) {
+        reserve_target = MOCK_PLAYBACK_HEAP_MAX_BYTES;
+    }
+    return reserve_target;
+}
+
+static void mock_playback_heap_profile_release(mock_playback_heap_profile_t *profile)
+{
+    if (!profile) {
+        return;
+    }
+
+    while (profile->block_count > 0) {
+        profile->block_count--;
+        free(profile->blocks[profile->block_count]);
+        profile->blocks[profile->block_count] = NULL;
+        profile->sizes[profile->block_count] = 0;
+    }
+    profile->total_size = 0;
+}
+
+static size_t mock_playback_heap_profile_acquire(mock_playback_heap_profile_t *profile)
+{
+    static const size_t block_pattern[] = {
+        4 * 1024,
+        8 * 1024,
+        4 * 1024,
+        5 * 1024,
+        3584,
+        3600,
+        8 * 1024,
+        4 * 1024,
+    };
+
+    if (!profile) {
+        return 0;
+    }
+
+    memset(profile, 0, sizeof(*profile));
+
+    size_t target = mock_playback_heap_target_bytes();
+    if (target == 0) {
+        return 0;
+    }
+
+    size_t remaining = target;
+    size_t largest_before = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    size_t largest_guard = 40 * 1024;
+    if (largest_before > MOCK_PLAYBACK_TARGET_LARGEST_FREE_BYTES) {
+        size_t collapse_target = largest_before - MOCK_PLAYBACK_TARGET_LARGEST_FREE_BYTES;
+        if (collapse_target > largest_guard) {
+            largest_guard = collapse_target;
+        }
+    }
+    if (largest_guard > remaining) {
+        largest_guard = remaining;
+    }
+
+    if (largest_guard > 0) {
+        void *guard = heap_caps_malloc(largest_guard, MALLOC_CAP_8BIT);
+        if (guard) {
+            memset(guard, 0xA5, largest_guard);
+            profile->blocks[profile->block_count] = guard;
+            profile->sizes[profile->block_count] = largest_guard;
+            profile->block_count++;
+            profile->total_size += largest_guard;
+            remaining -= largest_guard;
+        } else {
+            ESP_LOGW(TAG,
+                     "Mock playback largest-block reserve failed (size=%u)",
+                     (unsigned)largest_guard);
+        }
+    }
+
+    size_t pattern_len = sizeof(block_pattern) / sizeof(block_pattern[0]);
+    for (size_t i = 0; remaining > 0 && profile->block_count < MOCK_PLAYBACK_HEAP_BLOCK_SLOTS; i++) {
+        size_t pattern_size = block_pattern[i % pattern_len];
+        size_t alloc_size = remaining < pattern_size ? remaining : pattern_size;
+        void *block = heap_caps_malloc(alloc_size, MALLOC_CAP_8BIT);
+        if (!block) {
+            ESP_LOGW(TAG,
+                     "Mock playback heap reserve failed at block %u (size=%u, reserved=%u/%u)",
+                     (unsigned)profile->block_count,
+                     (unsigned)alloc_size,
+                     (unsigned)profile->total_size,
+                     (unsigned)target);
+            break;
+        }
+
+        memset(block, 0xA5, alloc_size);
+        profile->blocks[profile->block_count] = block;
+        profile->sizes[profile->block_count] = alloc_size;
+        profile->block_count++;
+        profile->total_size += alloc_size;
+        remaining -= alloc_size;
+    }
+
+    if (remaining > 0) {
+        ESP_LOGW(TAG,
+                 "Mock playback heap profile incomplete: reserved=%u target=%u blocks=%u",
+                 (unsigned)profile->total_size,
+                 (unsigned)target,
+                 (unsigned)profile->block_count);
+    } else {
+        ESP_LOGI(TAG,
+                 "Mock playback heap profile reserved %u bytes across %u blocks",
+                 (unsigned)profile->total_size,
+                 (unsigned)profile->block_count);
+    }
+
+    return profile->total_size;
+}
+
 // Parse playback duration from basename pattern "...<digits>ms...".
 // Example: "test6165ms.mp3" -> 6165.
 static uint32_t mock_playback_duration_from_path_ms(const char *path)
@@ -1333,6 +1490,7 @@ static void play_task(void *arg)
 
 #if CONFIG_TEST_AUDIO_MOCK_BACKEND
     uint32_t mock_duration_ms = mock_playback_duration_from_path_ms(s_current_file_path);
+    mock_playback_heap_profile_t mock_heap = {0};
     TickType_t start_tick = xTaskGetTickCount();
     TickType_t duration_ticks = 0;
     if (mock_duration_ms > 0) {
@@ -1340,6 +1498,7 @@ static void play_task(void *arg)
         if (duration_ticks == 0) {
             duration_ticks = 1;
         }
+        mock_playback_heap_profile_acquire(&mock_heap);
     } else {
         ESP_LOGW(TAG,
                  "Mock playback duration missing in filename: %s (finishing immediately)",
@@ -1386,6 +1545,9 @@ static void play_task(void *arg)
         mute_outputs();
     } else {
         fade_out_then_mute();
+    }
+    if (mock_heap.total_size > 0) {
+        mock_playback_heap_profile_release(&mock_heap);
     }
 
     s_play_stop_requested = false;
