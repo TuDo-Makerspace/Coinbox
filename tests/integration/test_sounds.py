@@ -5,6 +5,7 @@ import re
 import time
 import urllib.error
 from html.parser import HTMLParser
+from urllib.parse import quote, urlencode
 
 import pytest
 
@@ -44,6 +45,23 @@ def _unique_name(prefix: str) -> str:
 
 DEFAULT_SOUND_FILENAME = "default.mp3"
 DEFAULT_SOUND_LABEL = "Coin (Default)"
+SPECIAL_FILENAME_SCENARIOS = (
+    {
+        "label": "spaces-and-parentheses",
+        "source": "special upload 6165ms (mix cut).mp3",
+        "target": "renamed track 6165ms + plus (final cut).mp3",
+    },
+    {
+        "label": "plus-ampersand-comma",
+        "source": "mix+demo 6165ms, track & take!.mp3",
+        "target": "release 6165ms + final, track & take!.mp3",
+    },
+    {
+        "label": "apostrophe-and-brackets",
+        "source": "apostrophe's live 6165ms [set]!.mp3",
+        "target": "next take's 6165ms [rev a], live!.mp3",
+    },
+)
 
 
 class _SoundsMenuParser(HTMLParser):
@@ -121,6 +139,47 @@ def _upload_sound(base_url: str, filename: str, payload: bytes, timeout_s: float
         data=payload,
         headers={"Content-Type": "audio/mpeg"},
     )
+
+
+def _encoded_sound_path(filename: str) -> str:
+    return f"/sounds/{quote(filename, safe='')}"
+
+
+def _upload_sound_encoded(base_url: str, filename: str, payload: bytes, timeout_s: float = 30.0):
+    return _http_request(
+        base_url=base_url,
+        method="POST",
+        path=_encoded_sound_path(filename),
+        timeout_s=timeout_s,
+        data=payload,
+        headers={"Content-Type": "audio/mpeg"},
+    )
+
+
+def _assert_sound_download_status_encoded(
+    base_url: str,
+    filename: str,
+    expected_status: int,
+    timeout_s: float = 8.0,
+):
+    status, _, body = _http_get(base_url, _encoded_sound_path(filename), timeout_s=timeout_s)
+    assert status == expected_status, (
+        f"Unexpected status for {_encoded_sound_path(filename)}. "
+        f"Expected {expected_status}, got {status}. Body:\n{body}"
+    )
+
+
+def _download_sound_bytes_encoded(base_url: str, filename: str, timeout_s: float = 8.0):
+    return _http_get_bytes(base_url, _encoded_sound_path(filename), timeout_s=timeout_s)
+
+
+def _rename_sound_encoded(base_url: str, filename: str, new_base: str, timeout_s: float = 15.0):
+    rename_query = quote(new_base, safe="")
+    return _http_get(base_url, f"{_encoded_sound_path(filename)}?rename={rename_query}", timeout_s=timeout_s)
+
+
+def _delete_sound_encoded(base_url: str, filename: str, timeout_s: float = 4.0):
+    return _http_get(base_url, f"{_encoded_sound_path(filename)}?delete=1", timeout_s=timeout_s)
 
 
 def _sound_meta_path(filename: str) -> str:
@@ -203,6 +262,58 @@ def _stop_audio_playback(base_url: str):
         data=b"",
     )
     assert status == 200, f"Failed to stop playback. status={status}, body={body}"
+
+
+def _audio_playback_start_encoded(base_url: str, filename: str, timeout_s: float = 8.0):
+    query = urlencode({"action": "start", "name": filename})
+    return _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/audio/playback?{query}",
+        timeout_s=timeout_s,
+        data=b"",
+    )
+
+
+def _audio_playback_state(base_url: str) -> dict:
+    status, headers, body = _http_get(base_url, "/audio/playback")
+    assert status == 200, f"GET /audio/playback failed. status={status}, body={body}"
+    assert "application/json" in headers.get("Content-Type", "")
+    return json.loads(body)
+
+
+def _wait_for_playback_file(base_url: str, filename: str, active: bool, timeout_s: float = 3.0) -> dict:
+    state: dict = {}
+
+    def predicate() -> bool:
+        nonlocal state
+        state = _audio_playback_state(base_url)
+        if bool(state.get("active")) is not active:
+            return False
+        if active:
+            return state.get("file") == filename
+        return True
+
+    ready = _wait_until(predicate, timeout_s=timeout_s, poll_s=0.1)
+    assert ready, (
+        f"Playback state did not reach active={active} for {filename!r}.\n"
+        f"Last state: {state}"
+    )
+    return state
+
+
+def _assert_playback_not_rejected_for_filename(base_url: str, filename: str):
+    status, headers, body = _audio_playback_start_encoded(base_url, filename)
+    assert status == 200, f"Playback request failed for {filename!r}. status={status}, body={body}"
+    assert "application/json" in headers.get("Content-Type", "")
+
+    payload = json.loads(body)
+    assert payload.get("status") == "started", f"Expected playback start payload for {filename!r}, got {payload}"
+    assert payload.get("name") == filename, f"Expected playback payload to echo {filename!r}, got {payload}"
+
+    _wait_for_playback_file(base_url, filename, active=True, timeout_s=3.0)
+    _stop_audio_playback(base_url)
+    _wait_for_playback_file(base_url, filename, active=False, timeout_s=3.0)
 
 
 def _sized_mp3_payload(target_size: int) -> bytes:
@@ -374,6 +485,74 @@ def test_upload_real_mp3_file(qemu_mainapp_instance):
     assert status == 303
     assert headers.get("Location") == "/sounds/"
     _assert_sound_download_status(base_url, filename, 200)
+
+
+# Test: Special-character MP3 filenames survive the full upload -> playback -> rename -> playback -> delete flow.
+# 1. Start from main app mode and format storage to isolate the test cases.
+# 2. For each risky filename pair, upload an MP3 under the special-character source name.
+# 3. Verify the uploaded bytes are downloadable and manual playback is accepted for the source name.
+# 4. Rename the file from one special-character name to another and verify the old name disappears.
+# 5. Verify playback is accepted for the renamed file and deletion succeeds without rejection.
+def test_special_character_mp3_names_survive_upload_playback_rename_and_delete(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    payload = _test_mp3_bytes()
+
+    format_status, _, format_body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path="/format",
+        timeout_s=4.0,
+        data=b"",
+    )
+    assert format_status == 200, f"/format failed before special-character filename test. body={format_body}"
+
+    for scenario in SPECIAL_FILENAME_SCENARIOS:
+        case_label = scenario["label"]
+        source_name = scenario["source"]
+        target_name = scenario["target"]
+        target_base = target_name[: -len(".mp3")]
+
+        _stop_audio_playback(base_url)
+
+        upload_status, upload_headers, upload_body = _upload_sound_encoded(base_url, source_name, payload)
+        assert upload_status == 303, (
+            f"Upload was rejected for special-character source file {source_name!r} ({case_label}). "
+            f"body={upload_body}"
+        )
+        assert upload_headers.get("Location") == "/sounds/"
+
+        download_status, download_headers, download_body = _download_sound_bytes_encoded(base_url, source_name)
+        assert download_status == 200, f"Uploaded special-character file was not downloadable ({case_label})."
+        assert "audio/mpeg" in download_headers.get("Content-Type", "")
+        assert download_body == payload, f"Downloaded payload changed for {source_name!r} ({case_label})."
+
+        _assert_playback_not_rejected_for_filename(base_url, source_name)
+
+        rename_status, _, rename_body = _rename_sound_encoded(base_url, source_name, target_base)
+        assert rename_status == 200, (
+            f"Rename was rejected from {source_name!r} to {target_name!r} ({case_label}). "
+            f"body={rename_body}"
+        )
+        assert "Renamed" in rename_body
+
+        _assert_sound_download_status_encoded(base_url, source_name, 404)
+
+        renamed_status, renamed_headers, renamed_body = _download_sound_bytes_encoded(base_url, target_name)
+        assert renamed_status == 200, f"Renamed special-character file was not downloadable ({case_label})."
+        assert "audio/mpeg" in renamed_headers.get("Content-Type", "")
+        assert renamed_body == payload, f"Downloaded payload changed after rename to {target_name!r} ({case_label})."
+
+        _assert_playback_not_rejected_for_filename(base_url, target_name)
+
+        delete_status, delete_headers, delete_body = _delete_sound_encoded(base_url, target_name)
+        assert delete_status == 303, (
+            f"Deletion was rejected for special-character file {target_name!r} ({case_label}). "
+            f"body={delete_body}"
+        )
+        assert delete_headers.get("Location") == "/sounds/"
+        assert "File deleted successfully" in delete_body
+
+        _assert_sound_download_status_encoded(base_url, target_name, 404)
 
 
 # Test: Downloaded MP3 exactly matches uploaded content.

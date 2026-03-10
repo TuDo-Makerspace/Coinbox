@@ -179,6 +179,24 @@ static void url_decode_inplace(char *str)
     *dst = '\0';
 }
 
+static void url_decode_path_inplace(char *str)
+{
+    char *src = str;
+    char *dst = str;
+    while (*src) {
+        if (*src == '%' && isxdigit((unsigned char)src[1]) && isxdigit((unsigned char)src[2])) {
+            char hex[3] = { src[1], src[2], 0 };
+            *dst = (char) strtol(hex, NULL, 16);
+            src += 3;
+        } else {
+            *dst = *src;
+            src++;
+        }
+        dst++;
+    }
+    *dst = '\0';
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // JSON Helpers
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -2031,6 +2049,14 @@ static esp_err_t sounds_file_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    char *decoded_filename = filepath + strlen(CONFIG_BASE_PATH);
+    url_decode_path_inplace(decoded_filename);
+    filename = decoded_filename;
+    if (!is_flat_name_uri(filename)) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not found");
+        return ESP_FAIL;
+    }
+
     const char *base_name = filename;
     const char *slash_in_filename = strrchr(filename, '/');
     if (slash_in_filename && *(slash_in_filename + 1)) {
@@ -2846,6 +2872,7 @@ static esp_err_t audio_playback_post_handler(httpd_req_t *req)
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing name");
         return ESP_FAIL;
     }
+    url_decode_inplace(name);
 
     if (!is_mp3_only(name)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Only MP3 playback is supported right now");
@@ -2867,6 +2894,8 @@ static esp_err_t audio_playback_post_handler(httpd_req_t *req)
     }
 
     char resp[384];
+    char name_esc[(FILE_ENTRY_NAME_MAX * 2) + 1];
+    json_escape_copy(name, name_esc, sizeof(name_esc));
     int len = 0;
     if (start_result == AUDIO_PLAYBACK_START_RESULT_SKIPPED) {
         uint32_t notice_seq = 0;
@@ -2874,11 +2903,11 @@ static esp_err_t audio_playback_post_handler(httpd_req_t *req)
         len = snprintf(resp,
                        sizeof(resp),
                        "{\"status\":\"skipped\",\"name\":\"%s\",\"skip_reason\":\"%s\",\"playback_notice_seq\":%u}",
-                       name,
+                       name_esc,
                        audio_playback_skip_reason_text(skip_reason),
                        (unsigned)notice_seq);
     } else {
-        len = snprintf(resp, sizeof(resp), "{\"status\":\"started\",\"name\":\"%s\"}", name);
+        len = snprintf(resp, sizeof(resp), "{\"status\":\"started\",\"name\":\"%s\"}", name_esc);
     }
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
@@ -3004,6 +3033,13 @@ static esp_err_t upload_post_handler(httpd_req_t *req)
     if (!filename) {
         /* Respond with 500 Internal Server Error */
         return send_upload_error(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long", true);
+    }
+
+    char *decoded_filename = filepath + strlen(CONFIG_BASE_PATH);
+    url_decode_path_inplace(decoded_filename);
+    filename = decoded_filename;
+    if (!is_flat_name_uri(filename)) {
+        return send_upload_error(req, HTTPD_400_BAD_REQUEST, "Invalid filename", true);
     }
 
     size_t filename_len = strlen(filename);
@@ -3198,6 +3234,14 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
 
     if (!filename) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Filename too long");
+        return ESP_FAIL;
+    }
+
+    char *decoded_filename = filepath + strlen(CONFIG_BASE_PATH);
+    url_decode_path_inplace(decoded_filename);
+    filename = decoded_filename;
+    if (!is_flat_name_uri(filename)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid filename");
         return ESP_FAIL;
     }
 
