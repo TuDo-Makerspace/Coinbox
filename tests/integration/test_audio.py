@@ -1063,6 +1063,78 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
     assert muted, f"DAC/AMP did not return to muted after playback.\nLog tail:\n{_tail_log(log_path)}"
 
 
+# Test: Main HTML pages should not fail with "Out of memory" while timed playback is active.
+# 1. Upload the timed MP3 fixture.
+# 2. Start playback and wait until `GET /audio/playback` reports it active.
+# 3. Load `/settings` and `/sounds/` during playback.
+# 4. Fail if either page returns non-200 or an "Out of memory" response.
+def test_settings_and_sounds_pages_do_not_oom_during_playback(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    filename = f"{_unique_name('page-load-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    status, _, body = _audio_playback_start(base_url, filename, timeout_s=8.0)
+    assert status == 200, f"Failed to start playback. body={body}"
+
+    playing_state: dict[str, object] = {}
+
+    def _playback_for_target_file_is_active() -> bool:
+        nonlocal playing_state
+        playing_state = _audio_playback_state(base_url)
+        return bool(playing_state.get("active")) and playing_state.get("file") == filename
+
+    playing = _wait_until(
+        _playback_for_target_file_is_active,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert playing, f"Playback did not become active.\nLog tail:\n{_tail_log(log_path)}"
+
+    failures: list[str] = []
+    pages = (
+        ("/settings", "settings"),
+        ("/sounds/", "sounds"),
+    )
+
+    try:
+        for path, label in pages:
+            status, headers, body = _http_get(base_url, path, timeout_s=8.0)
+            if status != 200:
+                failures.append(
+                    f"{label} page returned {status} during playback. body={body[:200]!r}"
+                )
+                continue
+            if "text/html" not in headers.get("Content-Type", ""):
+                failures.append(
+                    f"{label} page returned unexpected content type during playback: "
+                    f"{headers.get('Content-Type', '')!r}"
+                )
+            if "Out of memory" in body:
+                failures.append(
+                    f"{label} page returned an Out of memory response during playback."
+                )
+    finally:
+        status, _, body = _audio_playback_stop(base_url, timeout_s=8.0)
+        assert status == 200, f"Failed to stop playback after page load test. body={body}"
+        playback_done = _wait_until(
+            lambda: not bool(_audio_playback_state(base_url).get("active")),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert playback_done, (
+            "Playback did not clear after page load test.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+    assert not failures, (
+        "Pages failed during active playback.\n"
+        + "\n".join(failures)
+        + f"\nLog tail:\n{_tail_log(log_path)}"
+    )
+
+
 # Test: `GET /audio/playback` reports a skipped file when track volume is 0%.
 # 1. Start from main app mode and wait for any startup sound playback to finish.
 # 2. Upload the `test6165ms.mp3` fixture and set its track volume to `0`.
