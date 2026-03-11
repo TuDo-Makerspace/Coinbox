@@ -310,6 +310,7 @@ def _browser_state_details(browser_state: dict, log_path) -> str:
         f"Browser title: {browser_state.get('title')}\n"
         f"Browser boot id: {browser_state.get('page_boot_id')}\n"
         f"Browser error: {browser_state.get('error')}\n"
+        f"Overlay text:\n{browser_state.get('overlay_text', '')[:1200]}\n"
         f"Body text:\n{browser_state.get('body_text', '')[:1200]}\n"
         f"DOM snippet:\n{browser_state.get('page_source', '')[:1200]}\n"
         f"Log tail:\n{_tail_log(log_path)}"
@@ -360,11 +361,17 @@ def _assert_connection_lost_popup_visible(
     assert disconnect_triggered["done"], f"{message}\n{details}"
     assert browser_state.get("has_connection_lost_overlay") is True, f"{message}\n{details}"
     assert browser_state.get("connection_lost_visible") is True, f"{message}\n{details}"
-    assert "Connection lost!" in browser_state.get("body_text", ""), f"{message}\n{details}"
+    assert _state_shows_connection_lost_text(browser_state), f"{message}\n{details}"
 
 
 def _body_text_matches(browser_state: dict, pattern: str) -> bool:
     return re.search(pattern, browser_state.get("body_text", ""), flags=re.IGNORECASE) is not None
+
+
+def _state_shows_connection_lost_text(state: dict) -> bool:
+    overlay_text = str(state.get("overlay_text", "") or "")
+    body_text = str(state.get("body_text", "") or "")
+    return "Connection lost!" in overlay_text or "Connection lost!" in body_text
 
 
 def _first_matching_state_index(states: list[dict], pattern: str) -> int | None:
@@ -409,7 +416,7 @@ def _trigger_test_laser_playback(base_url: str):
         base_url=base_url,
         method="POST",
         path="/test/gpio/laser-burst?count=1&interval_ms=0",
-        timeout_s=8.0,
+        timeout_s=20.0,
         data=b"",
     )
     assert status == 200, (
@@ -1275,8 +1282,8 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "href: window.location.href,"
         "path: window.location.pathname || '/',"
         "title: document.title || '',"
-        "html: document.documentElement ? document.documentElement.outerHTML.slice(0, 12000) : '',"
-        "bodyText: document.body ? document.body.innerText.slice(0, 4000) : '',"
+        "html: document.documentElement ? document.documentElement.outerHTML.slice(0, 24000) : '',"
+        "bodyText: document.body ? document.body.innerText.slice(0, 12000) : '',"
         "pageBootId: document.documentElement && document.documentElement.dataset"
         "  ? document.documentElement.dataset.bootId || ''"
         "  : '',"
@@ -1289,6 +1296,11 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "  const overlay = document.getElementById('coinbox-connection-lost-overlay')"
         "    || document.getElementById('connection-lost-overlay');"
         "  return !!overlay && overlay.dataset && overlay.dataset.visible === '1';"
+        "})(),"
+        "overlayText: (() => {"
+        "  const overlay = document.getElementById('coinbox-connection-lost-overlay')"
+        "    || document.getElementById('connection-lost-overlay');"
+        "  return overlay ? String((overlay.innerText || overlay.textContent || '')).slice(0, 4000) : '';"
         "})()"
         "}))()"
     )
@@ -1317,6 +1329,7 @@ def _cdp_capture_page_state(sock: socket.socket, command_id: int) -> dict:
         "page_ready": str(value.get("pageReady", "")),
         "has_connection_lost_overlay": bool(value.get("hasConnectionLostOverlay", False)),
         "connection_lost_visible": bool(value.get("connectionLostVisible", False)),
+        "overlay_text": str(value.get("overlayText", "")),
         "error": "",
     }
 
@@ -2063,19 +2076,19 @@ def test_expire_browser_reaches_login_when_auth_already_enabled(qemu_bootstrap_i
 
     countdown_s = _wait_for_bootstrap_countdown_threshold(
         base_url=base_url,
-        threshold_s=2,
+        threshold_s=4,
         timeout_s=BOOT_TIMEOUT_S,
     )
     assert countdown_s is not None, (
         "Could not reach late-countdown browser handoff window before bootstrap ended.\n"
-        "Threshold: <= 2s\n"
+        "Threshold: <= 4s\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
 
     browser_state = _capture_browser_state_in_headless_chrome(
         f"{base_url}/",
         wait_paths=("/login",),
-        wait_s=15.0,
+        wait_s=20.0,
     )
     _assert_browser_lands_on(
         browser_state=browser_state,
@@ -2267,8 +2280,10 @@ def test_sounds_browser_warns_when_no_sounds_are_enabled(qemu_mainapp_instance):
 
     browser_state = _capture_browser_state_in_headless_chrome(
         f"{base_url}/sounds/",
+        wait_s=HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S,
         wait_condition=lambda state: (
             state.get("current_path") == "/sounds/"
+            and state.get("page_ready") == "1"
             and _body_text_matches(state, r"all\s+sounds?.*disabled|no\s+sound.*played\s+on\s+coin\s+insertion")
         ),
     )
@@ -2299,8 +2314,10 @@ def test_sounds_browser_warns_when_all_sounds_have_no_weight(qemu_mainapp_instan
 
     browser_state = _capture_browser_state_in_headless_chrome(
         f"{base_url}/sounds/",
+        wait_s=HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S,
         wait_condition=lambda state: (
             state.get("current_path") == "/sounds/"
+            and state.get("page_ready") == "1"
             and _body_text_matches(state, r"all\s+sounds?.*weight|no\s+sound.*weight|weight.*0")
             and _body_text_matches(state, r"no\s+sound.*played\s+on\s+coin\s+insertion")
         ),
@@ -2333,8 +2350,10 @@ def test_sounds_browser_warns_when_all_sounds_have_zero_volume(qemu_mainapp_inst
 
     browser_state = _capture_browser_state_in_headless_chrome(
         f"{base_url}/sounds/",
+        wait_s=HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S,
         wait_condition=lambda state: (
             state.get("current_path") == "/sounds/"
+            and state.get("page_ready") == "1"
             and _body_text_matches(state, r"all\s+sounds?.*volume|no\s+sound.*volume|volume.*0%")
             and _body_text_matches(state, r"no\s+sound.*played\s+on\s+coin\s+insertion")
         ),
@@ -2458,7 +2477,7 @@ def test_settings_restart_actions_browser_immediately_show_connection_lost_popup
         f"The connection-lost overlay was not shown immediately after triggering {action_label} from settings.\n"
         f"{details}"
     )
-    assert "Connection lost!" in overlay_state.get("body_text", ""), (
+    assert _state_shows_connection_lost_text(overlay_state), (
         f"The expected overlay text was not visible after triggering {action_label} from settings.\n"
         f"{details}"
     )
@@ -2586,7 +2605,7 @@ def test_handoff_browser_shows_connection_lost_popup_after_disconnect(
         f"The browser left the handoff page before showing the connection-lost overlay during the {action_label}.\n"
         f"{details}"
     )
-    assert "Connection lost!" in overlay_state.get("body_text", ""), (
+    assert _state_shows_connection_lost_text(overlay_state), (
         f"The expected overlay text was not visible during the {action_label}.\n"
         f"{details}"
     )

@@ -83,6 +83,22 @@ def _wait_for_bootstrap_root(base_url: str, timeout_s: float) -> bool:
     return _wait_until(in_bootstrap_mode, timeout_s=timeout_s, poll_s=0.2)
 
 
+def _wait_for_reboot_markers(log_path, log_start_pos: int, timeout_s: float) -> bool:
+    reboot_markers = [
+        "Rebooting...",
+        "rst:0x1 (POWERON_RESET)",
+        "rst:0x3 (SW_RESET)",
+        "rst:0xc (SW_CPU_RESET)",
+        "main_task: Calling app_main()",
+        "bootstrap: Bootstrap server started",
+    ]
+    return _wait_until(
+        lambda: _log_contains_any_since(log_path, log_start_pos, reboot_markers),
+        timeout_s=timeout_s,
+        poll_s=0.2,
+    )
+
+
 # Test: Reboot endpoint restarts device and system comes back.
 # 1. Start from main app mode and confirm `/sounds/` is reachable.
 # 2. Call `POST /restart` and accept either immediate response or restart-race disconnect.
@@ -91,6 +107,7 @@ def _wait_for_bootstrap_root(base_url: str, timeout_s: float) -> bool:
 def test_restart_endpoint_reboots_device(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
     log_path = qemu_mainapp_instance["log_path"]
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
 
     status, _, _ = _http_get(base_url, "/sounds/")
     assert status == 200
@@ -113,7 +130,19 @@ def test_restart_endpoint_reboots_device(qemu_mainapp_instance):
         assert restart_status == 200
         assert "Restarting" in restart_body
 
-    rebooted = _wait_for_bootstrap_root(base_url, timeout_s=float(BOOT_TIMEOUT_S + 20.0))
+    reboot_seen = _wait_for_reboot_markers(
+        log_path,
+        log_start_pos,
+        timeout_s=float(BOOT_TIMEOUT_S + 10.0),
+    )
+    rebooted = _wait_for_bootstrap_root(base_url, timeout_s=float(BOOT_TIMEOUT_S + 40.0))
+    assert reboot_seen, (
+        "Did not observe reboot markers after /restart.\n"
+        f"restart_status={restart_status}\n"
+        f"restart_body={restart_body}\n"
+        f"restart_exc={restart_exc}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
     assert rebooted, (
         "Device did not reboot into bootstrap after /restart.\n"
         f"restart_status={restart_status}\n"

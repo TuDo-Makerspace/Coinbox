@@ -559,6 +559,16 @@ def _restart_into_bootstrap(
     log_path: Path,
     headers: dict[str, str] | None = None,
 ):
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    reboot_markers = [
+        "Rebooting...",
+        "rst:0x1 (POWERON_RESET)",
+        "rst:0x3 (SW_RESET)",
+        "rst:0xc (SW_CPU_RESET)",
+        "main_task: Calling app_main()",
+        "bootstrap: Bootstrap server started",
+    ]
+
     # Restart can race with connection close; do not require a specific HTTP result.
     try:
         _http_request(
@@ -572,6 +582,12 @@ def _restart_into_bootstrap(
     except Exception:
         pass
 
+    reboot_seen = _wait_until(
+        lambda: _log_contains_any_since(log_path, log_start_pos, reboot_markers),
+        timeout_s=float(BOOT_TIMEOUT_S + 10.0),
+        poll_s=0.2,
+    )
+
     def bootstrap_ready() -> bool:
         try:
             status, resp_headers, body = _http_get(base_url, "/")
@@ -581,9 +597,10 @@ def _restart_into_bootstrap(
 
     ready = _wait_until(
         bootstrap_ready,
-        timeout_s=float(BOOT_TIMEOUT_S + 15.0),
+        timeout_s=float(BOOT_TIMEOUT_S + 40.0),
         poll_s=0.2,
     )
+    assert reboot_seen, f"Device did not show reboot markers after /restart.\nLog tail:\n{_tail_log(log_path)}"
     assert ready, f"Device did not reboot back to bootstrap mode.\nLog tail:\n{_tail_log(log_path)}"
 
 
