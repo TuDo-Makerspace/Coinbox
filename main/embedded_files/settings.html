@@ -607,6 +607,13 @@
     .playback-setting-control.slider-number-wrap {
       justify-self: end;
     }
+    .playback-setting-row-stack-mobile {
+      /* Marker class for controls that should stack on narrow screens. */
+    }
+    .playback-section-divider + .playback-section-divider {
+      padding-top: 0.85rem;
+      border-top: 1px solid #e2e8f0;
+    }
     .playback-select {
       min-width: min(320px, 70vw);
       padding: 0.55rem 0.7rem;
@@ -692,6 +699,22 @@
       .playback-setting-control {
         justify-self: end;
       }
+      .playback-setting-row-stack-mobile {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas:
+          "title"
+          "control"
+          "note";
+        row-gap: 0.35rem;
+      }
+      .playback-setting-row-stack-mobile .playback-setting-control {
+        justify-self: stretch;
+        width: 100%;
+      }
+      .playback-setting-row-stack-mobile .playback-select {
+        min-width: 0;
+        width: 100%;
+      }
       .settings-toggle-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -752,14 +775,14 @@
           </div>
         </div>
         <div class="playback-group">
-          <div class="playback-setting-row">
+          <div class="playback-setting-row playback-setting-row-stack-mobile playback-section-divider">
             <label class="playback-setting-title" for="playback-lid-open-sound">Lid opening sound</label>
             <p class="note playback-setting-note">Play a selected sound whenever the lid is opened. Choose None to disable this event.</p>
             <select class="playback-select playback-setting-control" id="playback-lid-open-sound" disabled>
               <option value="">Loading sounds...</option>
             </select>
           </div>
-          <div class="slider-row">
+          <div class="slider-row playback-section-divider">
             <label for="playback-lid-open-volume">Lid opening volume</label>
             <p class="note">Volume of the lid open sound.</p>
             <div class="slider-control">
@@ -774,7 +797,7 @@
               </div>
             </div>
           </div>
-          <div class="playback-setting-row">
+          <div class="playback-setting-row playback-section-divider">
             <label class="playback-setting-title" for="playback-hall-debounce-number">Lid opening debounce</label>
             <p class="note playback-setting-note">Minimum time before the lid open sound can play again. Range: 0-5000 ms. Default: 1000 ms.</p>
             <div class="slider-number-wrap playback-setting-control">
