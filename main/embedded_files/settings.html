@@ -594,6 +594,7 @@
     .playback-setting-title {
       grid-area: title;
       color: var(--text);
+      font-weight: 700;
     }
     .playback-setting-note {
       grid-area: note;
@@ -613,6 +614,10 @@
     .playback-section-divider + .playback-section-divider {
       padding-top: 0.85rem;
       border-top: 1px solid #e2e8f0;
+    }
+    .playback-group-lid .playback-section-divider + .playback-section-divider {
+      margin-top: 0.2rem;
+      padding-top: 1rem;
     }
     .playback-select {
       min-width: min(320px, 70vw);
@@ -774,7 +779,7 @@
             </div>
           </div>
         </div>
-        <div class="playback-group">
+        <div class="playback-group playback-group-lid">
           <div class="playback-setting-row playback-setting-row-stack-mobile playback-section-divider">
             <label class="playback-setting-title" for="playback-lid-open-sound">Lid opening sound</label>
             <p class="note playback-setting-note">Play a selected sound whenever the lid is opened. Choose None to disable this event.</p>
@@ -783,7 +788,7 @@
             </select>
           </div>
           <div class="slider-row playback-section-divider">
-            <label for="playback-lid-open-volume">Lid opening volume</label>
+            <label class="playback-setting-title" for="playback-lid-open-volume">Lid opening volume</label>
             <p class="note">Volume of the lid open sound.</p>
             <div class="slider-control">
               <div class="slider-wrap">
