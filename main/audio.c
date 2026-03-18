@@ -112,6 +112,8 @@ static volatile bool s_playing;
 static volatile bool s_play_stop_requested;
 static size_t s_current_file_size;
 static size_t s_current_offset_bytes;
+static size_t s_current_stop_bytes;
+static uint32_t s_current_playback_duration_ms;
 static uint32_t s_playback_skip_notice_seq;
 static uint64_t s_playback_skip_notice_timestamp_ms;
 static audio_playback_skip_reason_t s_playback_skip_notice_reason;
@@ -1112,7 +1114,11 @@ static void deinit_playback_i2s_stream_locked(void)
     s_playback_i2s_stream = NULL;
 }
 
-static bool parse_mp3_header(uint32_t header, int *sample_rate, int *channels, int *frame_size)
+static bool parse_mp3_header(uint32_t header,
+                             int *sample_rate,
+                             int *channels,
+                             int *frame_size,
+                             int *samples_per_frame)
 {
     if (((header >> 21) & 0x7FF) != 0x7FF) {
         return false;
@@ -1160,22 +1166,34 @@ static bool parse_mp3_header(uint32_t header, int *sample_rate, int *channels, i
 
     int bitrate = kbps * 1000;
     int coeff = (version_id == 3) ? 144 : 72; // MPEG1 Layer III vs MPEG2/2.5 Layer III
+    int samples = (version_id == 3) ? 1152 : 576;
     int size = (coeff * bitrate) / sr + padding;
     if (size <= 4) {
         return false;
     }
 
-    *sample_rate = sr;
-    *channels = (channel_mode == 3) ? 1 : 2;
-    *frame_size = size;
+    if (sample_rate) {
+        *sample_rate = sr;
+    }
+    if (channels) {
+        *channels = (channel_mode == 3) ? 1 : 2;
+    }
+    if (frame_size) {
+        *frame_size = size;
+    }
+    if (samples_per_frame) {
+        *samples_per_frame = samples;
+    }
     return true;
 }
 
-static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, int *channels)
+static bool skip_id3v2_tag(FILE *f, size_t *out_start_offset)
 {
-    FILE *f = fopen(path, "rb");
     if (!f) {
-        ESP_LOGW(TAG, "Prefetch open failed: %s", path);
+        return false;
+    }
+
+    if (fseek(f, 0, SEEK_SET) != 0) {
         return false;
     }
 
@@ -1203,6 +1221,24 @@ static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, i
     }
 
     if (fseek(f, (long)start_offset, SEEK_SET) != 0) {
+        return false;
+    }
+
+    if (out_start_offset) {
+        *out_start_offset = start_offset;
+    }
+    return true;
+}
+
+static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, int *channels)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        ESP_LOGW(TAG, "Prefetch open failed: %s", path);
+        return false;
+    }
+
+    if (!skip_id3v2_tag(f, NULL)) {
         fclose(f);
         return false;
     }
@@ -1223,7 +1259,7 @@ static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, i
         int sr = 0;
         int ch = 0;
         int frame_size = 0;
-        if (parse_mp3_header(header, &sr, &ch, &frame_size)) {
+        if (parse_mp3_header(header, &sr, &ch, &frame_size, NULL)) {
             *sample_rate = sr;
             *channels = ch;
             *bits = AUDIO_MP3_PCM_BITS;
@@ -1246,6 +1282,158 @@ static bool prefetch_mp3_format(const char *path, int *sample_rate, int *bits, i
     return false;
 }
 
+#if !CONFIG_TEST_AUDIO_MOCK_BACKEND
+static esp_err_t resolve_mp3_trim_window_bytes(const char *path,
+                                               uint32_t trim_start_ms,
+                                               uint32_t trim_stop_ms,
+                                               size_t file_size,
+                                               size_t *out_start_offset,
+                                               size_t *out_stop_offset)
+{
+    if (!path || !out_start_offset || !out_stop_offset) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    size_t scan_offset = 0;
+    if (!skip_id3v2_tag(f, &scan_offset)) {
+        fclose(f);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    uint8_t window[4] = {0};
+    if (fread(window, 1, sizeof(window), f) != sizeof(window)) {
+        fclose(f);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    const uint64_t target_start_us = (uint64_t)trim_start_ms * 1000ULL;
+    const uint64_t target_stop_us = (uint64_t)trim_stop_ms * 1000ULL;
+
+    bool synced = false;
+    bool start_resolved = false;
+    bool stop_resolved = false;
+    uint64_t elapsed_us = 0;
+    size_t current_offset = scan_offset;
+    size_t start_offset = 0;
+    size_t stop_offset = 0;
+    size_t last_boundary_offset = scan_offset;
+    size_t next_boundary_after_start = 0;
+
+    while (true) {
+        uint32_t header = ((uint32_t)window[0] << 24) |
+                          ((uint32_t)window[1] << 16) |
+                          ((uint32_t)window[2] << 8) |
+                          (uint32_t)window[3];
+
+        int sample_rate = 0;
+        int frame_size = 0;
+        int samples_per_frame = 0;
+        if (parse_mp3_header(header, &sample_rate, NULL, &frame_size, &samples_per_frame)) {
+            synced = true;
+
+            if (!start_resolved && elapsed_us >= target_start_us) {
+                start_offset = current_offset;
+                start_resolved = true;
+            }
+
+            if (elapsed_us <= target_stop_us) {
+                stop_offset = current_offset;
+                stop_resolved = true;
+            } else if (start_resolved &&
+                       current_offset > start_offset &&
+                       next_boundary_after_start == 0) {
+                next_boundary_after_start = current_offset;
+            }
+
+            uint64_t frame_duration_us = ((uint64_t)samples_per_frame * 1000000ULL +
+                                          (uint64_t)sample_rate - 1ULL) /
+                                         (uint64_t)sample_rate;
+            if (frame_duration_us == 0) {
+                frame_duration_us = 1;
+            }
+            elapsed_us += frame_duration_us;
+
+            current_offset += (size_t)frame_size;
+            if (current_offset > file_size) {
+                current_offset = file_size;
+            }
+            last_boundary_offset = current_offset;
+
+            if (fseek(f, frame_size - 4, SEEK_CUR) != 0) {
+                break;
+            }
+            if (fread(window, 1, sizeof(window), f) != sizeof(window)) {
+                break;
+            }
+            continue;
+        }
+
+        if (synced) {
+            break;
+        }
+
+        int next = fgetc(f);
+        if (next == EOF) {
+            break;
+        }
+        window[0] = window[1];
+        window[1] = window[2];
+        window[2] = window[3];
+        window[3] = (uint8_t)next;
+        current_offset++;
+        if (current_offset > file_size) {
+            current_offset = file_size;
+        }
+    }
+
+    fclose(f);
+
+    if (!synced) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    if (!start_resolved) {
+        start_offset = last_boundary_offset;
+    }
+
+    if (elapsed_us <= target_stop_us) {
+        stop_offset = last_boundary_offset;
+        stop_resolved = true;
+    }
+
+    if (next_boundary_after_start == 0 && last_boundary_offset > start_offset) {
+        next_boundary_after_start = last_boundary_offset;
+    }
+
+    if (!stop_resolved || stop_offset <= start_offset) {
+        if (next_boundary_after_start > start_offset) {
+            stop_offset = next_boundary_after_start;
+        } else {
+            stop_offset = last_boundary_offset;
+        }
+    }
+
+    if (start_offset > file_size) {
+        start_offset = file_size;
+    }
+    if (stop_offset > file_size) {
+        stop_offset = file_size;
+    }
+    if (stop_offset <= start_offset) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    *out_start_offset = start_offset;
+    *out_stop_offset = stop_offset;
+    return ESP_OK;
+}
+#endif
+
 //-------------------------------------------------------------------------
 // File Loading
 //-------------------------------------------------------------------------
@@ -1259,10 +1447,13 @@ static esp_err_t load_meta_or_stat_locked(const char *name)
     }
 
     file_properties_t props;
+    files_props_init(&props, name);
     esp_err_t hdr_err = files_read_meta(name, &props);
 
     s_current_offset_bytes = 0;
     s_current_file_size = (size_t)st.st_size;
+    s_current_stop_bytes = s_current_file_size;
+    s_current_playback_duration_ms = 0;
 
     if (hdr_err == ESP_OK) {
         s_track_volume = clamp_track_volume(props.volume);
@@ -1274,6 +1465,48 @@ static esp_err_t load_meta_or_stat_locked(const char *name)
         ESP_LOGW(TAG, "Playing file without metadata sidecar: %s (size=%zu)",
                  s_current_file_path,
                  s_current_file_size);
+    }
+
+    uint32_t full_duration_ms = 0;
+    if (files_get_audio_duration_ms(name, &full_duration_ms) == ESP_OK) {
+        uint32_t trim_start_ms = props.trim_start_ms;
+        uint32_t trim_stop_ms = props.trim_stop_ms;
+        if (trim_start_ms > full_duration_ms) {
+            trim_start_ms = full_duration_ms;
+        }
+        if (trim_stop_ms == 0 || trim_stop_ms > full_duration_ms) {
+            trim_stop_ms = full_duration_ms;
+        }
+        if (trim_stop_ms > trim_start_ms) {
+            s_current_playback_duration_ms = trim_stop_ms - trim_start_ms;
+
+#if !CONFIG_TEST_AUDIO_MOCK_BACKEND
+            bool trim_active = (trim_start_ms > 0 || trim_stop_ms < full_duration_ms);
+            if (trim_active) {
+                esp_err_t trim_err = resolve_mp3_trim_window_bytes(s_current_file_path,
+                                                                   trim_start_ms,
+                                                                   trim_stop_ms,
+                                                                   s_current_file_size,
+                                                                   &s_current_offset_bytes,
+                                                                   &s_current_stop_bytes);
+                if (trim_err != ESP_OK) {
+                    ESP_LOGW(TAG,
+                             "Failed to resolve trim window for %s; using full file instead: %s",
+                             name,
+                             esp_err_to_name(trim_err));
+                    s_current_offset_bytes = 0;
+                    s_current_stop_bytes = s_current_file_size;
+                } else {
+                    ESP_LOGI(TAG,
+                             "Trimmed playback: %u ms..%u ms -> bytes %zu..%zu",
+                             (unsigned)trim_start_ms,
+                             (unsigned)trim_stop_ms,
+                             s_current_offset_bytes,
+                             s_current_stop_bytes);
+                }
+            }
+#endif
+        }
     }
 
     return ESP_OK;
@@ -1479,6 +1712,201 @@ static uint32_t mock_playback_duration_from_path_ms(const char *path)
 }
 #endif
 
+#if !CONFIG_TEST_AUDIO_MOCK_BACKEND
+typedef struct {
+    FILE *file;
+    bool is_open;
+    size_t stop_offset;
+} bounded_file_reader_t;
+
+static char *bounded_file_reader_mount_path(char *uri)
+{
+    if (!uri || uri[0] == '\0') {
+        return NULL;
+    }
+    if (uri[0] == '/') {
+        return uri;
+    }
+
+    char *skip_scheme = strstr(uri, "://");
+    if (!skip_scheme) {
+        return NULL;
+    }
+    skip_scheme += 2;
+    if (skip_scheme[1] == '/') {
+        skip_scheme++;
+    }
+    return skip_scheme;
+}
+
+static esp_err_t bounded_file_reader_open(audio_element_handle_t self)
+{
+    bounded_file_reader_t *reader = (bounded_file_reader_t *)audio_element_getdata(self);
+    if (!reader) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (reader->is_open) {
+        ESP_LOGE(TAG, "Bounded reader already open");
+        return ESP_FAIL;
+    }
+
+    char *uri = audio_element_get_uri(self);
+    char *path = bounded_file_reader_mount_path(uri);
+    if (!path) {
+        ESP_LOGE(TAG, "Bounded reader needs a valid file path");
+        return ESP_FAIL;
+    }
+
+    reader->file = fopen(path, "rb");
+    if (!reader->file) {
+        ESP_LOGE(TAG, "Failed to open bounded reader for %s", path);
+        return ESP_FAIL;
+    }
+
+    struct stat st = {0};
+    if (stat(path, &st) != 0 || st.st_size <= 0) {
+        fclose(reader->file);
+        reader->file = NULL;
+        ESP_LOGE(TAG, "Invalid file for bounded reader: %s", path);
+        return ESP_FAIL;
+    }
+
+    audio_element_info_t info = {0};
+    audio_element_getinfo(self, &info);
+
+    size_t stop_offset = reader->stop_offset;
+    if (stop_offset == 0 || stop_offset > (size_t)st.st_size) {
+        stop_offset = (size_t)st.st_size;
+    }
+    if ((size_t)info.byte_pos > stop_offset) {
+        info.byte_pos = (int64_t)stop_offset;
+    }
+    info.total_bytes = (int64_t)stop_offset;
+    audio_element_setinfo(self, &info);
+
+    if (info.byte_pos > 0 && fseek(reader->file, (long)info.byte_pos, SEEK_SET) != 0) {
+        fclose(reader->file);
+        reader->file = NULL;
+        ESP_LOGE(TAG, "Failed to seek bounded reader to %lld", (long long)info.byte_pos);
+        return ESP_FAIL;
+    }
+
+    reader->stop_offset = stop_offset;
+    reader->is_open = true;
+    return audio_element_set_total_bytes(self, (int)info.total_bytes);
+}
+
+static int bounded_file_reader_read(audio_element_handle_t self,
+                                    char *buffer,
+                                    int len,
+                                    TickType_t ticks_to_wait,
+                                    void *context)
+{
+    (void)ticks_to_wait;
+    (void)context;
+
+    bounded_file_reader_t *reader = (bounded_file_reader_t *)audio_element_getdata(self);
+    if (!reader || !reader->file || len <= 0) {
+        return AEL_IO_FAIL;
+    }
+
+    audio_element_info_t info = {0};
+    audio_element_getinfo(self, &info);
+
+    size_t byte_pos = (size_t)info.byte_pos;
+    if (byte_pos >= reader->stop_offset) {
+        return AEL_IO_OK;
+    }
+
+    size_t remaining = reader->stop_offset - byte_pos;
+    if ((size_t)len > remaining) {
+        len = (int)remaining;
+    }
+
+    int rlen = (int)fread(buffer, 1, (size_t)len, reader->file);
+    if (rlen > 0) {
+        audio_element_update_byte_pos(self, rlen);
+        return rlen;
+    }
+
+    if (ferror(reader->file)) {
+        clearerr(reader->file);
+        ESP_LOGE(TAG, "Bounded reader failed while reading");
+        return AEL_IO_FAIL;
+    }
+    return AEL_IO_OK;
+}
+
+static int bounded_file_reader_process(audio_element_handle_t self, char *in_buffer, int in_len)
+{
+    int r_size = audio_element_input(self, in_buffer, in_len);
+    int w_size = 0;
+    if (r_size > 0) {
+        w_size = audio_element_output(self, in_buffer, r_size);
+    } else {
+        w_size = r_size;
+    }
+    return w_size;
+}
+
+static esp_err_t bounded_file_reader_close(audio_element_handle_t self)
+{
+    bounded_file_reader_t *reader = (bounded_file_reader_t *)audio_element_getdata(self);
+    if (!reader) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (reader->file) {
+        fclose(reader->file);
+        reader->file = NULL;
+    }
+    reader->is_open = false;
+
+    if (AEL_STATE_PAUSED != audio_element_get_state(self)) {
+        audio_element_report_info(self);
+        audio_element_set_byte_pos(self, 0);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t bounded_file_reader_destroy(audio_element_handle_t self)
+{
+    bounded_file_reader_t *reader = (bounded_file_reader_t *)audio_element_getdata(self);
+    free(reader);
+    return ESP_OK;
+}
+
+static audio_element_handle_t bounded_file_reader_init(size_t stop_offset)
+{
+    bounded_file_reader_t *reader = calloc(1, sizeof(*reader));
+    if (!reader) {
+        return NULL;
+    }
+    reader->stop_offset = stop_offset;
+
+    audio_element_cfg_t cfg = DEFAULT_AUDIO_ELEMENT_CONFIG();
+    cfg.open = bounded_file_reader_open;
+    cfg.close = bounded_file_reader_close;
+    cfg.process = bounded_file_reader_process;
+    cfg.destroy = bounded_file_reader_destroy;
+    cfg.read = bounded_file_reader_read;
+    cfg.task_stack = FATFS_STREAM_TASK_STACK;
+    cfg.task_prio = FATFS_STREAM_TASK_PRIO;
+    cfg.task_core = FATFS_STREAM_TASK_CORE;
+    cfg.out_rb_size = FATFS_STREAM_RINGBUFFER_SIZE;
+    cfg.buffer_len = FATFS_STREAM_BUF_SIZE;
+    cfg.tag = "file";
+
+    audio_element_handle_t el = audio_element_init(&cfg);
+    if (!el) {
+        free(reader);
+        return NULL;
+    }
+    audio_element_setdata(el, reader);
+    return el;
+}
+#endif
+
 //-------------------------------------------------------------------------
 // Tasks
 //-------------------------------------------------------------------------
@@ -1488,7 +1916,10 @@ static void play_task(void *arg)
     (void)arg;
 
 #if CONFIG_TEST_AUDIO_MOCK_BACKEND
-    uint32_t mock_duration_ms = mock_playback_duration_from_path_ms(s_current_file_path);
+    uint32_t mock_duration_ms = s_current_playback_duration_ms;
+    if (mock_duration_ms == 0) {
+        mock_duration_ms = mock_playback_duration_from_path_ms(s_current_file_path);
+    }
     mock_playback_heap_profile_t mock_heap = {0};
     TickType_t start_tick = xTaskGetTickCount();
     TickType_t duration_ticks = 0;
@@ -1568,9 +1999,7 @@ static void play_task(void *arg)
         goto exit;
     }
 
-    fatfs_stream_cfg_t fs_cfg = FATFS_STREAM_CFG_DEFAULT();
-    fs_cfg.type = AUDIO_STREAM_READER;
-    s_stream_reader = fatfs_stream_init(&fs_cfg);
+    s_stream_reader = bounded_file_reader_init(s_current_stop_bytes);
     if (!s_stream_reader) {
         err = ESP_ERR_NO_MEM;
         goto exit;
@@ -1595,7 +2024,7 @@ static void play_task(void *arg)
     audio_element_info_t el_info = {0};
     audio_element_getinfo(s_stream_reader, &el_info);
     el_info.byte_pos = (int64_t)s_current_offset_bytes;
-    el_info.total_bytes = s_current_file_size;
+    el_info.total_bytes = (int64_t)s_current_stop_bytes;
     audio_element_setinfo(s_stream_reader, &el_info);
 
     audio_event_iface_cfg_t evt_cfg = AUDIO_EVENT_IFACE_DEFAULT_CFG();

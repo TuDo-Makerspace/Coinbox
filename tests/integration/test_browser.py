@@ -36,6 +36,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -95,6 +96,7 @@ DEFAULT_SOUND_FILENAME = "default.mp3"
 HEADLESS_PAGE_CAPTURE_TIMEOUT_S = 15.0
 HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S = 20.0
 HANDOFF_DELAY_TOLERANCE_S = 0.5
+TEST_SHORT_MP3_PATH = Path(__file__).resolve().parent / "assets" / "test5ms.mp3"
 
 
 def _capture_browser_state_in_headless_chrome(
@@ -327,6 +329,124 @@ def _capture_sounds_notice_transition_states(
                     browser.kill()
 
 
+def _evaluate_expression_in_sounds_page(
+    base_url: str,
+    *,
+    ready_row_name: str,
+    expression: str,
+) -> tuple[dict, object]:
+    chrome_binary = _find_browser_binary()
+    if not chrome_binary:
+        pytest.skip("Headless Chrome not found in PATH.")
+
+    url = f"{base_url}/sounds/"
+    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+        debug_port = _reserve_local_port()
+        browser = subprocess.Popen(
+            [
+                chrome_binary,
+                "--headless=new",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--window-size=1280,900",
+                f"--user-data-dir={user_data_dir}",
+                f"--remote-debugging-port={debug_port}",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            version_url = f"http://127.0.0.1:{debug_port}/json/version"
+            ready = _wait_until(
+                lambda: _cdp_browser_ready(browser, version_url),
+                timeout_s=5.0,
+                poll_s=0.1,
+            )
+            assert ready, (
+                "Headless Chrome DevTools endpoint did not start.\n"
+                f"Browser stderr:\n{_read_process_stderr(browser)}"
+            )
+
+            target_info = _http_json(
+                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                method="PUT",
+            )
+            ws_url = target_info.get("webSocketDebuggerUrl", "")
+            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+            sock = _ws_connect(ws_url)
+            try:
+                next_id = 1
+                _cdp_send_command(sock, next_id, "Runtime.enable")
+                next_id += 1
+
+                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
+                last_state = {}
+                while time.time() < ready_deadline:
+                    state = _cdp_capture_page_state(sock, next_id)
+                    next_id += 1
+                    last_state = state
+                    if (
+                        state.get("current_path") == "/sounds/"
+                        and state.get("page_ready") == "1"
+                        and ready_row_name in state.get("body_text", "")
+                    ):
+                        break
+                    time.sleep(0.05)
+                else:
+                    raise AssertionError(
+                        "Sounds page did not become interactive before browser expression evaluation.\n"
+                        f"Last state: {last_state}"
+                    )
+
+                _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": (
+                            "(() => {"
+                            "  window.alert = () => {};"
+                            "  return true;"
+                            "})()"
+                        ),
+                        "returnByValue": True,
+                    },
+                )
+                next_id += 1
+
+                eval_response = _cdp_send_command(
+                    sock,
+                    next_id,
+                    "Runtime.evaluate",
+                    {
+                        "expression": expression,
+                        "returnByValue": True,
+                        "awaitPromise": True,
+                    },
+                )
+                next_id += 1
+                result = eval_response.get("result", {}).get("result", {}).get("value")
+                state = _cdp_capture_page_state(sock, next_id)
+                return state, result
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        finally:
+            if browser.poll() is None:
+                browser.terminate()
+                try:
+                    browser.wait(timeout=5.0)
+                except subprocess.TimeoutExpired:
+                    browser.kill()
+
+
 def _browser_state_details(browser_state: dict, log_path) -> str:
     return (
         f"Browser URL: {browser_state.get('current_url')}\n"
@@ -470,6 +590,20 @@ def _set_sound_meta(base_url: str, filename: str, payload: dict):
     )
 
 
+def _get_sound_meta(base_url: str, filename: str) -> dict:
+    status, headers, body = _http_get(base_url, f"/sounds/file-meta/{filename}", timeout_s=4.0)
+    assert status == 200, (
+        f"Expected 200 from GET /sounds/file-meta/{filename}, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+    assert "application/json" in headers.get("Content-Type", ""), (
+        f"/sounds/file-meta/{filename} did not return JSON. content-type={headers.get('Content-Type', '')}"
+    )
+    payload = json.loads(body)
+    assert isinstance(payload, dict), f"/sounds/file-meta/{filename} did not return a JSON object: {payload!r}"
+    return payload
+
+
 def _upload_sound_fixture(base_url: str, filename: str):
     status, headers, body = _http_request(
         base_url=base_url,
@@ -483,6 +617,30 @@ def _upload_sound_fixture(base_url: str, filename: str):
         f"Expected upload of {filename} to redirect, got {status}. "
         f"content-type={headers.get('Content-Type', '')} body={body}"
     )
+
+
+def _upload_sound_bytes(base_url: str, filename: str, data: bytes):
+    status, headers, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/sounds/{filename}",
+        timeout_s=10.0,
+        data=data,
+        headers={"Content-Type": "audio/mpeg"},
+    )
+    assert status == 303, (
+        f"Expected upload of {filename} to redirect, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+
+
+def _test_short_mp3_bytes() -> bytes:
+    if not TEST_SHORT_MP3_PATH.is_file():
+        pytest.fail(f"Missing short MP3 fixture: {TEST_SHORT_MP3_PATH}")
+    data = TEST_SHORT_MP3_PATH.read_bytes()
+    if not data:
+        pytest.fail(f"Short MP3 fixture is empty: {TEST_SHORT_MP3_PATH}")
+    return data
 
 
 def _get_runtime_status(base_url: str, timeout_s: float = 2.0) -> dict:
@@ -2288,6 +2446,143 @@ def test_sounds_browser_shows_and_clears_zero_volume_playback_notice(
     )
     assert cleared_idx is not None, (
         f"Sounds page did not clear the transient zero-volume playback notice for {trigger_mode} trigger.\n{details}"
+    )
+
+
+# Test: Sounds page trim slider keeps the start/end window ordered while showing centered `seconds.hundredths + s` labels above the handles.
+# 1. Start the main app and upload the deterministic `test6165ms.mp3` fixture under a `...6165ms.mp3` filename.
+# 2. Open `/sounds/` in a real headless browser and expand that row.
+# 3. Move `end` inward, then try to drag `start` past it, then try to drag `end` before `start`.
+# 4. Assert the browser clamps both handles to a valid ordered 50 ms window and shows `seconds.hundredths + s` text.
+# 5. Assert the saved backend metadata matches the clamped UI state.
+def test_sounds_browser_trim_slider_clamps_and_persists_valid_window(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+    filename = "browser-trim-control-6165ms.mp3"
+
+    _upload_sound_fixture(base_url, filename)
+
+    browser_state, result = _evaluate_expression_in_sounds_page(
+        base_url,
+        ready_row_name=filename,
+        expression=(
+            "((targetName) => {"
+            "  const row = Array.from(document.querySelectorAll('.file-item'))"
+            "    .find((item) => item.dataset && item.dataset.fileName === targetName);"
+            "  if (!row) return { error: 'missing-row' };"
+            "  const toggle = row.querySelector('.chev');"
+            "  if (!toggle) return { error: 'missing-toggle' };"
+            "  toggle.click();"
+            "  const details = document.querySelector(`.details[data-for-row=\"${row.id}\"]`);"
+            "  const start = details && details.querySelector('input[data-k=\"trim-start\"]');"
+            "  const stop = details && details.querySelector('input[data-k=\"trim-stop\"]');"
+            "  const startValue = details && details.querySelector('[data-k=\"trim-start-value\"]');"
+            "  const stopValue = details && details.querySelector('[data-k=\"trim-stop-value\"]');"
+            "  if (!details || !start || !stop || !startValue || !stopValue) return { error: 'missing-trim-controls' };"
+            "  stop.value = '2000';"
+            "  stop.dispatchEvent(new Event('input', { bubbles: true }));"
+            "  start.value = '2500';"
+            "  start.dispatchEvent(new Event('input', { bubbles: true }));"
+            "  stop.value = '1000';"
+            "  stop.dispatchEvent(new Event('input', { bubbles: true }));"
+            "  return new Promise((resolve) => {"
+            "    window.setTimeout(() => resolve({"
+            "      startValue: String(startValue.textContent || '').trim(),"
+            "      stopValue: String(stopValue.textContent || '').trim(),"
+            "      startRaw: String(start.value || ''),"
+            "      stopRaw: String(stop.value || '')"
+            "    }), 700);"
+            "  });"
+            f"}})({json.dumps(filename)})"
+        ),
+    )
+
+    details = _browser_state_details(browser_state, log_path)
+    assert isinstance(result, dict), f"Expected browser expression result object.\nresult={result!r}\n{details}"
+    assert result.get("error") is None, f"Browser trim interaction failed: {result!r}\n{details}"
+    assert result.get("startValue") == "1.95s", f"Expected start readout to use seconds.hundredths with unit. result={result!r}\n{details}"
+    assert result.get("stopValue") == "2.00s", f"Expected stop readout to use seconds.hundredths with unit. result={result!r}\n{details}"
+    assert result.get("startRaw") == "1950", f"Expected start slider to clamp below end. result={result!r}\n{details}"
+    assert result.get("stopRaw") == "2000", f"Expected stop slider to clamp above start. result={result!r}\n{details}"
+
+    persisted_holder: dict[str, dict] = {"meta": {}}
+    saved = _wait_until(
+        lambda: (
+            persisted_holder.__setitem__("meta", _get_sound_meta(base_url, filename)) is None
+            and persisted_holder["meta"].get("start") == "1:950"
+            and persisted_holder["meta"].get("stop") == "2:000"
+        ),
+        timeout_s=5.0,
+        poll_s=0.1,
+    )
+    assert saved, (
+        "Trim slider changes did not persist the expected clamped window.\n"
+        f"last_meta={persisted_holder['meta']}\n{details}"
+    )
+
+
+# Test: Sounds page disables trimming and shows a warning when the file is shorter than the trim step.
+# 1. Start the main app and upload the dedicated `test5ms.mp3` fixture from `tests/integration/assets/`.
+# 2. Open `/sounds/` in a real headless browser and expand that row.
+# 3. Assert the trim bar is visually disabled, both trim inputs are disabled, and a warning note says the file is too small to trim.
+def test_sounds_browser_disables_trim_for_audio_shorter_than_step(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+    filename = "browser-trim-too-short.mp3"
+
+    _upload_sound_bytes(base_url, filename, _test_short_mp3_bytes())
+
+    browser_state, result = _evaluate_expression_in_sounds_page(
+        base_url,
+        ready_row_name=filename,
+        expression=(
+            "((targetName) => {"
+            "  const row = Array.from(document.querySelectorAll('.file-item'))"
+            "    .find((item) => item.dataset && item.dataset.fileName === targetName);"
+            "  if (!row) return { error: 'missing-row' };"
+            "  const toggle = row.querySelector('.chev');"
+            "  if (!toggle) return { error: 'missing-toggle' };"
+            "  toggle.click();"
+            "  const details = document.querySelector(`.details[data-for-row=\"${row.id}\"]`);"
+            "  const trimRange = details && details.querySelector('[data-k=\"trim-range\"]');"
+            "  const start = details && details.querySelector('input[data-k=\"trim-start\"]');"
+            "  const stop = details && details.querySelector('input[data-k=\"trim-stop\"]');"
+            "  const warning = details && details.querySelector('[data-k=\"trim-warning\"]');"
+            "  if (!details || !trimRange || !start || !stop) return { error: 'missing-trim-controls' };"
+            "  return new Promise((resolve) => {"
+            "    window.setTimeout(() => resolve({"
+            "      trimDisabledClass: trimRange.classList.contains('is-disabled'),"
+            "      startDisabled: !!start.disabled,"
+            "      stopDisabled: !!stop.disabled,"
+            "      warningPresent: !!warning,"
+            "      warningHidden: warning ? !!warning.hidden : null,"
+            "      warningText: warning ? String(warning.textContent || '').trim() : ''"
+            "    }), 100);"
+            "  });"
+            f"}})({json.dumps(filename)})"
+        ),
+    )
+
+    details = _browser_state_details(browser_state, log_path)
+    assert isinstance(result, dict), f"Expected browser expression result object.\nresult={result!r}\n{details}"
+    assert result.get("error") is None, f"Browser short-trim interaction failed: {result!r}\n{details}"
+    assert result.get("trimDisabledClass") is True, (
+        f"Expected short audio trim bar to be visually disabled.\nresult={result!r}\n{details}"
+    )
+    assert result.get("startDisabled") is True, (
+        f"Expected trim start handle to be disabled for short audio.\nresult={result!r}\n{details}"
+    )
+    assert result.get("stopDisabled") is True, (
+        f"Expected trim end handle to be disabled for short audio.\nresult={result!r}\n{details}"
+    )
+    assert result.get("warningPresent") is True, (
+        f"Expected a trim warning element for short audio.\nresult={result!r}\n{details}"
+    )
+    assert result.get("warningHidden") is False, (
+        f"Expected the trim warning to be visible for short audio.\nresult={result!r}\n{details}"
+    )
+    assert re.search(r"too\s+small.*trim|trim.*too\s+small", result.get("warningText", ""), re.IGNORECASE), (
+        f"Expected trim warning to explain that the file is too small to trim.\nresult={result!r}\n{details}"
     )
 
 # Test: Sounds page shows a warning note when no sounds are enabled.

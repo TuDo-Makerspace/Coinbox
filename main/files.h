@@ -38,6 +38,7 @@
 #define FILE_ENTRY_NAME_MAX 256
 #define FILE_PROBABILITY_MAX 100
 #define FILE_VOLUME_MAX 125
+#define FILE_TRIM_STEP_MS 50U
 #define FILES_DEFAULT_SOUND_NAME "default.mp3"
 #define FILES_DEFAULT_SOUND_LABEL "Coin (Default)"
 
@@ -50,6 +51,8 @@ typedef struct {
     uint8_t probability;  // 0-100
     uint8_t volume;       // 0-125
     bool enabled;
+    uint32_t trim_start_ms;
+    uint32_t trim_stop_ms;
 } file_properties_t;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -62,6 +65,7 @@ typedef struct {
 
 void files_props_init(file_properties_t *props, const char *name);
 void files_props_set(file_properties_t *props, const char *name, uint8_t probability, uint8_t volume, bool enabled);
+void files_props_set_trim_ms(file_properties_t *props, uint32_t trim_start_ms, uint32_t trim_stop_ms);
 
 //-------------------------------------------------------------------------
 // Storage
@@ -92,6 +96,7 @@ esp_err_t files_pick_weighted_enabled(char *out_name, size_t out_size, uint32_t 
 
 esp_err_t files_read_meta(const char *name, file_properties_t *out);
 esp_err_t files_write_meta(const char *name, const file_properties_t *props);
+esp_err_t files_get_audio_duration_ms(const char *name, uint32_t *out_duration_ms);
 
 //-------------------------------------------------------------------------
 // Files Mutation

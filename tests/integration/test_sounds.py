@@ -68,6 +68,9 @@ def _unique_name(prefix: str) -> str:
 
 DEFAULT_SOUND_FILENAME = "default.mp3"
 DEFAULT_SOUND_LABEL = "Coin (Default)"
+TEST_MP3_DURATION_MS = 6165
+TEST_TRIM_VALID_START = "0:500"
+TEST_TRIM_VALID_STOP = "1:000"
 SPECIAL_FILENAME_SCENARIOS = (
     {
         "label": "spaces-and-parentheses",
@@ -253,6 +256,35 @@ def _set_sound_meta(base_url: str, filename: str, payload: dict):
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
+
+
+def _parse_trim_timestamp_ms(value: object) -> int:
+    assert isinstance(value, str), f"Expected trim timestamp string, got {value!r}"
+    match = re.fullmatch(r"(\d+):(\d{1,3})", value)
+    assert match, f"Expected trim timestamp in seconds:ms format, got {value!r}"
+
+    seconds = int(match.group(1))
+    millis = int(match.group(2))
+    assert 0 <= millis <= 999, f"Expected milliseconds component in range 0-999, got {value!r}"
+    return seconds * 1000 + millis
+
+
+def _assert_trim_timestamp_quantized_to_50ms(value: object) -> int:
+    total_ms = _parse_trim_timestamp_ms(value)
+    assert total_ms % 50 == 0, f"Expected 50 ms resolution, got {value!r}"
+    return total_ms
+
+
+def _set_valid_sound_trim(
+    base_url: str,
+    filename: str,
+    start: str = TEST_TRIM_VALID_START,
+    stop: str = TEST_TRIM_VALID_STOP,
+) -> dict:
+    status, _, body = _set_sound_meta(base_url, filename, {"start": start, "stop": stop})
+    assert status == 200, f"Failed to set trim window. status={status}, body={body}"
+    assert body == "OK"
+    return _get_sound_meta(base_url, filename)
 
 
 def _set_test_gpio_level(base_url: str, name: str, level: int):
@@ -1104,6 +1136,175 @@ def test_reject_invalid_sound_volume(qemu_mainapp_instance):
 
     after = _get_sound_meta(base_url, filename)
     assert after == before
+
+
+# Test: Metadata quantizes trim timestamps to 50 ms steps.
+# 1. Start from main app mode.
+# 2. Upload source file.
+# 3. Send `start` + `stop` with finer-than-50 ms resolution.
+# 4. Fetch metadata and verify both values were normalized to 50 ms steps.
+def test_set_sound_trim_quantizes_to_50ms(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    filename = f"{_unique_name('meta-trim-quantize-6165ms')}.mp3"
+
+    upload_status, _, upload_body = _upload_sound(base_url, filename, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for trim quantization test. body={upload_body}"
+
+    requested_start = "0:149"
+    requested_stop = "6:089"
+    status, _, body = _set_sound_meta(
+        base_url,
+        filename,
+        {"start": requested_start, "stop": requested_stop},
+    )
+
+    assert status == 200, f"Expected trim quantization request to succeed. body={body}"
+    assert body == "OK"
+
+    after = _get_sound_meta(base_url, filename)
+    start_ms = _assert_trim_timestamp_quantized_to_50ms(after.get("start"))
+    stop_ms = _assert_trim_timestamp_quantized_to_50ms(after.get("stop"))
+
+    assert after["start"] != requested_start, f"Expected start to be quantized. meta={after}"
+    assert after["stop"] != requested_stop, f"Expected stop to be quantized. meta={after}"
+    assert 0 <= start_ms < stop_ms <= TEST_MP3_DURATION_MS, (
+        "Expected quantized trim window to remain ordered and within the fixture duration.\n"
+        f"meta={after}"
+    )
+
+
+# Test: Metadata rejects `start` values that are not before `stop`.
+# 1. Start from main app mode.
+# 2. Upload source file and save a valid trim window.
+# 3. Attempt to move `start` to `stop` and then beyond it.
+# 4. Assert each request is rejected.
+# 5. Verify metadata stayed unchanged.
+def test_reject_sound_trim_start_greater_than_or_equal_to_stop(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    filename = f"{_unique_name('meta-trim-start-order-6165ms')}.mp3"
+
+    upload_status, _, upload_body = _upload_sound(base_url, filename, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for trim start-order test. body={upload_body}"
+
+    before = _set_valid_sound_trim(base_url, filename)
+
+    for bad_start in (TEST_TRIM_VALID_STOP, "1:100"):
+        status, _, body = _set_sound_meta(base_url, filename, {"start": bad_start})
+
+        assert status == 400, f"Expected 400 for invalid start {bad_start}. body={body}"
+        body_lower = body.lower()
+        assert "start" in body_lower, f"Expected rejection body to mention start. body={body}"
+        assert ("stop" in body_lower) or ("end" in body_lower), (
+            "Expected rejection body to mention stop/end ordering.\n"
+            f"body={body}"
+        )
+
+        after = _get_sound_meta(base_url, filename)
+        assert after == before, (
+            f"Invalid start {bad_start} should not change stored metadata.\n"
+            f"before={before}\nafter={after}"
+        )
+
+
+# Test: Metadata rejects `stop` values that are not after `start`.
+# 1. Start from main app mode.
+# 2. Upload source file and save a valid trim window.
+# 3. Attempt to move `stop` to `start` and then before it.
+# 4. Assert each request is rejected.
+# 5. Verify metadata stayed unchanged.
+def test_reject_sound_trim_stop_less_than_or_equal_to_start(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    filename = f"{_unique_name('meta-trim-stop-order-6165ms')}.mp3"
+
+    upload_status, _, upload_body = _upload_sound(base_url, filename, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for trim stop-order test. body={upload_body}"
+
+    before = _set_valid_sound_trim(base_url, filename)
+
+    for bad_stop in (TEST_TRIM_VALID_START, "0:400"):
+        status, _, body = _set_sound_meta(base_url, filename, {"stop": bad_stop})
+
+        assert status == 400, f"Expected 400 for invalid stop {bad_stop}. body={body}"
+        body_lower = body.lower()
+        assert ("stop" in body_lower) or ("end" in body_lower), (
+            "Expected rejection body to mention stop/end. "
+            f"body={body}"
+        )
+        assert "start" in body_lower, f"Expected rejection body to mention start. body={body}"
+
+        after = _get_sound_meta(base_url, filename)
+        assert after == before, (
+            f"Invalid stop {bad_stop} should not change stored metadata.\n"
+            f"before={before}\nafter={after}"
+        )
+
+
+# Test: Metadata rejects negative `start` values.
+# 1. Start from main app mode.
+# 2. Upload source file.
+# 3. Attempt to save a negative `start`.
+# 4. Assert the request is rejected.
+# 5. Verify metadata stayed unchanged.
+def test_reject_negative_sound_trim_start(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    filename = f"{_unique_name('meta-trim-start-negative-6165ms')}.mp3"
+
+    upload_status, _, upload_body = _upload_sound(base_url, filename, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for negative trim-start test. body={upload_body}"
+
+    before = _get_sound_meta(base_url, filename)
+    status, _, body = _set_sound_meta(
+        base_url,
+        filename,
+        {"start": "-1:000", "stop": TEST_TRIM_VALID_STOP},
+    )
+
+    assert status == 400, f"Expected 400 for negative start trim. body={body}"
+    assert "start" in body.lower(), f"Expected rejection body to mention start. body={body}"
+
+    after = _get_sound_meta(base_url, filename)
+    assert after == before, (
+        "Negative start trim should not change stored metadata.\n"
+        f"before={before}\nafter={after}"
+    )
+
+
+# Test: Metadata rejects `stop` values beyond the MP3 duration.
+# 1. Start from main app mode.
+# 2. Upload the `test6165ms.mp3` fixture.
+# 3. Attempt to save a `stop` past the fixture's 6165 ms duration.
+# 4. Assert the request is rejected.
+# 5. Verify metadata stayed unchanged.
+def test_reject_sound_trim_stop_beyond_mp3_duration(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    filename = f"{_unique_name('meta-trim-stop-duration-6165ms')}.mp3"
+
+    upload_status, _, upload_body = _upload_sound(base_url, filename, _test_mp3_bytes())
+    assert upload_status == 303, f"Upload setup failed for trim stop-duration test. body={upload_body}"
+
+    before = _get_sound_meta(base_url, filename)
+    status, _, body = _set_sound_meta(
+        base_url,
+        filename,
+        {"start": "0:000", "stop": "6:200"},
+    )
+
+    assert status == 400, f"Expected 400 for stop beyond fixture duration. body={body}"
+    body_lower = body.lower()
+    assert ("stop" in body_lower) or ("end" in body_lower), (
+        "Expected rejection body to mention stop/end. "
+        f"body={body}"
+    )
+    assert ("duration" in body_lower) or ("range" in body_lower), (
+        "Expected rejection body to mention the file duration or range.\n"
+        f"body={body}"
+    )
+
+    after = _get_sound_meta(base_url, filename)
+    assert after == before, (
+        "Stop beyond fixture duration should not change stored metadata.\n"
+        f"before={before}\nafter={after}"
+    )
 
 
 # Test: Laser playback honors deterministic weight updates.

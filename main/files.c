@@ -42,7 +42,8 @@
 
 #define FILES_PATH_MAX 512
 #define FILE_ENTRY_MAGIC 0x46454E54u /* 'FENT' */
-#define FILE_ENTRY_VERSION 2
+#define FILE_ENTRY_VERSION 3
+#define FILE_ENTRY_VERSION_LEGACY 2
 #define DEFAULT_SOUND_PROBABILITY 100
 #define DEFAULT_SOUND_VOLUME 100
 
@@ -71,6 +72,17 @@ typedef struct __attribute__((packed)) {
     uint8_t volume;
     uint8_t enabled;
     uint8_t reserved;
+} file_entry_meta_v2_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint8_t version;
+    uint8_t probability;
+    uint8_t volume;
+    uint8_t enabled;
+    uint8_t reserved;
+    uint32_t trim_start_ms;
+    uint32_t trim_stop_ms;
 } file_entry_meta_t;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -84,6 +96,17 @@ static char s_base_path[FILES_PATH_MAX] = {0};
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 static esp_err_t full_path_for_name(const char *name, char *out, size_t out_size);
+static bool parse_mp3_header(uint32_t header,
+                             int *sample_rate,
+                             int *frame_size,
+                             int *samples_per_frame);
+static uint32_t read_be32(const uint8_t *buf);
+static bool mp3_gapless_trim_samples_from_frame(FILE *f,
+                                                long frame_offset,
+                                                uint32_t header,
+                                                int frame_size,
+                                                uint32_t *out_trim_samples);
+static esp_err_t mp3_duration_ms_from_path(const char *path, uint32_t *out_duration_ms);
 
 //-------------------------------------------------------------------------
 // Common
@@ -213,6 +236,8 @@ static esp_err_t ensure_default_sound(const file_properties_t *preserved_meta)
         effective_meta.probability = clamp_probability(preserved_meta->probability);
         effective_meta.volume = clamp_volume(preserved_meta->volume);
         effective_meta.enabled = preserved_meta->enabled;
+        effective_meta.trim_start_ms = preserved_meta->trim_start_ms;
+        effective_meta.trim_stop_ms = preserved_meta->trim_stop_ms;
     }
 
     esp_err_t err = write_default_sound_audio_file();
@@ -322,6 +347,322 @@ static esp_err_t meta_path_for_name(const char *name, char *out, size_t out_size
 }
 
 //-------------------------------------------------------------------------
+// Audio Duration
+//-------------------------------------------------------------------------
+
+#if CONFIG_TEST_AUDIO_MOCK_BACKEND
+static uint32_t mock_playback_duration_from_name_ms(const char *name)
+{
+    if (!name || !name[0]) {
+        return 0;
+    }
+
+    const char *base = basename_from_path(name);
+    const char *dot = strrchr(base, '.');
+    size_t name_len = (dot && dot > base) ? (size_t)(dot - base) : strlen(base);
+    uint32_t parsed_ms = 0;
+
+    for (size_t i = 1; (i + 1) < name_len; i++) {
+        if (base[i] != 'm' || base[i + 1] != 's') {
+            continue;
+        }
+
+        size_t start = i;
+        while (start > 0 && base[start - 1] >= '0' && base[start - 1] <= '9') {
+            start--;
+        }
+        if (start == i) {
+            continue;
+        }
+
+        uint32_t value = 0;
+        for (size_t j = start; j < i; j++) {
+            value = value * 10U + (uint32_t)(base[j] - '0');
+            if (value > 3600000U) {
+                value = 3600000U;
+                break;
+            }
+        }
+        parsed_ms = value;
+    }
+
+    return parsed_ms;
+}
+#endif
+
+static bool parse_mp3_header(uint32_t header,
+                             int *sample_rate,
+                             int *frame_size,
+                             int *samples_per_frame)
+{
+    if (((header >> 21) & 0x7FF) != 0x7FF) {
+        return false;
+    }
+
+    uint8_t version_id = (uint8_t)((header >> 19) & 0x3);
+    uint8_t layer_id = (uint8_t)((header >> 17) & 0x3);
+    uint8_t bitrate_idx = (uint8_t)((header >> 12) & 0xF);
+    uint8_t sample_idx = (uint8_t)((header >> 10) & 0x3);
+    uint8_t padding = (uint8_t)((header >> 9) & 0x1);
+
+    if (version_id == 1 || layer_id != 1 || bitrate_idx == 0 || bitrate_idx == 0xF || sample_idx == 3) {
+        return false;
+    }
+
+    static const int sample_rate_v1[3] = {44100, 48000, 32000};
+    static const int sample_rate_v2[3] = {22050, 24000, 16000};
+    static const int sample_rate_v25[3] = {11025, 12000, 8000};
+    static const int bitrate_v1_l3[16] = {
+        0, 32, 40, 48, 56, 64, 80, 96,
+        112, 128, 160, 192, 224, 256, 320, 0
+    };
+    static const int bitrate_v2_l3[16] = {
+        0, 8, 16, 24, 32, 40, 48, 56,
+        64, 80, 96, 112, 128, 144, 160, 0
+    };
+
+    int sr = 0;
+    if (version_id == 3) {
+        sr = sample_rate_v1[sample_idx];
+    } else if (version_id == 2) {
+        sr = sample_rate_v2[sample_idx];
+    } else if (version_id == 0) {
+        sr = sample_rate_v25[sample_idx];
+    }
+    if (sr <= 0) {
+        return false;
+    }
+
+    int kbps = (version_id == 3) ? bitrate_v1_l3[bitrate_idx] : bitrate_v2_l3[bitrate_idx];
+    if (kbps <= 0) {
+        return false;
+    }
+
+    int bitrate = kbps * 1000;
+    int coeff = (version_id == 3) ? 144 : 72;
+    int samples = (version_id == 3) ? 1152 : 576;
+    int size = (coeff * bitrate) / sr + padding;
+    if (size <= 4) {
+        return false;
+    }
+
+    *sample_rate = sr;
+    *frame_size = size;
+    *samples_per_frame = samples;
+    return true;
+}
+
+static uint32_t read_be32(const uint8_t *buf)
+{
+    if (!buf) {
+        return 0;
+    }
+
+    return ((uint32_t)buf[0] << 24) |
+           ((uint32_t)buf[1] << 16) |
+           ((uint32_t)buf[2] << 8) |
+           (uint32_t)buf[3];
+}
+
+static bool mp3_gapless_trim_samples_from_frame(FILE *f,
+                                                long frame_offset,
+                                                uint32_t header,
+                                                int frame_size,
+                                                uint32_t *out_trim_samples)
+{
+    if (!f || !out_trim_samples || frame_offset < 0 || frame_size <= 0) {
+        return false;
+    }
+
+    uint8_t version_id = (uint8_t)((header >> 19) & 0x3);
+    uint8_t channel_mode = (uint8_t)((header >> 6) & 0x3);
+    bool mono = (channel_mode == 3);
+    size_t side_info_size = 0;
+    if (version_id == 3) {
+        side_info_size = mono ? 17U : 32U;
+    } else if (version_id == 2 || version_id == 0) {
+        side_info_size = mono ? 9U : 17U;
+    } else {
+        return false;
+    }
+
+    size_t xing_offset = 4U + side_info_size;
+    if ((size_t)frame_size < (xing_offset + 8U) || frame_size > 2048) {
+        return false;
+    }
+
+    uint8_t frame_buf[2048];
+    long resume_pos = ftell(f);
+    if (resume_pos < 0) {
+        return false;
+    }
+    if (fseek(f, frame_offset, SEEK_SET) != 0) {
+        return false;
+    }
+
+    size_t read_bytes = fread(frame_buf, 1, (size_t)frame_size, f);
+    bool restored = (fseek(f, resume_pos, SEEK_SET) == 0);
+    if (read_bytes != (size_t)frame_size || !restored) {
+        return false;
+    }
+
+    const uint8_t *xing = frame_buf + xing_offset;
+    if (memcmp(xing, "Xing", 4) != 0 && memcmp(xing, "Info", 4) != 0) {
+        return false;
+    }
+
+    size_t cursor = xing_offset + 4U;
+    uint32_t flags = read_be32(frame_buf + cursor);
+    cursor += 4U;
+
+    if (flags & 0x1U) {
+        cursor += 4U;
+    }
+    if (flags & 0x2U) {
+        cursor += 4U;
+    }
+    if (flags & 0x4U) {
+        cursor += 100U;
+    }
+    if (flags & 0x8U) {
+        cursor += 4U;
+    }
+
+    if (cursor + 24U > (size_t)frame_size) {
+        return false;
+    }
+
+    const uint8_t *lame = frame_buf + cursor;
+    if (memcmp(lame, "LAME", 4) != 0) {
+        return false;
+    }
+
+    const uint8_t *delay_bytes = lame + 21U;
+    uint32_t encoder_delay = ((uint32_t)delay_bytes[0] << 4) |
+                             ((uint32_t)delay_bytes[1] >> 4);
+    uint32_t encoder_padding = (((uint32_t)delay_bytes[1] & 0x0FU) << 8) |
+                               (uint32_t)delay_bytes[2];
+    *out_trim_samples = encoder_delay + encoder_padding;
+    return (*out_trim_samples > 0U);
+}
+
+static esp_err_t mp3_duration_ms_from_path(const char *path, uint32_t *out_duration_ms)
+{
+    if (!path || !out_duration_ms) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    size_t start_offset = 0;
+    uint8_t id3_header[10] = {0};
+    size_t read_bytes = fread(id3_header, 1, sizeof(id3_header), f);
+    if (read_bytes == sizeof(id3_header) &&
+        id3_header[0] == 'I' &&
+        id3_header[1] == 'D' &&
+        id3_header[2] == '3') {
+        bool valid_syncsafe = ((id3_header[6] & 0x80) == 0) &&
+                              ((id3_header[7] & 0x80) == 0) &&
+                              ((id3_header[8] & 0x80) == 0) &&
+                              ((id3_header[9] & 0x80) == 0);
+        if (valid_syncsafe) {
+            size_t tag_size = ((size_t)id3_header[6] << 21) |
+                              ((size_t)id3_header[7] << 14) |
+                              ((size_t)id3_header[8] << 7) |
+                              (size_t)id3_header[9];
+            start_offset = 10 + tag_size;
+            if (id3_header[5] & 0x10) {
+                start_offset += 10;
+            }
+        }
+    }
+
+    if (fseek(f, (long)start_offset, SEEK_SET) != 0) {
+        fclose(f);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    uint8_t window[4] = {0};
+    if (fread(window, 1, sizeof(window), f) != sizeof(window)) {
+        fclose(f);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    bool synced = false;
+    uint64_t total_samples = 0;
+    int final_sample_rate = 0;
+    uint32_t gapless_trim_samples = 0;
+    bool have_gapless_trim = false;
+
+    while (true) {
+        uint32_t header = ((uint32_t)window[0] << 24) |
+                          ((uint32_t)window[1] << 16) |
+                          ((uint32_t)window[2] << 8) |
+                          (uint32_t)window[3];
+
+        int sample_rate = 0;
+        int frame_size = 0;
+        int samples_per_frame = 0;
+        if (parse_mp3_header(header, &sample_rate, &frame_size, &samples_per_frame)) {
+            if (!synced) {
+                long frame_offset = ftell(f) - (long)sizeof(window);
+                if (!have_gapless_trim &&
+                    mp3_gapless_trim_samples_from_frame(f,
+                                                        frame_offset,
+                                                        header,
+                                                        frame_size,
+                                                        &gapless_trim_samples)) {
+                    have_gapless_trim = true;
+                }
+            }
+            synced = true;
+            final_sample_rate = sample_rate;
+            total_samples += (uint64_t)samples_per_frame;
+
+            if (fseek(f, frame_size - 4, SEEK_CUR) != 0) {
+                break;
+            }
+            if (fread(window, 1, sizeof(window), f) != sizeof(window)) {
+                break;
+            }
+            continue;
+        }
+
+        if (synced) {
+            break;
+        }
+
+        int next = fgetc(f);
+        if (next == EOF) {
+            break;
+        }
+        window[0] = window[1];
+        window[1] = window[2];
+        window[2] = window[3];
+        window[3] = (uint8_t)next;
+    }
+
+    fclose(f);
+    if (!synced || total_samples == 0 || final_sample_rate <= 0) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    if (have_gapless_trim && total_samples > (uint64_t)gapless_trim_samples) {
+        total_samples -= (uint64_t)gapless_trim_samples;
+    }
+
+    uint64_t duration_ms = (total_samples * 1000ULL) / (uint64_t)final_sample_rate;
+    if (duration_ms > UINT32_MAX) {
+        duration_ms = UINT32_MAX;
+    }
+    *out_duration_ms = (uint32_t)duration_ms;
+    return ESP_OK;
+}
+
+//-------------------------------------------------------------------------
 // Metadata
 //-------------------------------------------------------------------------
 
@@ -333,6 +674,8 @@ static void build_meta(file_entry_meta_t *hdr, const file_properties_t *props)
     hdr->volume = clamp_volume(props->volume);
     hdr->enabled = props->enabled ? 1 : 0;
     hdr->reserved = 0;
+    hdr->trim_start_ms = props->trim_start_ms;
+    hdr->trim_stop_ms = props->trim_stop_ms;
 }
 
 static esp_err_t file_props_load(const char *name, file_properties_t *out)
@@ -364,17 +707,36 @@ static esp_err_t file_props_load(const char *name, file_properties_t *out)
         return ESP_ERR_NOT_FOUND;
     }
 
-    file_entry_meta_t hdr;
+    file_entry_meta_t hdr = {0};
     size_t read_bytes = fread(&hdr, 1, sizeof(hdr), f);
     fclose(f);
-    if (read_bytes != sizeof(hdr) || hdr.magic != FILE_ENTRY_MAGIC || hdr.version != FILE_ENTRY_VERSION) {
+    if (read_bytes < sizeof(file_entry_meta_v2_t) || hdr.magic != FILE_ENTRY_MAGIC) {
         return ESP_ERR_INVALID_RESPONSE;
     }
 
     files_props_init(out, basename_from_path(audio_path));
+    if (hdr.version == FILE_ENTRY_VERSION_LEGACY) {
+        if (read_bytes != sizeof(file_entry_meta_v2_t)) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        file_entry_meta_v2_t *legacy = (file_entry_meta_v2_t *)&hdr;
+        out->probability = clamp_probability(legacy->probability);
+        out->volume = clamp_volume(legacy->volume);
+        out->enabled = legacy->enabled ? true : false;
+        out->trim_start_ms = 0;
+        out->trim_stop_ms = 0;
+        return ESP_OK;
+    }
+
+    if (hdr.version != FILE_ENTRY_VERSION || read_bytes != sizeof(hdr)) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
     out->probability = clamp_probability(hdr.probability);
     out->volume = clamp_volume(hdr.volume);
     out->enabled = hdr.enabled ? true : false;
+    out->trim_start_ms = hdr.trim_start_ms;
+    out->trim_stop_ms = hdr.trim_stop_ms;
     return ESP_OK;
 }
 
@@ -396,6 +758,8 @@ void files_props_init(file_properties_t *props, const char *path)
     props->probability = 0;
     props->volume = 0;
     props->enabled = false;
+    props->trim_start_ms = 0;
+    props->trim_stop_ms = 0;
 }
 
 void files_props_set(file_properties_t *props, const char *name, uint8_t probability, uint8_t volume, bool enabled)
@@ -409,6 +773,15 @@ void files_props_set(file_properties_t *props, const char *name, uint8_t probabi
     props->probability = clamp_probability(probability);
     props->volume = clamp_volume(volume);
     props->enabled = enabled;
+}
+
+void files_props_set_trim_ms(file_properties_t *props, uint32_t trim_start_ms, uint32_t trim_stop_ms)
+{
+    if (!props) {
+        return;
+    }
+    props->trim_start_ms = trim_start_ms;
+    props->trim_stop_ms = trim_stop_ms;
 }
 
 //-------------------------------------------------------------------------
@@ -675,6 +1048,36 @@ esp_err_t files_write_meta(const char *name, const file_properties_t *props)
     size_t written = fwrite(&hdr, 1, sizeof(hdr), f);
     fclose(f);
     return (written == sizeof(hdr)) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t files_get_audio_duration_ms(const char *name, uint32_t *out_duration_ms)
+{
+    if (!name || !out_duration_ms) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_base_path[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char audio_path[FILES_PATH_MAX];
+    esp_err_t err = full_path_for_name(name, audio_path, sizeof(audio_path));
+    if (err == ESP_OK) {
+        esp_err_t duration_err = mp3_duration_ms_from_path(audio_path, out_duration_ms);
+        if (duration_err == ESP_OK) {
+            return ESP_OK;
+        }
+        err = duration_err;
+    }
+
+#if CONFIG_TEST_AUDIO_MOCK_BACKEND
+    uint32_t mock_duration_ms = mock_playback_duration_from_name_ms(name);
+    if (mock_duration_ms > 0) {
+        *out_duration_ms = mock_duration_ms;
+        return ESP_OK;
+    }
+#endif
+
+    return err;
 }
 
 //-------------------------------------------------------------------------

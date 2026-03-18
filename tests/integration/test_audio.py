@@ -1124,6 +1124,59 @@ def test_playback_unmutes_has_expected_duration_and_blocks_test_modes(qemu_maina
     elapsed_s = time.monotonic() - t_start
     assert elapsed_s >= 5.0, f"Playback ended too quickly: {elapsed_s:.2f}s"
 
+
+# Test: Mock playback duration honors stored trim metadata.
+# 1. Upload the `test6165ms.mp3` fixture under a `...6165ms.mp3` filename.
+# 2. Save a trim window from `1.200s` to `3.900s`.
+# 3. Start playback and wait until `GET /audio/playback` reports the file as active.
+# 4. Measure how long playback remains active.
+# 5. Assert the observed active duration is near the trimmed `2.7s` window, not the full fixture length.
+def test_playback_duration_respects_trim_window_in_mock_backend(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    filename = f"{_unique_name('trimmed-playback-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    status, _, body = _set_sound_meta(
+        base_url,
+        filename,
+        {"start": "1:200", "stop": "3:900"},
+    )
+    assert status == 200, f"Failed to save trim metadata. body={body}"
+    assert body == "OK"
+
+    status, _, body = _audio_playback_start(base_url, filename, timeout_s=8.0)
+    assert status == 200, f"Failed to start trimmed playback. body={body}"
+
+    playback_state: dict[str, object] = {}
+
+    def _trimmed_playback_is_active() -> bool:
+        nonlocal playback_state
+        playback_state = _audio_playback_state(base_url)
+        return bool(playback_state.get("active")) and playback_state.get("file") == filename
+
+    playing = _wait_until(
+        _trimmed_playback_is_active,
+        timeout_s=4.0,
+        poll_s=0.05,
+    )
+    assert playing, f"Trimmed playback did not become active.\nLog tail:\n{_tail_log(log_path)}"
+
+    active_started_at = time.monotonic()
+    playback_done = _wait_until(
+        lambda: not bool(_audio_playback_state(base_url).get("active")),
+        timeout_s=6.0,
+        poll_s=0.05,
+    )
+    assert playback_done, f"Trimmed playback did not finish in time.\nLog tail:\n{_tail_log(log_path)}"
+
+    elapsed_s = time.monotonic() - active_started_at
+    assert 2.0 <= elapsed_s <= 3.6, (
+        "Trimmed mock playback should run for roughly the requested 2.7 s window.\n"
+        f"elapsed={elapsed_s:.2f}s\nstate={playback_state}\nlog_tail=\n{_tail_log(log_path)}"
+    )
+
     muted = _wait_until(lambda: _outputs_are_muted(base_url), timeout_s=3.0, poll_s=0.1)
     assert muted, f"DAC/AMP did not return to muted after playback.\nLog tail:\n{_tail_log(log_path)}"
 

@@ -350,6 +350,71 @@ static bool json_get_uint32_in_range(const char *json,
     return true;
 }
 
+static uint32_t trim_ms_quantize(uint32_t value_ms)
+{
+    const uint32_t half_step = FILE_TRIM_STEP_MS / 2U;
+    if (value_ms > UINT32_MAX - half_step) {
+        value_ms = UINT32_MAX - half_step;
+    }
+    return ((value_ms + half_step) / FILE_TRIM_STEP_MS) * FILE_TRIM_STEP_MS;
+}
+
+static bool parse_trim_timestamp_ms(const char *value, uint32_t *out_ms)
+{
+    if (!value || !out_ms || value[0] == '\0' || value[0] == '-') {
+        return false;
+    }
+
+    const char *colon = strchr(value, ':');
+    if (!colon || colon == value || colon[1] == '\0' || strchr(colon + 1, ':')) {
+        return false;
+    }
+
+    uint64_t seconds = 0;
+    for (const char *p = value; p < colon; ++p) {
+        if (*p < '0' || *p > '9') {
+            return false;
+        }
+        seconds = seconds * 10ULL + (uint64_t)(*p - '0');
+        if (seconds > (UINT32_MAX / 1000ULL)) {
+            return false;
+        }
+    }
+
+    size_t millis_len = strlen(colon + 1);
+    if (millis_len == 0 || millis_len > 3) {
+        return false;
+    }
+
+    uint32_t millis = 0;
+    for (const char *p = colon + 1; *p; ++p) {
+        if (*p < '0' || *p > '9') {
+            return false;
+        }
+        millis = millis * 10U + (uint32_t)(*p - '0');
+    }
+    if (millis > 999U) {
+        return false;
+    }
+
+    uint64_t total_ms = seconds * 1000ULL + (uint64_t)millis;
+    if (total_ms > UINT32_MAX) {
+        return false;
+    }
+
+    *out_ms = trim_ms_quantize((uint32_t)total_ms);
+    return true;
+}
+
+static bool format_trim_timestamp_ms(uint32_t value_ms, char *out, size_t out_size)
+{
+    if (!out || out_size == 0) {
+        return false;
+    }
+    int written = snprintf(out, out_size, "%u:%03u", (unsigned)(value_ms / 1000U), (unsigned)(value_ms % 1000U));
+    return written > 0 && (size_t)written < out_size;
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Start-Up Settings
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1831,6 +1896,24 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
             ESP_LOGW(TAG, "Skipping non-entry file: %s", entrypath);
             continue;
         }
+        uint32_t duration_ms = 0;
+        bool have_duration = (files_get_audio_duration_ms(entry->d_name, &duration_ms) == ESP_OK);
+        uint32_t effective_trim_start_ms = meta.trim_start_ms;
+        uint32_t effective_trim_stop_ms = meta.trim_stop_ms;
+        if (have_duration) {
+            if (effective_trim_start_ms > duration_ms) {
+                effective_trim_start_ms = duration_ms;
+            }
+            if (effective_trim_stop_ms == 0 || effective_trim_stop_ms > duration_ms) {
+                effective_trim_stop_ms = duration_ms;
+            }
+            if (effective_trim_stop_ms < effective_trim_start_ms) {
+                effective_trim_stop_ms = effective_trim_start_ms;
+            }
+        } else {
+            effective_trim_start_ms = 0;
+            effective_trim_stop_ms = 0;
+        }
         bool is_protected_sound = files_is_default_sound_name(entry->d_name);
         const char *display_name = sound_display_name(entry->d_name);
 
@@ -1854,6 +1937,15 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
         httpd_resp_sendstr_chunk(req, meta.enabled ? "1" : "0");
         httpd_resp_sendstr_chunk(req, "\" data-protected=\"");
         httpd_resp_sendstr_chunk(req, is_protected_sound ? "1" : "0");
+        httpd_resp_sendstr_chunk(req, "\" data-duration-ms=\"");
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)duration_ms);
+        httpd_resp_sendstr_chunk(req, numbuf);
+        httpd_resp_sendstr_chunk(req, "\" data-trim-start-ms=\"");
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)effective_trim_start_ms);
+        httpd_resp_sendstr_chunk(req, numbuf);
+        httpd_resp_sendstr_chunk(req, "\" data-trim-stop-ms=\"");
+        snprintf(numbuf, sizeof(numbuf), "%u", (unsigned)effective_trim_stop_ms);
+        httpd_resp_sendstr_chunk(req, numbuf);
         httpd_resp_sendstr_chunk(req, "\">");
 
         httpd_resp_sendstr_chunk(req, "<div class=\"file-row-main\">");
@@ -1905,6 +1997,21 @@ static esp_err_t sounds_index_get_handler(httpd_req_t *req)
         httpd_resp_sendstr_chunk(req, "</div>");
         httpd_resp_sendstr_chunk(req, "<input type=\"number\" min=\"0\" max=\"" STR_VALUE(FILE_VOLUME_MAX) "\" inputmode=\"numeric\" data-k=\"volume-num\">");
         httpd_resp_sendstr_chunk(req, "<span class=\"percent\">%</span>");
+        httpd_resp_sendstr_chunk(req, "</div>");
+
+        httpd_resp_sendstr_chunk(req, "<div class=\"prop trim-row\"><label>Trim</label>");
+        httpd_resp_sendstr_chunk(req, "<div class=\"trim-editor\">");
+        httpd_resp_sendstr_chunk(req, "<div class=\"trim-slider-wrap\" data-k=\"trim-range\">");
+        httpd_resp_sendstr_chunk(req, "<span class=\"trim-handle-label\" data-k=\"trim-start-label\"><strong data-k=\"trim-start-value\">0.00s</strong></span>");
+        httpd_resp_sendstr_chunk(req, "<span class=\"trim-handle-label\" data-k=\"trim-stop-label\"><strong data-k=\"trim-stop-value\">0.00s</strong></span>");
+        httpd_resp_sendstr_chunk(req, "<input type=\"range\" min=\"0\" step=\"" STR_VALUE(FILE_TRIM_STEP_MS) "\" value=\"0\" data-k=\"trim-start\" aria-label=\"Trim start\">");
+        httpd_resp_sendstr_chunk(req, "<input type=\"range\" min=\"0\" step=\"" STR_VALUE(FILE_TRIM_STEP_MS) "\" value=\"0\" data-k=\"trim-stop\" aria-label=\"Trim end\">");
+        httpd_resp_sendstr_chunk(req, "</div>");
+        httpd_resp_sendstr_chunk(req,
+                                 "<p class=\"trim-warning\" data-k=\"trim-warning\" hidden>"
+                                 "Audio file is too small to trim."
+                                 "</p>");
+        httpd_resp_sendstr_chunk(req, "</div>");
         httpd_resp_sendstr_chunk(req, "</div>");
 
         httpd_resp_sendstr_chunk(req, "<div class=\"action-row\">");
@@ -3409,13 +3516,39 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    uint32_t duration_ms = 0;
+    bool have_duration = (files_get_audio_duration_ms(base_name, &duration_ms) == ESP_OK);
+    uint32_t effective_start_ms = meta.trim_start_ms;
+    uint32_t effective_stop_ms = meta.trim_stop_ms;
+    if (have_duration) {
+        if (effective_start_ms > duration_ms) {
+            effective_start_ms = duration_ms;
+        }
+        if (effective_stop_ms == 0 || effective_stop_ms > duration_ms) {
+            effective_stop_ms = duration_ms;
+        }
+        if (effective_stop_ms < effective_start_ms) {
+            effective_stop_ms = effective_start_ms;
+        }
+    }
+
     if (req->method == HTTP_GET) {
-        char buf[128];
+        char start_buf[16];
+        char stop_buf[16];
+        if (!format_trim_timestamp_ms(effective_start_ms, start_buf, sizeof(start_buf)) ||
+            !format_trim_timestamp_ms(effective_stop_ms, stop_buf, sizeof(stop_buf))) {
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to format trim state");
+            return ESP_FAIL;
+        }
+
+        char buf[192];
         int n = snprintf(buf, sizeof(buf),
-                         "{\"probability\":%u,\"volume\":%u,\"enabled\":%s}\n",
+                         "{\"probability\":%u,\"volume\":%u,\"enabled\":%s,\"start\":\"%s\",\"stop\":\"%s\"}\n",
                          (unsigned)meta.probability,
                          (unsigned)meta.volume,
-                         meta.enabled ? "true" : "false");
+                         meta.enabled ? "true" : "false",
+                         start_buf,
+                         stop_buf);
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, buf, n);
         return ESP_OK;
@@ -3444,10 +3577,15 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
         int p = (int)meta.probability;
         int v = (int)meta.volume;
         bool e = meta.enabled;
+        uint32_t start_ms = meta.trim_start_ms;
+        uint32_t stop_ms = meta.trim_stop_ms;
 
         bool p_present = json_has_key(body, "probability");
         bool v_present = json_has_key(body, "volume");
         bool e_present = json_has_key(body, "enabled");
+        bool start_present = json_has_key(body, "start");
+        bool stop_present = json_has_key(body, "stop");
+        bool trim_present = start_present || stop_present;
 
         // keys must match what the browser sends
         if (p_present && !json_get_int(body, "probability", &p)) {
@@ -3462,6 +3600,22 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid enabled");
             return ESP_FAIL;
         }
+        if (start_present) {
+            char start_raw[24];
+            if (!json_get_string(body, "start", start_raw, sizeof(start_raw)) ||
+                !parse_trim_timestamp_ms(start_raw, &start_ms)) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid start");
+                return ESP_FAIL;
+            }
+        }
+        if (stop_present) {
+            char stop_raw[24];
+            if (!json_get_string(body, "stop", stop_raw, sizeof(stop_raw)) ||
+                !parse_trim_timestamp_ms(stop_raw, &stop_ms)) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid stop");
+                return ESP_FAIL;
+            }
+        }
 
         if (p < 0 || p > FILE_PROBABILITY_MAX) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Probability out of range");
@@ -3471,8 +3625,32 @@ static esp_err_t file_meta_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Volume out of range");
             return ESP_FAIL;
         }
+        if (trim_present) {
+            if (!have_duration) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Could not determine file duration");
+                return ESP_FAIL;
+            }
+            if (!stop_present && stop_ms == 0) {
+                stop_ms = duration_ms;
+            }
+            if (start_ms > duration_ms) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Start out of range");
+                return ESP_FAIL;
+            }
+            if (stop_ms > duration_ms) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Stop out of range for file duration");
+                return ESP_FAIL;
+            }
+            if (start_ms >= stop_ms) {
+                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Start must be less than stop");
+                return ESP_FAIL;
+            }
+        }
 
         files_props_set(&meta, NULL, (uint8_t)p, (uint8_t)v, e);
+        if (trim_present) {
+            files_props_set_trim_ms(&meta, start_ms, stop_ms);
+        }
         if (files_write_meta(base_name, &meta) != ESP_OK) {
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save properties");
             return ESP_FAIL;

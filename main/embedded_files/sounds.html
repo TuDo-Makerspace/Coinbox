@@ -351,6 +351,187 @@
       pointer-events: none;
     }
 
+    .prop.trim-row {
+      grid-column: 1 / -1;
+    }
+
+    .trim-editor {
+      grid-column: 2 / -1;
+      display: grid;
+      justify-items: start;
+    }
+
+    .trim-warning {
+      width: calc(100% - 1.5rem);
+      max-width: 100%;
+      margin: 0.15rem 0 0;
+      color: #9a3412;
+      font-size: 0.9rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+
+    .trim-warning[hidden] {
+      display: none !important;
+    }
+
+    .trim-slider-wrap {
+      --trim-start-pct: 0%;
+      --trim-stop-pct: 100%;
+      --trim-start-x: 10px;
+      --trim-stop-x: calc(100% - 10px);
+      width: calc(100% - 1.5rem);
+      max-width: 100%;
+      position: relative;
+      display: flex;
+      align-items: center;
+      overflow: visible;
+      min-height: 78px;
+      padding-top: 2.95rem;
+      padding-bottom: 0.45rem;
+    }
+
+    .trim-slider-wrap::before,
+    .trim-slider-wrap::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      height: 8px;
+      transform: translateY(-50%);
+      border-radius: 999px;
+      pointer-events: none;
+    }
+
+    .trim-slider-wrap::before {
+      width: 100%;
+      background: #dbe4ee;
+    }
+
+    .trim-slider-wrap::after {
+      left: var(--trim-start-pct);
+      width: calc(var(--trim-stop-pct) - var(--trim-start-pct));
+      background: #2563eb;
+    }
+
+    .trim-slider-wrap input[type="range"] {
+      position: absolute;
+      inset: 0;
+      margin: 0;
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    .trim-slider-wrap input[data-k="trim-start"] {
+      z-index: 2;
+    }
+
+    .trim-slider-wrap input[data-k="trim-stop"] {
+      z-index: 3;
+    }
+
+    .trim-slider-wrap input[type="range"]::-webkit-slider-runnable-track {
+      height: 8px;
+      background: transparent;
+    }
+
+    .trim-slider-wrap input[type="range"]::-moz-range-track {
+      height: 8px;
+      background: transparent;
+      border: none;
+    }
+
+    .trim-slider-wrap input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      margin-top: -6px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 3px solid #2563eb;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .trim-slider-wrap input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #ffffff;
+      border: 3px solid #2563eb;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+
+    .trim-handle-label {
+      position: absolute;
+      top: 0.25rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transform: translateX(-50%);
+      min-width: 3.25rem;
+      padding: 0.28rem 0.65rem;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1e3a8a;
+      font-size: 0.9rem;
+      font-weight: 700;
+      line-height: 1.2;
+      text-align: center;
+      white-space: nowrap;
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.12);
+    }
+
+    .trim-handle-label strong {
+      font-weight: 800;
+    }
+
+    .trim-handle-label[data-k="trim-start-label"] {
+      left: var(--trim-start-x);
+    }
+
+    .trim-handle-label[data-k="trim-stop-label"] {
+      left: var(--trim-stop-x);
+    }
+
+    .trim-slider-wrap.is-crowded {
+      min-height: 96px;
+      padding-top: 4rem;
+    }
+
+    .trim-slider-wrap.is-crowded .trim-handle-label[data-k="trim-stop-label"] {
+      top: 1.95rem;
+    }
+
+    .trim-slider-wrap.is-disabled {
+      opacity: 0.55;
+    }
+
+    .trim-slider-wrap.is-disabled input[type="range"]::-webkit-slider-thumb {
+      background: #e2e8f0;
+      border-color: #94a3b8;
+      box-shadow: none;
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+
+    .trim-slider-wrap.is-disabled input[type="range"]::-moz-range-thumb {
+      background: #e2e8f0;
+      border-color: #94a3b8;
+      box-shadow: none;
+      pointer-events: none;
+      cursor: not-allowed;
+    }
+
     .nudge {
       border: none;
       background: #f1f5f9;
@@ -477,6 +658,9 @@
         max-width: none;
         grid-column: 1;
       }
+      .trim-editor {
+        grid-column: 1 / -1;
+      }
       .percent {
         grid-column: 2;
         justify-self: end;
@@ -587,6 +771,7 @@
       const safeBase = basePath.endsWith('/') ? basePath : basePath + '/';
       const FILE_PROBABILITY_MAX = 100;
       const FILE_VOLUME_MAX = 125;
+      const TRIM_STEP_MS = 50;
       const markerPct = FILE_VOLUME_MAX > 0 ? (100 / FILE_VOLUME_MAX) * 100 : 50;
       document.documentElement.style.setProperty('--volume-overdrive-marker-left', `${markerPct}%`);
 
@@ -668,6 +853,33 @@
         const parsed = Number.parseInt(value, 10);
         if (Number.isNaN(parsed)) return fallback;
         return Math.min(100, Math.max(0, parsed));
+      }
+
+      function parseMsValue(value, fallback = 0) {
+        const parsed = Number.parseInt(value, 10);
+        return Number.isNaN(parsed) ? fallback : parsed;
+      }
+
+      function quantizeTrimMs(value) {
+        return Math.round(Math.max(0, Number(value) || 0) / TRIM_STEP_MS) * TRIM_STEP_MS;
+      }
+
+      function clampTrimMs(value, minValue, maxValue) {
+        const quantized = quantizeTrimMs(value);
+        return Math.min(maxValue, Math.max(minValue, quantized));
+      }
+
+      function trimDisplayFromMs(valueMs) {
+        const safe = quantizeTrimMs(valueMs);
+        const centiseconds = Math.round(safe / 10);
+        const seconds = Math.floor(centiseconds / 100);
+        const hundredths = String(centiseconds % 100).padStart(2, '0');
+        return `${seconds}.${hundredths}s`;
+      }
+
+      function trimMetaFromMs(valueMs) {
+        const safe = quantizeTrimMs(valueMs);
+        return `${Math.floor(safe / 1000)}:${String(safe % 1000).padStart(3, '0')}`;
       }
 
       function setSoundStateNote(message) {
@@ -995,12 +1207,30 @@
         const volNum = details.querySelector('input[data-k="volume-num"]');
         const volMinus = details.querySelector('button[data-k="volume-minus"]');
         const volPlus = details.querySelector('button[data-k="volume-plus"]');
+        const trimStart = details.querySelector('input[data-k="trim-start"]');
+        const trimStop = details.querySelector('input[data-k="trim-stop"]');
+        const trimRange = details.querySelector('[data-k="trim-range"]');
+        const trimStartValue = details.querySelector('[data-k="trim-start-value"]');
+        const trimStopValue = details.querySelector('[data-k="trim-stop-value"]');
+        const trimWarning = details.querySelector('[data-k="trim-warning"]');
         const deleteBtn = details.querySelector('button.delete-btn');
         const nameInput = row.querySelector('input[data-k="name-edit"]');
         const nameLink = row.querySelector('.file-name');
         let nameExt = splitNameExt(row.dataset.fileName || nameLink?.textContent || '').ext || '.mp3';
         let renameInFlight = false;
         let pendingRenameRaw = null;
+        const rawDurationMs = Math.max(0, parseMsValue(row.dataset.durationMs, 0));
+        const trimTooShort = rawDurationMs > 0 && rawDurationMs < TRIM_STEP_MS;
+        const trimMaxMs = rawDurationMs >= TRIM_STEP_MS
+          ? Math.floor(rawDurationMs / TRIM_STEP_MS) * TRIM_STEP_MS
+          : 0;
+        const trimThumbSizePx = 20;
+        const trimEnabled = !!(trimStart && trimStop && trimRange && trimMaxMs >= TRIM_STEP_MS);
+        let trimState = {
+          maxMs: trimMaxMs,
+          startMs: 0,
+          stopMs: trimMaxMs,
+        };
 
         if (isProtected) {
           if (nameInput) {
@@ -1013,6 +1243,75 @@
 
         const clampProbability = (v) => Math.min(FILE_PROBABILITY_MAX, Math.max(0, parseInt(v || 0, 10)));
         const clampVolume = (v) => Math.min(FILE_VOLUME_MAX, Math.max(0, parseInt(v || 0, 10)));
+
+        function applyTrimState() {
+          if (!trimRange) return;
+
+          const startPct = trimState.maxMs > 0 ? (trimState.startMs / trimState.maxMs) * 100 : 0;
+          const stopPct = trimState.maxMs > 0 ? (trimState.stopMs / trimState.maxMs) * 100 : 100;
+          const sliderWidthPx = Math.max(trimRange.clientWidth, trimThumbSizePx);
+          const usableTrackPx = Math.max(sliderWidthPx - trimThumbSizePx, 0);
+          const startX = (trimThumbSizePx / 2) + usableTrackPx * (startPct / 100);
+          const stopX = (trimThumbSizePx / 2) + usableTrackPx * (stopPct / 100);
+          trimRange.style.setProperty('--trim-start-pct', `${startPct}%`);
+          trimRange.style.setProperty('--trim-stop-pct', `${stopPct}%`);
+          trimRange.style.setProperty('--trim-start-x', `${startX}px`);
+          trimRange.style.setProperty('--trim-stop-x', `${stopX}px`);
+          trimRange.classList.toggle('is-disabled', !trimEnabled);
+          trimRange.classList.toggle('is-crowded', trimEnabled && (stopPct - startPct) < 12);
+          if (trimWarning) {
+            trimWarning.hidden = !trimTooShort;
+          }
+
+          if (trimStart) {
+            trimStart.min = '0';
+            trimStart.max = String(trimState.maxMs);
+            trimStart.step = String(TRIM_STEP_MS);
+            trimStart.value = String(trimState.startMs);
+            trimStart.disabled = !trimEnabled;
+          }
+          if (trimStop) {
+            trimStop.min = '0';
+            trimStop.max = String(trimState.maxMs);
+            trimStop.step = String(TRIM_STEP_MS);
+            trimStop.value = String(trimState.stopMs);
+            trimStop.disabled = !trimEnabled;
+          }
+          if (trimStartValue) trimStartValue.textContent = trimDisplayFromMs(trimState.startMs);
+          if (trimStopValue) trimStopValue.textContent = trimDisplayFromMs(trimState.stopMs);
+
+          row.dataset.trimStartMs = String(trimState.startMs);
+          row.dataset.trimStopMs = String(trimState.stopMs);
+        }
+
+        function setTrim(nextStartMs, nextStopMs, changedEdge = '') {
+          if (!trimEnabled) {
+            applyTrimState();
+            return;
+          }
+
+          let startMs = clampTrimMs(nextStartMs, 0, trimState.maxMs);
+          let stopMs = clampTrimMs(nextStopMs, 0, trimState.maxMs);
+
+          if (changedEdge === 'start') {
+            if (startMs >= stopMs) {
+              startMs = Math.max(0, stopMs - TRIM_STEP_MS);
+            }
+          } else if (changedEdge === 'stop') {
+            if (stopMs <= startMs) {
+              stopMs = Math.min(trimState.maxMs, startMs + TRIM_STEP_MS);
+            }
+          } else if (startMs >= stopMs) {
+            stopMs = Math.min(trimState.maxMs, startMs + TRIM_STEP_MS);
+            if (stopMs <= startMs) {
+              startMs = Math.max(0, stopMs - TRIM_STEP_MS);
+            }
+          }
+
+          trimState.startMs = startMs;
+          trimState.stopMs = stopMs;
+          applyTrimState();
+        }
 
         function setProb(val) {
           const v = clampProbability(val);
@@ -1033,13 +1332,31 @@
         setProb(row.dataset.probability || "50");
         setVol(row.dataset.volume || "50");
         if (toggle) toggle.checked = (row.dataset.enabled === "1");
+        {
+          const initialStartMs = parseMsValue(row.dataset.trimStartMs, 0);
+          const initialStopMs = parseMsValue(row.dataset.trimStopMs, trimMaxMs);
+          setTrim(initialStartMs, initialStopMs || trimMaxMs);
+        }
+        if (trimRange) {
+          if (typeof ResizeObserver === 'function') {
+            const trimResizeObserver = new ResizeObserver(() => applyTrimState());
+            trimResizeObserver.observe(trimRange);
+          } else {
+            window.addEventListener('resize', applyTrimState);
+          }
+        }
 
         function currentMeta() {
-          return {
+          const meta = {
             probability: clampProbability(prob?.value),
             volume: clampVolume(vol?.value),
             enabled: !!(toggle && toggle.checked)
           };
+          if (trimEnabled) {
+            meta.start = trimMetaFromMs(trimState.startMs);
+            meta.stop = trimMetaFromMs(trimState.stopMs);
+          }
+          return meta;
         }
 
         function handleSliderOrNudgeChange(kind, setter, delta) {
@@ -1098,6 +1415,23 @@
         vol?.addEventListener('input', handleSliderOrNudgeChange('vol', setVol));
         volMinus?.addEventListener('click', handleSliderOrNudgeChange('vol', setVol, -1));
         volPlus?.addEventListener('click', handleSliderOrNudgeChange('vol', setVol, 1));
+
+        trimStart?.addEventListener('input', () => {
+          setTrim(trimStart.value, trimStop?.value, 'start');
+          schedulePersist(rowId, fileUri, currentMeta);
+        });
+        trimStop?.addEventListener('input', () => {
+          setTrim(trimStart?.value, trimStop.value, 'stop');
+          schedulePersist(rowId, fileUri, currentMeta);
+        });
+        trimStart?.addEventListener('pointerdown', () => {
+          trimStart.style.zIndex = '4';
+          if (trimStop) trimStop.style.zIndex = '3';
+        });
+        trimStop?.addEventListener('pointerdown', () => {
+          trimStop.style.zIndex = '4';
+          if (trimStart) trimStart.style.zIndex = '3';
+        });
 
         probNum?.addEventListener('input', () => {
           const raw = String(probNum.value ?? '').trim();

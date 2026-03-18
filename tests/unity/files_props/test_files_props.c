@@ -35,6 +35,8 @@ TEST_CASE("files_props_init sets basename and defaults", "[files]")
     TEST_ASSERT_EQUAL_UINT8(0, props.probability);
     TEST_ASSERT_EQUAL_UINT8(0, props.volume);
     TEST_ASSERT_FALSE(props.enabled);
+    TEST_ASSERT_EQUAL_UINT32(0, props.trim_start_ms);
+    TEST_ASSERT_EQUAL_UINT32(0, props.trim_stop_ms);
 }
 
 TEST_CASE("files_props_set clamps probability and volume", "[files]")
@@ -48,6 +50,8 @@ TEST_CASE("files_props_set clamps probability and volume", "[files]")
     TEST_ASSERT_EQUAL_UINT8(FILE_PROBABILITY_MAX, props.probability);
     TEST_ASSERT_EQUAL_UINT8(FILE_VOLUME_MAX, props.volume);
     TEST_ASSERT_TRUE(props.enabled);
+    TEST_ASSERT_EQUAL_UINT32(0, props.trim_start_ms);
+    TEST_ASSERT_EQUAL_UINT32(0, props.trim_stop_ms);
 }
 
 TEST_CASE("files_props_set accepts disabled zeroed entry", "[files]")
@@ -61,4 +65,17 @@ TEST_CASE("files_props_set accepts disabled zeroed entry", "[files]")
     TEST_ASSERT_EQUAL_UINT8(0, props.probability);
     TEST_ASSERT_EQUAL_UINT8(0, props.volume);
     TEST_ASSERT_FALSE(props.enabled);
+    TEST_ASSERT_EQUAL_UINT32(0, props.trim_start_ms);
+    TEST_ASSERT_EQUAL_UINT32(0, props.trim_stop_ms);
+}
+
+TEST_CASE("files_props_set_trim_ms stores trim window", "[files]")
+{
+    file_properties_t props;
+    files_props_init(&props, "placeholder.mp3");
+
+    files_props_set_trim_ms(&props, 500, 1200);
+
+    TEST_ASSERT_EQUAL_UINT32(500, props.trim_start_ms);
+    TEST_ASSERT_EQUAL_UINT32(1200, props.trim_stop_ms);
 }
