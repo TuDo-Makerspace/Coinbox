@@ -1,0 +1,98 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Test: Unity",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "set -euo pipefail; cd \"${workspaceFolder}\"; source /home/patrick/esp/v5.5.2/esp-idf/export.sh; export ADF_PATH=/home/patrick/esp/esp-adf; bash ./tests/unity/run_qemu_tests.sh ${input:unityTarget}"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Test: Integration",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "set -euo pipefail; cd \"${workspaceFolder}\"; source /home/patrick/esp/v5.5.2/esp-idf/export.sh; export ADF_PATH=/home/patrick/esp/esp-adf; target='${input:integrationTarget}'; if [ \"$target\" = \"all\" ]; then python3 -m pytest -s -vv -rA tests/integration; else python3 -m pytest -s -vv -rA \"tests/integration/$target\"; fi"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Test: Integration (Compose, All)",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "set -euo pipefail; cd \"${workspaceFolder}\"; source /home/patrick/esp/v5.5.2/esp-idf/export.sh; export ADF_PATH=/home/patrick/esp/esp-adf; python3 tests/integration/run_all_compose.py"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Test: Integration (tmux split)",
+            "type": "shell",
+            "command": "bash",
+            "args": [
+                "-lc",
+                "set -euo pipefail; cd \"${workspaceFolder}\"; source /home/patrick/esp/v5.5.2/esp-idf/export.sh; export ADF_PATH=/home/patrick/esp/esp-adf; target='${input:integrationTarget}'; if [ \"$target\" = \"all\" ]; then export COINBOX_INTEGRATION_TEST_TARGET=tests/integration; else export COINBOX_INTEGRATION_TEST_TARGET=\"tests/integration/$target\"; fi; export IDF_EXPORT_SH=/home/patrick/esp/v5.5.2/esp-idf/export.sh; bash ./tests/integration/run_all_tmux_split.sh"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "focus": true,
+                "panel": "dedicated",
+                "clear": true
+            },
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "unityTarget",
+            "type": "pickString",
+            "description": "Select Unity test target",
+            "options": [
+                "all",
+                "files",
+                "recovery"
+            ],
+            "default": "all"
+        },
+        {
+            "id": "integrationTarget",
+            "type": "pickString",
+            "description": "Select integration test target",
+            "options": [
+                "all",
+                "test_audio.py",
+                "test_auth.py",
+                "test_bootstrap.py",
+                "test_browser.py",
+                "test_gpio.py",
+                "test_sounds.py",
+                "test_system.py"
+            ],
+            "default": "all"
+        }
+    ]
+}

@@ -31,7 +31,8 @@ node_modules/
 .env
 
 # VS Code
-.vscode/
+.vscode/*
+!.vscode/tasks.json
 .vscode-server/
 .vscode-test/
 .devcontainer
