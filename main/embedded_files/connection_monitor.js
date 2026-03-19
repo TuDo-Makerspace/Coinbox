@@ -8,7 +8,7 @@
   const STYLE_ID = "coinbox-connection-style";
   const FAILURE_THRESHOLD = 2;
   const RECONNECT_POLL_MS = 200;
-  const RECONNECT_REQUEST_TIMEOUT_MS = 450;
+  const RECONNECT_REQUEST_TIMEOUT_MS = 1500;
   const RUNTIME_STATUS_PATH = "/runtime/status";
   const nativeFetch = window.fetch.bind(window);
   const FETCH_ALLOW_DURING_EXPECTED_DISCONNECT = "coinboxAllowDuringExpectedDisconnect";

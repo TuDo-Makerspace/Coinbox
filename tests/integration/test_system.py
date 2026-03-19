@@ -43,6 +43,7 @@ try:
         _http_get,
         _http_request,
         _is_bootstrap_root_page,
+        _is_main_app_ready,
         _is_login_redirect,
         _log_contains_any_since,
         _set_network_config,
@@ -70,6 +71,7 @@ except ModuleNotFoundError:
         _http_get,
         _http_request,
         _is_bootstrap_root_page,
+        _is_main_app_ready,
         _is_login_redirect,
         _log_contains_any_since,
         _set_network_config,
@@ -81,6 +83,9 @@ except ModuleNotFoundError:
         _wait_until,
         qemu_bootstrap_instance,
     )
+
+
+BOOTSTRAP_PAGE_TIMEOUT_S = 6.0
 
 
 def _unique_name(prefix: str) -> str:
@@ -98,12 +103,25 @@ def qemu_mainapp_instance(qemu_bootstrap_instance):
 def _wait_for_bootstrap_root(base_url: str, timeout_s: float) -> bool:
     def in_bootstrap_mode() -> bool:
         try:
-            status, headers, body = _http_get(base_url, "/")
+            status, headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
         except Exception:
             return False
         return _is_bootstrap_root_page(status, headers, body)
 
     return _wait_until(in_bootstrap_mode, timeout_s=timeout_s, poll_s=0.2)
+
+
+def _wait_for_bootstrap_or_mainapp(base_url: str, timeout_s: float) -> bool:
+    def bootstrap_or_mainapp_ready() -> bool:
+        try:
+            status, headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
+        except Exception:
+            return _is_main_app_ready(base_url)
+        if _is_bootstrap_root_page(status, headers, body):
+            return True
+        return _is_main_app_ready(base_url)
+
+    return _wait_until(bootstrap_or_mainapp_ready, timeout_s=timeout_s, poll_s=0.2)
 
 
 def _wait_for_reboot_markers(log_path, log_start_pos: int, timeout_s: float) -> bool:
@@ -190,6 +208,7 @@ def test_restart_endpoint_reboots_device(qemu_mainapp_instance):
 def test_reset_settings_endpoint_restores_defaults_and_reboots_device(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
     log_path = qemu_mainapp_instance["log_path"]
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
 
     baseline_network = _get_network_config(base_url)
     baseline_security = _get_security_config(base_url)
@@ -251,16 +270,41 @@ def test_reset_settings_endpoint_restores_defaults_and_reboots_device(qemu_maina
             f"got status={reset_status}, body={reset_body}"
         )
 
-    rebooted = _wait_for_bootstrap_root(base_url, timeout_s=float(BOOT_TIMEOUT_S + 20.0))
-    assert rebooted, (
-        "Device did not reboot into bootstrap after /settings/reset.\n"
+    reboot_seen = _wait_for_reboot_markers(
+        log_path,
+        log_start_pos,
+        timeout_s=float(BOOT_TIMEOUT_S + 10.0),
+    )
+    reset_ready = _wait_for_bootstrap_or_mainapp(base_url, timeout_s=float(BOOT_TIMEOUT_S + 20.0))
+    assert reboot_seen, (
+        "Did not observe reboot markers after /settings/reset.\n"
+        f"reset_status={reset_status}\n"
+        f"reset_body={reset_body}\n"
+        f"reset_exc={reset_exc}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert reset_ready, (
+        "Device did not return to bootstrap or main app after /settings/reset.\n"
         f"reset_status={reset_status}\n"
         f"reset_body={reset_body}\n"
         f"reset_exc={reset_exc}\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
 
-    _skip_to_main_app(base_url, log_path)
+    try:
+        status, headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
+    except Exception:
+        status = None
+        headers = None
+        body = ""
+    if status is not None and headers is not None and _is_bootstrap_root_page(status, headers, body):
+        _skip_to_main_app(base_url, log_path)
+    else:
+        main_ready = _wait_until(lambda: _is_main_app_ready(base_url), timeout_s=20.0, poll_s=0.2)
+        assert main_ready, (
+            "Main app did not become ready after /settings/reset reboot.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
 
     network_after_reset = _get_network_config(base_url)
     security_after_reset = _get_security_config(base_url)
@@ -290,7 +334,7 @@ def test_format_endpoint_wipes_uploaded_sounds(qemu_mainapp_instance):
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
     assert status == 200

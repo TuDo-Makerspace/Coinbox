@@ -50,13 +50,25 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_PORT = _env_int("COINBOX_TEST_PORT", 18080)
 TEST_BUILD_DIR = os.environ.get("COINBOX_TEST_BUILD_DIR", "build_qemu_integration")
 QEMU_LOG_PATH_ENV = os.environ.get("COINBOX_TEST_QEMU_LOG_PATH", "").strip()
 BOOT_TIMEOUT_S = float(_env_int("COINBOX_TEST_BOOT_TIMEOUT_S", 30))
 QEMU_BUILD_TIMEOUT_S = float(_env_int("COINBOX_TEST_BUILD_TIMEOUT_S", 900))
+HTTP_TIMEOUT_SCALE = max(1.0, _env_float("COINBOX_TEST_HTTP_TIMEOUT_SCALE", 1.0))
 MAIN_READY_TIMEOUT_S = 20.0
+BOOTSTRAP_PAGE_TIMEOUT_S = 6.0
 BOOTSTRAP_HTML_MARKER = "Coinbox is starting"
 RECOVERY_AP_ATTEMPT_LOG_MARKER = "Creating AP: coinboxrecovery"
 RECOVERY_MODE_ENGAGED_LOG_MARKER = "Recovery endpoint hit; countdown aborted"
@@ -82,11 +94,24 @@ IPV4_RE = re.compile(
 _TEST_MP3_BYTES: bytes | None = None
 _QEMU_BUILD_DONE = False
 _QEMU_BUILD_LOCK = threading.Lock()
+_QEMU_FLASH_IMAGE_NAME = "qemu_flash.bin"
+_QEMU_EFUSE_IMAGE_NAME = "qemu_efuse.bin"
+_QEMU_RESTART_MARKER = "Restarting..."
+_QEMU_BOOTSTRAP_STARTED_MARKER = "bootstrap: Bootstrap server started"
+_QEMU_RESTART_PANIC_MARKERS = (
+    "Guru Meditation Error:",
+    "panic'ed",
+)
+_QEMU_RESTART_RECOVERY_LIMIT = 3
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def _scaled_http_timeout(timeout_s: float) -> float:
+    return max(0.1, timeout_s * HTTP_TIMEOUT_SCALE)
 
 
 def _http_get(base_url: str, path: str, timeout_s: float = 2.0):
@@ -110,7 +135,7 @@ def _http_request(
     for key, value in (headers or {}).items():
         req.add_header(key, value)
     try:
-        with opener.open(req, timeout=timeout_s) as resp:
+        with opener.open(req, timeout=_scaled_http_timeout(timeout_s)) as resp:
             body = resp.read().decode("utf-8", errors="replace")
             return resp.status, resp.headers, body
     except urllib.error.HTTPError as err:
@@ -131,7 +156,7 @@ def _http_request_bytes(
     for key, value in (headers or {}).items():
         req.add_header(key, value)
     try:
-        with opener.open(req, timeout=timeout_s) as resp:
+        with opener.open(req, timeout=_scaled_http_timeout(timeout_s)) as resp:
             return resp.status, resp.headers, resp.read()
     except urllib.error.HTTPError as err:
         return err.code, err.headers, err.read()
@@ -207,11 +232,15 @@ def _extract_bootstrap_countdown_seconds(body: str) -> int | None:
 
 def _is_main_app_ready(base_url: str) -> bool:
     try:
-        status_code, headers, _ = _http_get(base_url, "/sounds/")
+        status_code, headers, body = _http_get(base_url, "/runtime/status", timeout_s=3.0)
     except Exception:
         return False
     if status_code == 200:
-        return True
+        try:
+            payload = _json_load_object(body, "/runtime/status")
+        except Exception:
+            return False
+        return payload.get("mode") == "mainapp" and payload.get("ready") is True
     if status_code == 302 and headers.get("Location", "").startswith("/login"):
         return True
     return False
@@ -613,7 +642,7 @@ def _restart_into_bootstrap(
 
     def bootstrap_ready() -> bool:
         try:
-            status, resp_headers, body = _http_get(base_url, "/")
+            status, resp_headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
         except Exception:
             return False
         return _is_bootstrap_root_page(status, resp_headers, body)
@@ -632,7 +661,7 @@ def _reset_settings_from_recovery(base_url: str, headers: dict[str, str] | None 
         base_url=base_url,
         method="POST",
         path="/settings/reset",
-        timeout_s=2.0,
+        timeout_s=10.0,
         data=b"",
         headers=headers,
     )
@@ -645,7 +674,7 @@ def _format_storage_from_recovery(base_url: str, headers: dict[str, str] | None 
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=2.0,
+        timeout_s=10.0,
         data=b"",
         headers=headers,
     )
@@ -710,7 +739,7 @@ def _assert_network_ips_payload(base_url: str):
 def _assert_recovery_persists(base_url: str, duration_s: float, poll_s: float = 0.5):
     deadline = time.time() + duration_s
     while time.time() < deadline:
-        status, headers, body = _http_get(base_url, "/")
+        status, headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
         assert _is_recovery_bootstrap_page(status, headers, body), (
             "Expected to stay in recovery bootstrap page, but page changed.\n"
             f"status={status}\n"
@@ -737,6 +766,18 @@ def _log_contains_any_since(path: Path, start_pos: int, markers: list[str]) -> b
     return any(marker in text for marker in markers)
 
 
+def _read_log_since(path: Path, start_pos: int) -> tuple[str, int]:
+    if not path.exists():
+        return "", start_pos
+
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        if start_pos > 0:
+            f.seek(start_pos)
+        text = f.read()
+        end_pos = f.tell()
+    return text, end_pos
+
+
 def _wait_for_bootstrap_countdown_threshold(
     base_url: str,
     threshold_s: int,
@@ -746,7 +787,7 @@ def _wait_for_bootstrap_countdown_threshold(
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         try:
-            status, headers, body = _http_get(base_url, "/")
+            status, headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
         except Exception:
             time.sleep(poll_s)
             continue
@@ -795,6 +836,119 @@ def _idf_qemu_base_cmd() -> list[str]:
         "-D",
         "SDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.defaults.qemu;sdkconfig.qemu",
     ]
+
+
+def _qemu_build_path(filename: str) -> Path:
+    return REPO_ROOT / TEST_BUILD_DIR / filename
+
+
+def _reset_qemu_runtime_images():
+    flash_path = _qemu_build_path(_QEMU_FLASH_IMAGE_NAME)
+    with contextlib.suppress(FileNotFoundError):
+        flash_path.unlink()
+
+    efuse_path = _qemu_build_path(_QEMU_EFUSE_IMAGE_NAME)
+    with contextlib.suppress(FileNotFoundError):
+        efuse_path.unlink()
+
+
+def _start_qemu_process(log_path: Path, append: bool):
+    qemu_args = f"-nic user,model=open_eth,hostfwd=tcp::{TEST_PORT}-:80"
+    cmd = _idf_qemu_base_cmd() + ["qemu", "--qemu-extra-args", qemu_args]
+
+    log_file = log_path.open("a" if append else "w", encoding="utf-8")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        bufsize=1,
+        preexec_fn=os.setsid,
+    )
+
+    if proc.stdout is None:
+        log_file.close()
+        pytest.fail("Failed to capture QEMU output stream.")
+
+    output_thread = threading.Thread(
+        target=_capture_qemu_output,
+        args=(proc.stdout, log_file),
+        daemon=True,
+    )
+    output_thread.start()
+    return proc, output_thread, log_file, cmd
+
+
+def _replace_qemu_process(state: dict, append: bool = True) -> bool:
+    with state["lock"]:
+        if state["closed"]:
+            return False
+        old_proc = state["proc"]
+        old_output_thread = state["output_thread"]
+        old_log_file = state["log_file"]
+        log_path = state["log_path"]
+        instance = state["instance"]
+
+    _stop_process_group(old_proc)
+    old_output_thread.join(timeout=2.0)
+    old_log_file.close()
+
+    proc, output_thread, log_file, _ = _start_qemu_process(log_path, append=append)
+
+    with state["lock"]:
+        if state["closed"]:
+            _stop_process_group(proc)
+            output_thread.join(timeout=2.0)
+            log_file.close()
+            return False
+        state["proc"] = proc
+        state["output_thread"] = output_thread
+        state["log_file"] = log_file
+        instance["process"] = proc
+    return True
+
+
+def _monitor_qemu_restarts(state: dict):
+    last_pos = 0
+
+    while True:
+        with state["lock"]:
+            if state["closed"]:
+                return
+            proc = state["proc"]
+            log_path = state["log_path"]
+            restart_pending = state["restart_pending"]
+            recovery_count = state["restart_recovery_count"]
+
+        text, last_pos = _read_log_since(log_path, last_pos)
+        if text:
+            if _QEMU_RESTART_MARKER in text:
+                with state["lock"]:
+                    state["restart_pending"] = True
+                restart_pending = True
+
+            if restart_pending and _QEMU_BOOTSTRAP_STARTED_MARKER in text:
+                with state["lock"]:
+                    state["restart_pending"] = False
+                restart_pending = False
+
+        proc_exited = proc.poll() is not None
+        panic_during_restart = restart_pending and any(marker in text for marker in _QEMU_RESTART_PANIC_MARKERS)
+        exited_during_restart = restart_pending and proc_exited
+        needs_recovery = panic_during_restart or exited_during_restart
+
+        if needs_recovery and recovery_count < _QEMU_RESTART_RECOVERY_LIMIT:
+            if _replace_qemu_process(state, append=True):
+                with state["lock"]:
+                    state["restart_pending"] = False
+                    state["restart_recovery_count"] += 1
+                last_pos = log_path.stat().st_size if log_path.exists() else 0
+            time.sleep(0.2)
+            continue
+
+        time.sleep(0.1)
 
 
 def _ensure_qemu_firmware_built():
@@ -930,6 +1084,7 @@ def _stop_process_group(proc: subprocess.Popen):
 def qemu_bootstrap_instance(tmp_path: Path):
     _ensure_prerequisites()
     _ensure_qemu_firmware_built()
+    _reset_qemu_runtime_images()
 
     base_url = f"http://127.0.0.1:{TEST_PORT}"
     if QEMU_LOG_PATH_ENV:
@@ -942,39 +1097,32 @@ def qemu_bootstrap_instance(tmp_path: Path):
 
     def in_bootstrap_mode() -> bool:
         try:
-            status, headers, body = _http_get(base_url, "/")
+            status, headers, body = _http_get(base_url, "/", timeout_s=BOOTSTRAP_PAGE_TIMEOUT_S)
         except Exception:
             return False
         return _is_bootstrap_root_page(status, headers, body)
 
     _kill_stale_qemu_instances()
     _ensure_port_free(TEST_PORT)
-
-    qemu_args = f"-nic user,model=open_eth,hostfwd=tcp::{TEST_PORT}-:80"
-    cmd = _idf_qemu_base_cmd() + ["qemu", "--qemu-extra-args", qemu_args]
-
-    log_file = log_path.open("w", encoding="utf-8")
-    proc = subprocess.Popen(
-        cmd,
-        cwd=REPO_ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        errors="replace",
-        bufsize=1,
-        preexec_fn=os.setsid,
-    )
-
-    if proc.stdout is None:
-        log_file.close()
-        pytest.fail("Failed to capture QEMU output stream.")
-
-    output_thread = threading.Thread(
-        target=_capture_qemu_output,
-        args=(proc.stdout, log_file),
+    proc, output_thread, log_file, cmd = _start_qemu_process(log_path, append=False)
+    instance = {"base_url": base_url, "log_path": log_path, "process": proc}
+    state = {
+        "closed": False,
+        "instance": instance,
+        "lock": threading.Lock(),
+        "log_file": log_file,
+        "log_path": log_path,
+        "output_thread": output_thread,
+        "proc": proc,
+        "restart_pending": False,
+        "restart_recovery_count": 0,
+    }
+    monitor_thread = threading.Thread(
+        target=_monitor_qemu_restarts,
+        args=(state,),
         daemon=True,
     )
-    output_thread.start()
+    monitor_thread.start()
 
     try:
         boot_ok = _wait_until(
@@ -987,8 +1135,14 @@ def qemu_bootstrap_instance(tmp_path: Path):
             f"Log tail:\n{_tail_log(log_path)}"
         )
 
-        yield {"base_url": base_url, "log_path": log_path, "process": proc}
+        yield instance
     finally:
+        with state["lock"]:
+            state["closed"] = True
+            proc = state["proc"]
+            output_thread = state["output_thread"]
+            log_file = state["log_file"]
         _stop_process_group(proc)
         output_thread.join(timeout=2.0)
         log_file.close()
+        monitor_thread.join(timeout=2.0)

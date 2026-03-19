@@ -1,4 +1,4 @@
-FROM espressif/idf:release-v5.5
+FROM espressif/idf:release-v5.5@sha256:ff21d212f1d942d004b4bc4e303d98a32c78de06184932211f0632d31d0dd309
 
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -18,7 +18,7 @@ RUN apt-get update \
 
 RUN source "${IDF_PATH}/export.sh" >/dev/null \
     && python -m pip install --no-cache-dir pytest \
-    && python "${IDF_PATH}/tools/idf_tools.py" install qemu-xtensa
+    && python "${IDF_PATH}/tools/idf_tools.py" install --targets esp32 required qemu-xtensa
 
 ENV CHROME_BIN=/usr/bin/google-chrome-stable
 WORKDIR /work

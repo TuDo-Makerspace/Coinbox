@@ -1065,6 +1065,10 @@ esp_err_t files_get_audio_duration_ms(const char *name, uint32_t *out_duration_m
         *out_duration_ms = mock_duration_ms;
         return ESP_OK;
     }
+
+    // In the mock backend, generic filenames deliberately do not trigger a real
+    // MP3 scan. Tests that need a duration encode it in the filename.
+    return ESP_ERR_NOT_SUPPORTED;
 #endif
 
     char audio_path[FILES_PATH_MAX];

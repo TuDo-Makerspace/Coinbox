@@ -149,13 +149,13 @@ def _assert_no_panic_since(log_path, start_pos: int):
 
 
 def _assert_system_responsive(base_url: str):
-    status, _, body = _http_get(base_url, "/sounds/")
-    assert status == 200, f"/sounds/ is not healthy after spam. status={status}, body={body}"
+    status, _, body = _http_get(base_url, "/runtime/status", timeout_s=4.0)
+    assert status == 200, f"/runtime/status is not healthy after spam. status={status}, body={body}"
 
-    status, _, body = _http_get(base_url, "/gpio/state")
+    status, _, body = _http_get(base_url, "/gpio/state", timeout_s=4.0)
     assert status == 200, f"/gpio/state is not healthy after spam. status={status}, body={body}"
 
-    status, _, body = _http_get(base_url, "/logs")
+    status, _, body = _http_get(base_url, "/logs", timeout_s=4.0)
     assert status == 200, f"/logs is not healthy after spam. status={status}, body={body}"
 
 
@@ -164,7 +164,7 @@ def _format_storage(base_url: str):
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
     assert status == 200, f"/format failed in main app. status={status}, body={body}"

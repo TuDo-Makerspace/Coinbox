@@ -83,6 +83,9 @@ LID_DEBOUNCE_MIN_MS = 0
 LID_DEBOUNCE_MAX_MS = 5000
 LID_VOLUME_MIN_PCT = 0
 LID_VOLUME_MAX_PCT = 125
+TEST_GPIO_WRITE_TIMEOUT_S = 6.0
+TEST_GPIO_WRITE_RETRIES = 3
+TEST_GPIO_RETRY_BACKOFF_S = 0.05
 
 
 @pytest.fixture
@@ -280,19 +283,42 @@ def _volume_pct(state: dict) -> float:
 
 
 def _set_test_gpio_level(base_url: str, name: str, level: int):
-    status, _, body = _http_request(
-        base_url=base_url,
-        method="POST",
-        path=f"/test/gpio/{name}?level={level}",
-        timeout_s=3.0,
-        data=b"",
-    )
-    assert status == 200, (
+    last_error: Exception | None = None
+    last_status: int | None = None
+    last_body = ""
+
+    for attempt in range(TEST_GPIO_WRITE_RETRIES):
+        try:
+            status, _, body = _http_request(
+                base_url=base_url,
+                method="POST",
+                path=f"/test/gpio/{name}?level={level}",
+                timeout_s=TEST_GPIO_WRITE_TIMEOUT_S,
+                data=b"",
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < TEST_GPIO_WRITE_RETRIES:
+                time.sleep(TEST_GPIO_RETRY_BACKOFF_S)
+                continue
+            raise
+
+        last_status = status
+        last_body = body
+        if status == 200:
+            payload = _json_object(body, f"POST /test/gpio/{name}")
+            assert payload.get("level") == level
+            return
+
+        if attempt + 1 < TEST_GPIO_WRITE_RETRIES:
+            time.sleep(TEST_GPIO_RETRY_BACKOFF_S)
+
+    if last_error is not None:
+        raise last_error
+    assert last_status == 200, (
         f"Failed to set /test/gpio/{name}?level={level}. "
-        f"status={status}, body={body}"
+        f"status={last_status}, body={last_body}"
     )
-    payload = _json_object(body, f"POST /test/gpio/{name}")
-    assert payload.get("level") == level
 
 
 def _trigger_laser_playback(base_url: str):
@@ -406,7 +432,7 @@ def _format_storage(base_url: str):
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
 

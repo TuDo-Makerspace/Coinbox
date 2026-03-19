@@ -3,7 +3,9 @@ name: coinbox-integration
 x-integration-env: &integration-env
   ADF_PATH: ${ADF_PATH:?Set ADF_PATH before running docker compose}
   CLICOLOR_FORCE: ${CLICOLOR_FORCE:-}
+  COINBOX_TEST_BOOT_TIMEOUT_S: ${COINBOX_TEST_BOOT_TIMEOUT_S:-60}
   COINBOX_TEST_RESULTS_ROOT: /results
+  COINBOX_TEST_HTTP_TIMEOUT_SCALE: ${COINBOX_TEST_HTTP_TIMEOUT_SCALE:-3}
   FORCE_COLOR: ${FORCE_COLOR:-}
   HOME: /root
   IDF_GIT_SAFE_DIR: /work

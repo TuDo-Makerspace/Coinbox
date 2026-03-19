@@ -71,6 +71,7 @@ DEFAULT_SOUND_LABEL = "Coin (Default)"
 TEST_MP3_DURATION_MS = 6165
 TEST_TRIM_VALID_START = "0:500"
 TEST_TRIM_VALID_STOP = "1:000"
+SOUNDS_HTTP_TIMEOUT_S = 10.0
 SPECIAL_FILENAME_SCENARIOS = (
     {
         "label": "spaces-and-parentheses",
@@ -217,7 +218,7 @@ def _get_sound_meta(base_url: str, filename: str) -> dict:
         base_url=base_url,
         method="GET",
         path=_sound_meta_path(filename),
-        timeout_s=4.0,
+        timeout_s=SOUNDS_HTTP_TIMEOUT_S,
     )
     assert status == 200, f"Failed to fetch metadata for {filename}. status={status}, body={body}"
     assert "application/json" in headers.get("Content-Type", "")
@@ -225,7 +226,7 @@ def _get_sound_meta(base_url: str, filename: str) -> dict:
 
 
 def _get_sounds_menu_row(base_url: str, filename: str) -> dict:
-    status, headers, body = _http_get(base_url, "/sounds/")
+    status, headers, body = _http_get(base_url, "/sounds/", timeout_s=SOUNDS_HTTP_TIMEOUT_S)
     assert status == 200, f"Failed to fetch /sounds/. status={status}, body={body}"
     assert "text/html" in headers.get("Content-Type", "")
 
@@ -252,7 +253,7 @@ def _set_sound_meta(base_url: str, filename: str, payload: dict):
         base_url=base_url,
         method="POST",
         path=_sound_meta_path(filename),
-        timeout_s=4.0,
+        timeout_s=SOUNDS_HTTP_TIMEOUT_S,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
@@ -556,7 +557,7 @@ def test_special_character_mp3_names_survive_upload_playback_rename_and_delete(q
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
     assert format_status == 200, f"/format failed before special-character filename test. body={format_body}"
@@ -1320,7 +1321,7 @@ def test_laser_playback_honors_weighted_enabled_sound_selection(qemu_mainapp_ins
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
     assert status == 200, f"/format failed before weighted playback test. status={status}, body={body}"
@@ -1403,7 +1404,7 @@ def test_laser_playback_is_not_attempted_when_all_sounds_are_disabled(qemu_maina
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
     assert status == 200, f"/format failed before all-disabled test. status={status}, body={body}"
@@ -1510,7 +1511,7 @@ def test_format_preserves_default_sound(qemu_mainapp_instance):
         base_url=base_url,
         method="POST",
         path="/format",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=b"",
     )
     assert status == 200

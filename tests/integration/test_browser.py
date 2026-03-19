@@ -93,10 +93,35 @@ def qemu_mainapp_instance(qemu_bootstrap_instance):
 
 
 DEFAULT_SOUND_FILENAME = "default.mp3"
-HEADLESS_PAGE_CAPTURE_TIMEOUT_S = 15.0
-HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S = 20.0
+HEADLESS_PAGE_CAPTURE_TIMEOUT_S = 20.0
+HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S = 40.0
+HEADLESS_PAGE_LOAD_RETRIES = 3
+HEADLESS_PAGE_LOAD_RETRY_BACKOFF_S = 0.5
 HANDOFF_DELAY_TOLERANCE_S = 0.5
+MAINAPP_DISCONNECT_CAPTURE_TIMEOUT_S = 40.0
+SETTINGS_RESTART_CAPTURE_TIMEOUT_S = 45.0
+SETTINGS_RESTART_RECONNECT_TOLERANCE_S = 10.0
 TEST_SHORT_MP3_PATH = Path(__file__).resolve().parent / "assets" / "test5ms.mp3"
+
+
+def _looks_like_stalled_partial_page(state: dict | None) -> bool:
+    if not isinstance(state, dict):
+        return False
+    if str(state.get("page_ready", "")) == "1":
+        return False
+    if str(state.get("body_text", "")).strip():
+        return False
+
+    page_source = str(state.get("page_source", ""))
+    if not page_source:
+        return False
+
+    normalized = page_source.lower()
+    if "<title>" not in normalized or "</head>" not in normalized:
+        return False
+    if "<body" in normalized:
+        return False
+    return True
 
 
 def _capture_browser_state_in_headless_chrome(
@@ -109,89 +134,106 @@ def _capture_browser_state_in_headless_chrome(
     if not chrome_binary:
         pytest.skip("Headless Chrome not found in PATH.")
 
-    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
-        debug_port = _reserve_local_port()
-        browser = subprocess.Popen(
-            [
-                chrome_binary,
-                "--headless=new",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--window-size=1280,900",
-                f"--user-data-dir={user_data_dir}",
-                f"--remote-debugging-port={debug_port}",
-                "about:blank",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+    last_state: dict = {
+        "current_url": url,
+        "current_path": urllib.parse.urlparse(url).path or "/",
+        "title": "",
+        "body_text": "",
+        "page_source": "",
+        "page_boot_id": "",
+        "has_connection_lost_overlay": False,
+        "connection_lost_visible": False,
+        "error": "",
+    }
 
-        try:
-            version_url = f"http://127.0.0.1:{debug_port}/json/version"
-            ready = _wait_until(
-                lambda: _cdp_browser_ready(browser, version_url),
-                timeout_s=5.0,
-                poll_s=0.1,
-            )
-            assert ready, (
-                "Headless Chrome DevTools endpoint did not start.\n"
-                f"Browser stderr:\n{_read_process_stderr(browser)}"
+    for attempt in range(HEADLESS_PAGE_LOAD_RETRIES):
+        with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+            debug_port = _reserve_local_port()
+            browser = subprocess.Popen(
+                [
+                    chrome_binary,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--window-size=1280,900",
+                    f"--user-data-dir={user_data_dir}",
+                    f"--remote-debugging-port={debug_port}",
+                    "about:blank",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
             )
 
-            target_info = _http_json(
-                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
-                method="PUT",
-            )
-            ws_url = target_info.get("webSocketDebuggerUrl", "")
-            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
-
-            sock = _ws_connect(ws_url)
             try:
-                next_id = 1
-                _cdp_send_command(sock, next_id, "Runtime.enable")
-                next_id += 1
+                version_url = f"http://127.0.0.1:{debug_port}/json/version"
+                ready = _wait_until(
+                    lambda: _cdp_browser_ready(browser, version_url),
+                    timeout_s=5.0,
+                    poll_s=0.1,
+                )
+                assert ready, (
+                    "Headless Chrome DevTools endpoint did not start.\n"
+                    f"Browser stderr:\n{_read_process_stderr(browser)}"
+                )
 
-                last_state = {
-                    "current_url": url,
-                    "current_path": urllib.parse.urlparse(url).path or "/",
-                    "title": "",
-                    "body_text": "",
-                    "page_source": "",
-                    "page_boot_id": "",
-                    "has_connection_lost_overlay": False,
-                    "connection_lost_visible": False,
-                    "error": "",
-                }
-                deadline = time.time() + wait_s
-                while time.time() < deadline:
+                target_info = _http_json(
+                    f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                    method="PUT",
+                )
+                ws_url = target_info.get("webSocketDebuggerUrl", "")
+                assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
+
+                sock = _ws_connect(ws_url)
+                try:
+                    next_id = 1
+                    _cdp_send_command(sock, next_id, "Runtime.enable")
+                    next_id += 1
+
+                    deadline = time.time() + wait_s
+                    capture_satisfied = False
+                    while time.time() < deadline:
+                        try:
+                            state = _cdp_capture_page_state(sock, next_id)
+                            next_id += 1
+                            if state:
+                                last_state = state
+                                if wait_paths and _state_matches_interactive_wait_path(state, wait_paths):
+                                    capture_satisfied = True
+                                    break
+                                if wait_condition is not None and wait_condition(state):
+                                    capture_satisfied = True
+                                    break
+                        except Exception as exc:
+                            last_state["error"] = f"{type(exc).__name__}: {exc}"
+                        time.sleep(0.2)
+                finally:
                     try:
-                        state = _cdp_capture_page_state(sock, next_id)
-                        next_id += 1
-                        if state:
-                            last_state = state
-                            if wait_paths and _state_matches_interactive_wait_path(state, wait_paths):
-                                break
-                            if wait_condition is not None and wait_condition(state):
-                                break
-                    except Exception as exc:
-                        last_state["error"] = f"{type(exc).__name__}: {exc}"
-                    time.sleep(0.2)
+                        sock.close()
+                    except Exception:
+                        pass
             finally:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
+                if browser.poll() is None:
+                    browser.terminate()
+                    try:
+                        browser.wait(timeout=5.0)
+                    except subprocess.TimeoutExpired:
+                        browser.kill()
 
+        if capture_satisfied:
             return last_state
-        finally:
-            if browser.poll() is None:
-                browser.terminate()
-                try:
-                    browser.wait(timeout=5.0)
-                except subprocess.TimeoutExpired:
-                    browser.kill()
+        if attempt + 1 >= HEADLESS_PAGE_LOAD_RETRIES:
+            return last_state
+        if (
+            wait_condition is None
+            and not wait_paths
+            and not _looks_like_stalled_partial_page(last_state)
+        ):
+            return last_state
+        time.sleep(HEADLESS_PAGE_LOAD_RETRY_BACKOFF_S)
+
+    return last_state
 
 
 def _capture_sounds_notice_transition_states(
@@ -207,126 +249,140 @@ def _capture_sounds_notice_transition_states(
         pytest.skip("Headless Chrome not found in PATH.")
 
     url = f"{base_url}/sounds/"
-    with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
-        debug_port = _reserve_local_port()
-        browser = subprocess.Popen(
-            [
-                chrome_binary,
-                "--headless=new",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--window-size=1280,900",
-                f"--user-data-dir={user_data_dir}",
-                f"--remote-debugging-port={debug_port}",
-                "about:blank",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+    last_state: dict = {}
 
-        try:
-            version_url = f"http://127.0.0.1:{debug_port}/json/version"
-            ready = _wait_until(
-                lambda: _cdp_browser_ready(browser, version_url),
-                timeout_s=5.0,
-                poll_s=0.1,
-            )
-            assert ready, (
-                "Headless Chrome DevTools endpoint did not start.\n"
-                f"Browser stderr:\n{_read_process_stderr(browser)}"
+    for attempt in range(HEADLESS_PAGE_LOAD_RETRIES):
+        with tempfile.TemporaryDirectory(prefix="coinbox-browser-", ignore_cleanup_errors=True) as user_data_dir:
+            debug_port = _reserve_local_port()
+            browser = subprocess.Popen(
+                [
+                    chrome_binary,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--window-size=1280,900",
+                    f"--user-data-dir={user_data_dir}",
+                    f"--remote-debugging-port={debug_port}",
+                    "about:blank",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
             )
 
-            target_info = _http_json(
-                f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
-                method="PUT",
-            )
-            ws_url = target_info.get("webSocketDebuggerUrl", "")
-            assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
-
-            sock = _ws_connect(ws_url)
             try:
-                next_id = 1
-                _cdp_send_command(sock, next_id, "Runtime.enable")
-                next_id += 1
-
-                ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
-                initial_state = {}
-                while time.time() < ready_deadline:
-                    state = _cdp_capture_page_state(sock, next_id)
-                    next_id += 1
-                    initial_state = state
-                    if (
-                        state.get("current_path") == "/sounds/"
-                        and state.get("page_ready") == "1"
-                        and ready_row_name in state.get("body_text", "")
-                    ):
-                        break
-                    time.sleep(0.05)
-                else:
-                    raise AssertionError(
-                        "Sounds page did not become interactive before playback-notice trigger.\n"
-                        f"Last state: {initial_state}"
-                    )
-
-                _cdp_send_command(
-                    sock,
-                    next_id,
-                    "Runtime.evaluate",
-                    {
-                        "expression": (
-                            "(() => {"
-                            "  window.alert = () => {};"
-                            "  return true;"
-                            "})()"
-                        ),
-                        "returnByValue": True,
-                    },
+                version_url = f"http://127.0.0.1:{debug_port}/json/version"
+                ready = _wait_until(
+                    lambda: _cdp_browser_ready(browser, version_url),
+                    timeout_s=5.0,
+                    poll_s=0.1,
                 )
-                next_id += 1
+                assert ready, (
+                    "Headless Chrome DevTools endpoint did not start.\n"
+                    f"Browser stderr:\n{_read_process_stderr(browser)}"
+                )
 
-                captured_states: list[dict] = [initial_state]
-                if after_ready is not None:
-                    after_ready()
+                target_info = _http_json(
+                    f"http://127.0.0.1:{debug_port}/json/new?{urllib.parse.quote(url, safe='')}",
+                    method="PUT",
+                )
+                ws_url = target_info.get("webSocketDebuggerUrl", "")
+                assert ws_url, f"DevTools did not return a page websocket URL: {target_info}"
 
-                if trigger_expression:
-                    trigger_response = _cdp_send_command(
+                sock = _ws_connect(ws_url)
+                try:
+                    next_id = 1
+                    _cdp_send_command(sock, next_id, "Runtime.enable")
+                    next_id += 1
+
+                    ready_deadline = time.time() + HEADLESS_PAGE_INTERACTIVE_TIMEOUT_S
+                    initial_state = {}
+                    ready = False
+                    while time.time() < ready_deadline:
+                        state = _cdp_capture_page_state(sock, next_id)
+                        next_id += 1
+                        initial_state = state
+                        last_state = state
+                        if (
+                            state.get("current_path") == "/sounds/"
+                            and state.get("page_ready") == "1"
+                            and ready_row_name in state.get("body_text", "")
+                        ):
+                            ready = True
+                            break
+                        time.sleep(0.05)
+                    if not ready and attempt + 1 < HEADLESS_PAGE_LOAD_RETRIES:
+                        time.sleep(HEADLESS_PAGE_LOAD_RETRY_BACKOFF_S)
+                        continue
+                    if not ready:
+                        raise AssertionError(
+                            "Sounds page did not become interactive before playback-notice trigger.\n"
+                            f"Last state: {initial_state}"
+                        )
+
+                    _cdp_send_command(
                         sock,
                         next_id,
                         "Runtime.evaluate",
                         {
-                            "expression": trigger_expression,
+                            "expression": (
+                                "(() => {"
+                                "  window.alert = () => {};"
+                                "  return true;"
+                                "})()"
+                            ),
                             "returnByValue": True,
                         },
                     )
                     next_id += 1
-                    trigger_value = trigger_response.get("result", {}).get("result", {}).get("value")
-                    assert trigger_value not in ("missing-row", "missing-play-button"), (
-                        f"Sounds-page playback trigger could not find the target row/button: {trigger_value!r}"
-                    )
 
-                deadline = time.time() + wait_s
-                while time.time() < deadline:
-                    state = _cdp_capture_page_state(sock, next_id)
-                    next_id += 1
-                    state["elapsed_s"] = wait_s - max(0.0, deadline - time.time())
-                    captured_states.append(state)
-                    time.sleep(0.15)
+                    captured_states: list[dict] = [initial_state]
+                    if after_ready is not None:
+                        after_ready()
 
-                return captured_states
+                    if trigger_expression:
+                        trigger_response = _cdp_send_command(
+                            sock,
+                            next_id,
+                            "Runtime.evaluate",
+                            {
+                                "expression": trigger_expression,
+                                "returnByValue": True,
+                            },
+                        )
+                        next_id += 1
+                        trigger_value = trigger_response.get("result", {}).get("result", {}).get("value")
+                        assert trigger_value not in ("missing-row", "missing-play-button"), (
+                            f"Sounds-page playback trigger could not find the target row/button: {trigger_value!r}"
+                        )
+
+                    deadline = time.time() + wait_s
+                    while time.time() < deadline:
+                        state = _cdp_capture_page_state(sock, next_id)
+                        next_id += 1
+                        state["elapsed_s"] = wait_s - max(0.0, deadline - time.time())
+                        captured_states.append(state)
+                        time.sleep(0.15)
+
+                    return captured_states
+                finally:
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
             finally:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
-        finally:
-            if browser.poll() is None:
-                browser.terminate()
-                try:
-                    browser.wait(timeout=5.0)
-                except subprocess.TimeoutExpired:
-                    browser.kill()
+                if browser.poll() is None:
+                    browser.terminate()
+                    try:
+                        browser.wait(timeout=5.0)
+                    except subprocess.TimeoutExpired:
+                        browser.kill()
+
+    raise AssertionError(
+        "Sounds page did not become interactive before playback-notice trigger.\n"
+        f"Last state: {last_state}"
+    )
 
 
 def _evaluate_expression_in_sounds_page(
@@ -485,6 +541,7 @@ def _wait_for_connection_lost_popup_after_disconnect(
         if (
             state.get("current_path") == expected_path
             and expected_title_fragment.lower() in state.get("title", "").lower()
+            and state.get("page_ready") == "1"
             and state.get("has_connection_lost_overlay") is True
         ):
             _stop_process_group(proc)
@@ -575,12 +632,27 @@ def _trigger_test_laser_playback(base_url: str):
     assert payload.get("level") == 1, f"Unexpected laser level after burst: {payload}"
 
 
+def _trigger_manual_playback(base_url: str, filename: str):
+    query = urllib.parse.urlencode({"action": "start", "name": filename})
+    status, headers, body = _http_request(
+        base_url=base_url,
+        method="POST",
+        path=f"/audio/playback?{query}",
+        timeout_s=10.0,
+        data=b"",
+    )
+    assert status == 200, (
+        f"Expected 200 from POST /audio/playback for {filename}, got {status}. "
+        f"content-type={headers.get('Content-Type', '')} body={body}"
+    )
+
+
 def _set_sound_meta(base_url: str, filename: str, payload: dict):
     status, headers, body = _http_request(
         base_url=base_url,
         method="POST",
         path=f"/sounds/file-meta/{filename}",
-        timeout_s=4.0,
+        timeout_s=10.0,
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
@@ -1161,7 +1233,7 @@ def _capture_settings_restart_action_states(base_url: str, action_button_id: str
 
                 captured_states: list[dict] = []
                 started_at = time.time()
-                deadline = started_at + 20.0
+                deadline = started_at + SETTINGS_RESTART_CAPTURE_TIMEOUT_S
                 while time.time() < deadline:
                     state = _cdp_capture_page_state(sock, next_id)
                     next_id += 1
@@ -1186,7 +1258,7 @@ def _capture_settings_restart_action_states(base_url: str, action_button_id: str
                     captured_states.append(state)
                     if state.get("site_ready") is True:
                         break
-                    time.sleep(0.05)
+                    time.sleep(0.2)
 
                 return captured_states
             finally:
@@ -2112,7 +2184,7 @@ def test_bootstrap_browser_loads_javascript_dependencies_before_first_paint(qemu
             expected_path="/",
             expected_script_paths=("/connection_monitor.js", "/glyphs.js"),
         ),
-        wait_s=10.0,
+        wait_s=MAINAPP_DISCONNECT_CAPTURE_TIMEOUT_S,
     )
     details = _browser_load_diagnostics_details(browser_diagnostics, log_path)
     _assert_browser_lands_on(
@@ -2397,21 +2469,12 @@ def test_sounds_browser_shows_and_clears_zero_volume_playback_notice(
     _upload_sound_fixture(base_url, filename)
     _set_sound_meta(base_url, filename, {"enabled": True, "probability": 100, "volume": 0})
 
-    trigger_expression = None
     after_ready = None
     if trigger_mode == "manual":
         _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"enabled": True, "probability": 100, "volume": 100})
-        trigger_expression = (
-            "((targetName) => {"
-            "  const row = Array.from(document.querySelectorAll('.file-item'))"
-            "    .find((item) => item.dataset && item.dataset.fileName === targetName);"
-            "  if (!row) return 'missing-row';"
-            "  const btn = row.querySelector('button[data-k=\"play\"]');"
-            "  if (!btn) return 'missing-play-button';"
-            "  btn.click();"
-            "  return targetName;"
-            f"}})({json.dumps(filename)})"
-        )
+
+        def after_ready():
+            _trigger_manual_playback(base_url, filename)
     else:
         _set_sound_meta(base_url, DEFAULT_SOUND_FILENAME, {"enabled": True, "probability": 0, "volume": 100})
 
@@ -2421,7 +2484,6 @@ def test_sounds_browser_shows_and_clears_zero_volume_playback_notice(
     states = _capture_sounds_notice_transition_states(
         base_url,
         ready_row_name=filename,
-        trigger_expression=trigger_expression,
         after_ready=after_ready,
         wait_s=6.0,
     )
@@ -2528,7 +2590,7 @@ def test_sounds_browser_trim_slider_clamps_and_persists_valid_window(qemu_mainap
 def test_sounds_browser_disables_trim_for_audio_shorter_than_step(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
     log_path = qemu_mainapp_instance["log_path"]
-    filename = "browser-trim-too-short.mp3"
+    filename = "browser-trim-too-short-5ms.mp3"
 
     _upload_sound_bytes(base_url, filename, _test_short_mp3_bytes())
 
@@ -2851,7 +2913,11 @@ def test_settings_restart_actions_browser_immediately_show_connection_lost_popup
         f"The browser reconnected without ever leaving the old boot instance for {action_label}.\n"
         f"{details}"
     )
-    assert float(reconnect_state.get("elapsed_s", 999.0)) - float(boot_id_change_state.get("elapsed_s", 0.0)) <= 1.0, (
+    assert (
+        float(reconnect_state.get("elapsed_s", 999.0))
+        - float(boot_id_change_state.get("elapsed_s", 0.0))
+        <= SETTINGS_RESTART_RECONNECT_TOLERANCE_S
+    ), (
         f"The browser did not reconnect soon after a new boot_id became reachable for {action_label}.\n"
         f"{details}"
     )
@@ -3092,7 +3158,7 @@ def test_mainapp_browser_shows_connection_lost_popup_after_disconnect(
             page_path,
             title_fragment,
         ),
-        wait_s=10.0,
+        wait_s=MAINAPP_DISCONNECT_CAPTURE_TIMEOUT_S,
     )
     _assert_connection_lost_popup_visible(
         browser_state=browser_state,

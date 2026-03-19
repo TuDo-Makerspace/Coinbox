@@ -2467,6 +2467,8 @@ static void restart_timer_cb(TimerHandle_t timer)
 
 static void schedule_restart_timer(const char *timer_name)
 {
+    audio_stop();
+
     esp_err_t mdns_err = mdns_stop_service();
     if (mdns_err != ESP_OK) {
         ESP_LOGW(TAG,
@@ -3267,6 +3269,9 @@ static esp_err_t format_storage_handler(httpd_req_t *req)
     if (auth_err != ESP_OK) {
         return auth_err;
     }
+
+    // Formatting tears down LittleFS, so stop any active playback first.
+    audio_stop();
 
     if (files_format_storage() != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Format failed");
