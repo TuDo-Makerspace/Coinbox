@@ -72,17 +72,17 @@ PANIC_LOG_MARKERS = [
 DEFAULT_SOUND_FILENAME = "default.mp3"
 AUDIO_CONFIG_DEBOUNCE_FIELDS = (
     "laser_debounce_ms",
-    "hall_debounce_ms",
+    "lid_debounce_ms",
     "laser_trigger_cooldown_ms",
 )
 LASER_DEBOUNCE_DEFAULT_MS = 30
 LASER_DEBOUNCE_MIN_MS = 0
 LASER_DEBOUNCE_MAX_MS = 1000
-HALL_DEBOUNCE_DEFAULT_MS = 1000
-HALL_DEBOUNCE_MIN_MS = 0
-HALL_DEBOUNCE_MAX_MS = 5000
-LID_OPEN_VOLUME_MIN_PCT = 0
-LID_OPEN_VOLUME_MAX_PCT = 100
+LID_DEBOUNCE_DEFAULT_MS = 1000
+LID_DEBOUNCE_MIN_MS = 0
+LID_DEBOUNCE_MAX_MS = 5000
+LID_VOLUME_MIN_PCT = 0
+LID_VOLUME_MAX_PCT = 125
 
 
 @pytest.fixture
@@ -224,8 +224,8 @@ def _set_laser_debounce_ms(base_url: str, debounce_ms: int) -> dict:
     return _set_audio_config(base_url, {"laser_debounce_ms": debounce_ms})
 
 
-def _set_hall_debounce_ms(base_url: str, debounce_ms: int) -> dict:
-    return _set_audio_config(base_url, {"hall_debounce_ms": debounce_ms})
+def _set_lid_debounce_ms(base_url: str, debounce_ms: int) -> dict:
+    return _set_audio_config(base_url, {"lid_debounce_ms": debounce_ms})
 
 
 def _set_lid_open_sound_config(
@@ -233,16 +233,34 @@ def _set_lid_open_sound_config(
     *,
     sound: str | None = None,
     volume_pct: int | None = None,
-    hall_debounce_ms: int | None = None,
+    lid_debounce_ms: int | None = None,
 ) -> dict:
     payload: dict[str, object] = {}
     if sound is not None:
         payload["lid_open_sound"] = sound
     if volume_pct is not None:
-        payload["lid_open_volume_pct"] = volume_pct
-    if hall_debounce_ms is not None:
-        payload["hall_debounce_ms"] = hall_debounce_ms
+        payload["lid_volume_pct"] = volume_pct
+    if lid_debounce_ms is not None:
+        payload["lid_debounce_ms"] = lid_debounce_ms
     assert payload, "Expected at least one lid-open sound config update."
+    return _set_audio_config(base_url, payload)
+
+
+def _set_lid_close_sound_config(
+    base_url: str,
+    *,
+    sound: str | None = None,
+    volume_pct: int | None = None,
+    lid_debounce_ms: int | None = None,
+) -> dict:
+    payload: dict[str, object] = {}
+    if sound is not None:
+        payload["lid_close_sound"] = sound
+    if volume_pct is not None:
+        payload["lid_volume_pct"] = volume_pct
+    if lid_debounce_ms is not None:
+        payload["lid_debounce_ms"] = lid_debounce_ms
+    assert payload, "Expected at least one lid-close sound config update."
     return _set_audio_config(base_url, payload)
 
 
@@ -286,6 +304,12 @@ def _trigger_lid_open(base_url: str, settle_s: float = 0.02):
     _set_test_gpio_level(base_url, "hall", 0)
     time.sleep(settle_s)
     _set_test_gpio_level(base_url, "hall", 1)
+
+
+def _trigger_lid_close(base_url: str, settle_s: float = 0.02):
+    _set_test_gpio_level(base_url, "hall", 1)
+    time.sleep(settle_s)
+    _set_test_gpio_level(base_url, "hall", 0)
 
 
 def _trigger_laser_playback_burst(base_url: str, count: int, interval_s: float):
@@ -484,7 +508,7 @@ def test_audio_config_updates_top_level_debounce_settings(qemu_mainapp_instance)
 
     new_values = {
         "laser_debounce_ms": 25,
-        "hall_debounce_ms": 750,
+        "lid_debounce_ms": 750,
         "laser_trigger_cooldown_ms": 125,
     }
     updated = _set_audio_config(base_url, new_values)
@@ -585,71 +609,102 @@ def test_audio_config_rejects_nonexistent_lid_open_sound(qemu_mainapp_instance):
     )
 
 
-# Test: `/audio/config` rejects lid-open volume values outside `0-100`.
-# 1. Upload a valid MP3 and configure it as the lid-open sound candidate.
-# 2. Attempt to save lid-open volumes below `0` and above `100`.
-# 3. Assert each request is rejected with a lid-open-volume-specific error.
-# 4. Assert the stored lid-open volume remains unchanged afterwards.
-def test_audio_config_rejects_invalid_lid_open_volume_values(qemu_mainapp_instance):
+# Test: `/audio/config` rejects lid-close sounds that do not exist on storage.
+# 1. Start from main app mode and capture the current lid-close sound selection.
+# 2. Attempt to save a non-existing MP3 as the lid-close sound.
+# 3. Assert the request is rejected with a lid-close-sound-specific error.
+# 4. Assert the stored lid-close sound selection remains empty afterwards.
+def test_audio_config_rejects_nonexistent_lid_close_sound(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
 
-    filename = f"{_unique_name('lid-open-volume-valid')}.mp3"
-    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+    missing_name = f"{_unique_name('missing-lid-close')}.mp3"
+
+    status, _, body = _http_post_json(
+        base_url=base_url,
+        path="/audio/config",
+        payload={"lid_close_sound": missing_name},
+        timeout_s=4.0,
+    )
+    assert status == 400, f"Expected 400 when selecting a missing lid-close sound. body={body}"
+    body_lower = body.lower()
+    assert "lid" in body_lower and "close" in body_lower, (
+        "Expected rejection body to mention the lid-close sound field.\n"
+        f"body={body}"
+    )
+    assert ("does not exist" in body_lower) or ("not found" in body_lower), (
+        "Expected rejection body to explain that the lid-close sound file does not exist.\n"
+        f"body={body}"
+    )
+
+    readback = _get_audio_config(base_url)
+    assert readback.get("lid_close_sound") == "", (
+        "Missing lid-close sound should not be persisted into /audio/config.\n"
+        f"Readback: {readback}"
+    )
+
+
+# Test: `/audio/config` rejects lid volume values outside `0-125`.
+# 1. Start from main app mode and capture the current lid volume.
+# 2. Attempt to save lid volume values below `0` and above `125`.
+# 3. Assert each request is rejected with a lid-volume-specific error.
+# 4. Assert the stored lid volume remains unchanged afterwards.
+def test_audio_config_rejects_invalid_lid_volume_values(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
 
     baseline = _get_audio_config(base_url)
-    baseline_volume = baseline.get("lid_open_volume_pct", 100)
+    baseline_volume = baseline.get("lid_volume_pct", 100)
 
-    for bad_value in (LID_OPEN_VOLUME_MIN_PCT - 1, LID_OPEN_VOLUME_MAX_PCT + 1):
+    for bad_value in (LID_VOLUME_MIN_PCT - 1, LID_VOLUME_MAX_PCT + 1):
         status, _, body = _http_post_json(
             base_url=base_url,
             path="/audio/config",
-            payload={"lid_open_sound": filename, "lid_open_volume_pct": bad_value},
+            payload={"lid_volume_pct": bad_value},
             timeout_s=4.0,
         )
         assert status == 400, (
-            f"Expected 400 for invalid lid-open volume {bad_value}. body={body}"
+            f"Expected 400 for invalid lid volume {bad_value}. body={body}"
         )
         body_lower = body.lower()
         assert "lid" in body_lower and "volume" in body_lower, (
-            "Expected rejection body to mention the lid-open volume field.\n"
+            "Expected rejection body to mention the lid volume field.\n"
             f"body={body}"
         )
 
         readback = _get_audio_config(base_url)
-        assert readback.get("lid_open_volume_pct", baseline_volume) == baseline_volume, (
-            f"Invalid lid-open volume {bad_value} should not change stored config.\n"
+        assert readback.get("lid_volume_pct", baseline_volume) == baseline_volume, (
+            f"Invalid lid volume {bad_value} should not change stored config.\n"
             f"Readback: {readback}"
         )
 
 
-# Test: `/audio/config` rejects hall/lid debounce values outside `0-5000`.
-# 1. Start from main app mode and capture the current hall debounce.
-# 2. Attempt to save hall debounce values below `0` and above `5000`.
+# Test: `/audio/config` rejects lid debounce values outside `0-5000`.
+# 1. Start from main app mode and capture the current lid debounce.
+# 2. Attempt to save lid debounce values below `0` and above `5000`.
 # 3. Assert each request is rejected with `400`.
-# 4. Assert the stored hall debounce remains unchanged afterwards.
-def test_audio_config_rejects_out_of_range_hall_debounce_values(qemu_mainapp_instance):
+# 4. Assert the stored lid debounce remains unchanged afterwards.
+def test_audio_config_rejects_out_of_range_lid_debounce_values(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
 
     baseline = _get_audio_config(base_url)
-    baseline_hall_debounce = baseline.get("hall_debounce_ms")
-    assert isinstance(baseline_hall_debounce, int), (
-        f"Expected integer hall_debounce_ms, got {baseline_hall_debounce!r}"
+    baseline_lid_debounce = baseline.get("lid_debounce_ms")
+    assert isinstance(baseline_lid_debounce, int), (
+        f"Expected integer lid_debounce_ms, got {baseline_lid_debounce!r}"
     )
 
-    for bad_value in (HALL_DEBOUNCE_MIN_MS - 1, HALL_DEBOUNCE_MAX_MS + 1):
+    for bad_value in (LID_DEBOUNCE_MIN_MS - 1, LID_DEBOUNCE_MAX_MS + 1):
         status, _, body = _http_post_json(
             base_url=base_url,
             path="/audio/config",
-            payload={"hall_debounce_ms": bad_value},
+            payload={"lid_debounce_ms": bad_value},
             timeout_s=4.0,
         )
         assert status == 400, (
-            f"Expected 400 for invalid hall debounce {bad_value}. body={body}"
+            f"Expected 400 for invalid lid debounce {bad_value}. body={body}"
         )
 
         readback = _get_audio_config(base_url)
-        assert readback.get("hall_debounce_ms") == baseline_hall_debounce, (
-            f"Invalid hall debounce {bad_value} should not change stored config.\n"
+        assert readback.get("lid_debounce_ms") == baseline_lid_debounce, (
+            f"Invalid lid debounce {bad_value} should not change stored config.\n"
             f"Readback: {readback}"
         )
 
@@ -1495,7 +1550,7 @@ def test_laser_break_with_open_lid_does_not_start_playback(qemu_mainapp_instance
 
 
 # Test: Opening the lid starts playback of the configured lid-open sound.
-# 1. Upload a timed MP3 and configure it as the lid-open sound with non-zero volume and zero hall debounce.
+# 1. Upload a timed MP3 and configure it as the lid-open sound with non-zero lid volume and zero lid debounce.
 # 2. Force the hall sensor from closed to open.
 # 3. Assert `/audio/playback` reports the configured file active.
 # 4. Assert logs show the lid-open event selected that file for playback.
@@ -1512,12 +1567,12 @@ def test_lid_open_event_starts_configured_playback(qemu_mainapp_instance):
     config = _set_lid_open_sound_config(
         base_url,
         sound=filename,
-        volume_pct=100,
-        hall_debounce_ms=0,
+        volume_pct=125,
+        lid_debounce_ms=0,
     )
     assert config.get("lid_open_sound") == filename, config
-    assert config.get("lid_open_volume_pct") == 100, config
-    assert config.get("hall_debounce_ms") == 0, config
+    assert config.get("lid_volume_pct") == 125, config
+    assert config.get("lid_debounce_ms") == 0, config
 
     log_start_pos = log_path.stat().st_size if log_path.exists() else 0
     try:
@@ -1557,15 +1612,14 @@ def test_lid_open_event_starts_configured_playback(qemu_mainapp_instance):
     finally:
         _audio_playback_stop(base_url, timeout_s=8.0)
         _wait_for_playback_idle(base_url, timeout_s=3.0)
-        _set_test_gpio_level(base_url, "hall", 0)
 
 
-# Test: Lid-open playback honors the configured hall debounce.
+# Test: Lid-open playback honors the configured lid debounce.
 # 1. Upload a non-timed MP3 and configure it as the lid-open sound.
-# 2. Set a hall debounce of `200ms`.
+# 2. Set a lid debounce of `200ms`.
 # 3. Toggle the hall sensor open -> closed -> open within the debounce window.
 # 4. Assert only one playback start is logged for the configured file.
-def test_lid_open_event_honors_hall_debounce(qemu_mainapp_instance):
+def test_lid_open_event_honors_lid_debounce(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
     log_path = qemu_mainapp_instance["log_path"]
 
@@ -1579,11 +1633,11 @@ def test_lid_open_event_honors_hall_debounce(qemu_mainapp_instance):
         base_url,
         sound=filename,
         volume_pct=100,
-        hall_debounce_ms=200,
+        lid_debounce_ms=200,
     )
     assert config.get("lid_open_sound") == filename, config
-    assert config.get("lid_open_volume_pct") == 100, config
-    assert config.get("hall_debounce_ms") == 200, config
+    assert config.get("lid_volume_pct") == 100, config
+    assert config.get("lid_debounce_ms") == 200, config
 
     _set_test_gpio_level(base_url, "hall", 0)
     log_start_pos = log_path.stat().st_size if log_path.exists() else 0
@@ -1607,7 +1661,7 @@ def test_lid_open_event_honors_hall_debounce(qemu_mainapp_instance):
     time.sleep(0.5)
     start_count = _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}")
     assert start_count == 1, (
-        "Expected hall debounce to suppress repeated lid-open playback within the debounce window.\n"
+        "Expected lid debounce to suppress repeated lid-open playback within the debounce window.\n"
         f"Observed start count: {start_count}\n"
         f"Log tail:\n{_tail_log(log_path)}"
     )
@@ -1615,10 +1669,10 @@ def test_lid_open_event_honors_hall_debounce(qemu_mainapp_instance):
     _set_test_gpio_level(base_url, "hall", 0)
 
 
-# Test: Lid-open playback is skipped when the configured lid-open volume is `0%`.
-# 1. Upload an MP3 and configure it as the lid-open sound with volume `0`.
+# Test: Lid-open playback is skipped when the configured lid volume is `0%`.
+# 1. Upload an MP3 and configure it as the lid-open sound with lid volume `0`.
 # 2. Open the lid.
-# 3. Assert logs explain that lid-open playback is skipped because the configured volume is `0%`.
+# 3. Assert logs explain that lid-open playback is skipped because the configured lid volume is `0%`.
 # 4. Assert playback never becomes active and outputs stay muted.
 def test_lid_open_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
     base_url = qemu_mainapp_instance["base_url"]
@@ -1637,10 +1691,10 @@ def test_lid_open_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
         base_url,
         sound=filename,
         volume_pct=0,
-        hall_debounce_ms=0,
+        lid_debounce_ms=0,
     )
     assert config.get("lid_open_sound") == filename, config
-    assert config.get("lid_open_volume_pct") == 0, config
+    assert config.get("lid_volume_pct") == 0, config
 
     log_start_pos = log_path.stat().st_size if log_path.exists() else 0
     try:
@@ -1650,13 +1704,13 @@ def test_lid_open_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
             lambda: _log_contains_any_since(
                 log_path,
                 log_start_pos,
-                ["Lid opened, but lid-open volume is 0%"],
+                ["Lid opened, but lid volume is 0%"],
             ),
             timeout_s=3.0,
             poll_s=0.1,
         )
         assert skip_logged, (
-            "Expected logs to show lid-open playback was skipped because the configured volume is 0%.\n"
+            "Expected logs to show lid-open playback was skipped because the configured lid volume is 0%.\n"
             f"Log tail:\n{_tail_log(log_path)}"
         )
 
@@ -1670,7 +1724,7 @@ def test_lid_open_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
             log_path,
             log_start_pos,
             [f"Starting playback: {filename}"],
-        ), f"Lid-open volume 0% should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
+        ), f"Lid volume 0% should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
         assert _outputs_are_muted(base_url), (
             f"DAC/AMP should stay muted when lid-open playback is skipped for 0% volume.\nLog tail:\n{_tail_log(log_path)}"
         )
@@ -1679,7 +1733,7 @@ def test_lid_open_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
 
 
 # Test: Lid-open playback is skipped when no lid-open sound is configured.
-# 1. Clear the lid-open sound selection and set hall debounce to `0`.
+# 1. Clear the lid-open sound selection and set lid debounce to `0`.
 # 2. Open the lid.
 # 3. Assert logs explain that no lid-open sound is configured.
 # 4. Assert playback never becomes active and outputs stay muted.
@@ -1693,9 +1747,9 @@ def test_lid_open_event_is_skipped_when_no_sound_is_configured(qemu_mainapp_inst
         f"Log tail:\n{_tail_log(log_path)}"
     )
 
-    config = _set_lid_open_sound_config(base_url, sound="", hall_debounce_ms=0)
+    config = _set_lid_open_sound_config(base_url, sound="", lid_debounce_ms=0)
     assert config.get("lid_open_sound") == "", config
-    assert config.get("hall_debounce_ms") == 0, config
+    assert config.get("lid_debounce_ms") == 0, config
 
     log_start_pos = log_path.stat().st_size if log_path.exists() else 0
     try:
@@ -1737,9 +1791,9 @@ def test_deleting_selected_lid_open_sound_clears_audio_config(qemu_mainapp_insta
     filename = f"{_unique_name('lid-open-delete-clear')}.mp3"
     _upload_sound_file(base_url, filename, _test_mp3_bytes())
 
-    config = _set_lid_open_sound_config(base_url, sound=filename, volume_pct=84, hall_debounce_ms=0)
+    config = _set_lid_open_sound_config(base_url, sound=filename, volume_pct=84, lid_debounce_ms=0)
     assert config.get("lid_open_sound") == filename, config
-    assert config.get("lid_open_volume_pct") == 84, config
+    assert config.get("lid_volume_pct") == 84, config
 
     delete_status, delete_headers, delete_body = _delete_sound_file(base_url, filename)
     assert delete_status == 303, (
@@ -1773,7 +1827,7 @@ def test_stale_configured_lid_open_sound_fails_cleanly(qemu_mainapp_instance):
     filename = f"{_unique_name('lid-open-stale-6165ms')}.mp3"
     _upload_sound_file(base_url, filename, _test_mp3_bytes())
 
-    config = _set_lid_open_sound_config(base_url, sound=filename, volume_pct=100, hall_debounce_ms=0)
+    config = _set_lid_open_sound_config(base_url, sound=filename, volume_pct=100, lid_debounce_ms=0)
     assert config.get("lid_open_sound") == filename, config
 
     status, _, body = _format_storage(base_url)
@@ -1812,6 +1866,314 @@ def test_stale_configured_lid_open_sound_fails_cleanly(qemu_mainapp_instance):
         _assert_no_panic_since(log_path, log_start_pos)
     finally:
         _set_test_gpio_level(base_url, "hall", 0)
+
+
+# Test: Closing the lid starts playback of the configured lid-close sound.
+# 1. Upload a timed MP3 and configure it as the lid-close sound with non-zero lid volume and zero lid debounce.
+# 2. Force the hall sensor from open to closed.
+# 3. Assert `/audio/playback` reports the configured file active.
+# 4. Assert logs show the lid-close event selected that file for playback.
+def test_lid_close_event_starts_configured_playback(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, f"Startup playback did not clear before lid-close playback test.\nLog tail:\n{_tail_log(log_path)}"
+
+    filename = f"{_unique_name('lid-close-start-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_close_sound_config(
+        base_url,
+        sound=filename,
+        volume_pct=125,
+        lid_debounce_ms=0,
+    )
+    assert config.get("lid_close_sound") == filename, config
+    assert config.get("lid_volume_pct") == 125, config
+    assert config.get("lid_debounce_ms") == 0, config
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    try:
+        _trigger_lid_close(base_url)
+
+        playback_state: dict[str, object] = {}
+
+        def _configured_lid_close_file_is_active() -> bool:
+            nonlocal playback_state
+            playback_state = _audio_playback_state(base_url)
+            return bool(playback_state.get("active")) and playback_state.get("file") == filename
+
+        playing = _wait_until(
+            _configured_lid_close_file_is_active,
+            timeout_s=4.0,
+            poll_s=0.1,
+        )
+        assert playing, (
+            "Expected lid-close event to start playback of the configured file.\n"
+            f"Last state: {playback_state}\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+
+        lid_close_logged = _wait_until(
+            lambda: _log_contains_any_since(
+                log_path,
+                log_start_pos,
+                [f"Lid closed! Starting playback of {filename}"],
+            ),
+            timeout_s=3.0,
+            poll_s=0.1,
+        )
+        assert lid_close_logged, (
+            "Expected logs to show the lid-close event selected the configured file.\n"
+            f"Log tail:\n{_tail_log(log_path)}"
+        )
+    finally:
+        _audio_playback_stop(base_url, timeout_s=8.0)
+        _wait_for_playback_idle(base_url, timeout_s=3.0)
+
+
+# Test: Lid-close playback honors the configured lid debounce.
+# 1. Upload a non-timed MP3 and configure it as the lid-close sound.
+# 2. Set a lid debounce of `200ms`.
+# 3. Toggle the hall sensor closed -> open -> closed within the debounce window.
+# 4. Assert only one playback start is logged for the configured file.
+def test_lid_close_event_honors_lid_debounce(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, f"Startup playback did not clear before lid-close debounce test.\nLog tail:\n{_tail_log(log_path)}"
+
+    filename = f"{_unique_name('lid-close-debounce')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_close_sound_config(
+        base_url,
+        sound=filename,
+        volume_pct=100,
+        lid_debounce_ms=200,
+    )
+    assert config.get("lid_close_sound") == filename, config
+    assert config.get("lid_volume_pct") == 100, config
+    assert config.get("lid_debounce_ms") == 200, config
+
+    _set_test_gpio_level(base_url, "hall", 1)
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+
+    _set_test_gpio_level(base_url, "hall", 0)
+    time.sleep(0.05)
+    _set_test_gpio_level(base_url, "hall", 1)
+    time.sleep(0.05)
+    _set_test_gpio_level(base_url, "hall", 0)
+
+    first_start_seen = _wait_until(
+        lambda: _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}") >= 1,
+        timeout_s=4.0,
+        poll_s=0.1,
+    )
+    assert first_start_seen, (
+        "Expected at least one playback start after closing the lid.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    time.sleep(0.5)
+    start_count = _log_count_since(log_path, log_start_pos, f"Starting playback: {filename}")
+    assert start_count == 1, (
+        "Expected lid debounce to suppress repeated lid-close playback within the debounce window.\n"
+        f"Observed start count: {start_count}\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: Lid-close playback is skipped when the configured lid volume is `0%`.
+# 1. Upload an MP3 and configure it as the lid-close sound with lid volume `0`.
+# 2. Close the lid.
+# 3. Assert logs explain that lid-close playback is skipped because the configured lid volume is `0%`.
+# 4. Assert playback never becomes active and outputs stay muted.
+def test_lid_close_event_with_zero_volume_is_skipped(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before lid-close zero-volume test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('lid-close-zero-volume-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_close_sound_config(
+        base_url,
+        sound=filename,
+        volume_pct=0,
+        lid_debounce_ms=0,
+    )
+    assert config.get("lid_close_sound") == filename, config
+    assert config.get("lid_volume_pct") == 0, config
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_lid_close(base_url)
+
+    skip_logged = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Lid closed, but lid volume is 0%"],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert skip_logged, (
+        "Expected logs to show lid-close playback was skipped because the configured lid volume is 0%.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+    assert stayed_inactive, (
+        "Lid-close zero-volume playback unexpectedly became active.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    assert not _log_contains_any_since(
+        log_path,
+        log_start_pos,
+        [f"Starting playback: {filename}"],
+    ), f"Lid volume 0% should not start real playback.\nLog tail:\n{_tail_log(log_path)}"
+    assert _outputs_are_muted(base_url), (
+        f"DAC/AMP should stay muted when lid-close playback is skipped for 0% volume.\nLog tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: Lid-close playback is skipped when no lid-close sound is configured.
+# 1. Clear the lid-close sound selection and set lid debounce to `0`.
+# 2. Close the lid.
+# 3. Assert logs explain that no lid-close sound is configured.
+# 4. Assert playback never becomes active and outputs stay muted.
+def test_lid_close_event_is_skipped_when_no_sound_is_configured(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before lid-close no-sound test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    config = _set_lid_close_sound_config(base_url, sound="", lid_debounce_ms=0)
+    assert config.get("lid_close_sound") == "", config
+    assert config.get("lid_debounce_ms") == 0, config
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_lid_close(base_url)
+
+    skip_logged = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            ["Lid closed, but no lid-close sound is configured"],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert skip_logged, (
+        "Expected logs to show lid-close playback was skipped because no sound is configured.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+    assert stayed_inactive, (
+        "Lid-close event unexpectedly started playback even though no sound is configured.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert _outputs_are_muted(base_url), (
+        f"DAC/AMP should stay muted when no lid-close sound is configured.\nLog tail:\n{_tail_log(log_path)}"
+    )
+
+
+# Test: Deleting the selected lid-close sound clears the saved lid-close sound setting.
+# 1. Upload an MP3 and configure it as the lid-close sound.
+# 2. Delete that sound through the normal `/sounds/<name>?delete=1` endpoint.
+# 3. Assert `/audio/config` clears `lid_close_sound` afterwards.
+def test_deleting_selected_lid_close_sound_clears_audio_config(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+
+    filename = f"{_unique_name('lid-close-delete-clear')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_close_sound_config(base_url, sound=filename, volume_pct=84, lid_debounce_ms=0)
+    assert config.get("lid_close_sound") == filename, config
+    assert config.get("lid_volume_pct") == 84, config
+
+    delete_status, delete_headers, delete_body = _delete_sound_file(base_url, filename)
+    assert delete_status == 303, (
+        f"Deleting the selected lid-close sound should still succeed normally. body={delete_body}"
+    )
+    assert delete_headers.get("Location") == "/sounds/"
+    assert "File deleted successfully" in delete_body
+
+    readback = _get_audio_config(base_url)
+    assert readback.get("lid_close_sound") == "", (
+        "Deleting the selected lid-close sound should clear the saved lid-close sound selection.\n"
+        f"Readback: {readback}"
+    )
+
+
+# Test: A stale configured lid-close sound fails in a controlled manner if the file disappears.
+# 1. Upload an MP3 and configure it as the lid-close sound.
+# 2. Format storage so the selected file disappears while the config remains.
+# 3. Close the lid.
+# 4. Assert playback stays inactive and logs report the missing configured file without a panic.
+def test_stale_configured_lid_close_sound_fails_cleanly(qemu_mainapp_instance):
+    base_url = qemu_mainapp_instance["base_url"]
+    log_path = qemu_mainapp_instance["log_path"]
+
+    idle = _wait_for_playback_idle(base_url, timeout_s=3.0)
+    assert idle, (
+        "Startup playback did not clear before stale lid-close sound test.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    filename = f"{_unique_name('lid-close-stale-6165ms')}.mp3"
+    _upload_sound_file(base_url, filename, _test_mp3_bytes())
+
+    config = _set_lid_close_sound_config(base_url, sound=filename, volume_pct=100, lid_debounce_ms=0)
+    assert config.get("lid_close_sound") == filename, config
+
+    status, _, body = _format_storage(base_url)
+    assert status == 200, f"Failed to format storage while preparing stale lid-close sound test. body={body}"
+    assert "Formatted" in body
+
+    missing_status, _, _ = _http_get(base_url, f"/sounds/{filename}", timeout_s=4.0)
+    assert missing_status == 404, f"Expected stale lid-close sound file to be gone after format, got status={missing_status}"
+
+    log_start_pos = log_path.stat().st_size if log_path.exists() else 0
+    _trigger_lid_close(base_url)
+
+    missing_logged = _wait_until(
+        lambda: _log_contains_any_since(
+            log_path,
+            log_start_pos,
+            [f"Configured lid-close sound does not exist: {filename}"],
+        ),
+        timeout_s=3.0,
+        poll_s=0.1,
+    )
+    assert missing_logged, (
+        "Expected logs to report the missing configured lid-close sound file.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+
+    stayed_inactive = _playback_stays_inactive_for(base_url, duration_s=2.0, poll_s=0.05)
+    assert stayed_inactive, (
+        "Stale configured lid-close sound unexpectedly became active.\n"
+        f"Log tail:\n{_tail_log(log_path)}"
+    )
+    assert _outputs_are_muted(base_url), (
+        f"DAC/AMP should stay muted when the configured lid-close sound file is missing.\nLog tail:\n{_tail_log(log_path)}"
+    )
+    _assert_no_panic_since(log_path, log_start_pos)
 
 
 # Test: Rapid repeated playback-start requests keep the control plane responsive.

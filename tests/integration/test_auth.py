@@ -338,7 +338,7 @@ def test_auth_blocks_audio_config_endpoint(qemu_mainapp_instance):
         path="/audio/config",
         payload={
             "laser_debounce_ms": 25,
-            "hall_debounce_ms": 750,
+            "lid_debounce_ms": 750,
             "laser_trigger_cooldown_ms": 125,
         },
     )

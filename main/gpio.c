@@ -79,6 +79,7 @@ static void gpio_hall_isr_handler(void *arg);
 static void laser_event_task(void *arg);
 static void laser_handle_blocked_trigger(TickType_t trigger_tick);
 static void hall_event_task(void *arg);
+static void hall_handle_close_trigger(TickType_t trigger_tick);
 static void hall_handle_open_trigger(TickType_t trigger_tick);
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -115,7 +116,7 @@ static volatile gpio_runtime_mode_t s_runtime_mode = GPIO_RUNTIME_BOOTSTRAP;
 
 // Laser debouncing
 static uint16_t s_debounce_time_laser_ms = GPIO_LASER_DEBOUNCE_DEFAULT_MS;
-static uint16_t s_debounce_time_hall_ms = GPIO_HALL_DEBOUNCE_DEFAULT_MS;
+static uint16_t s_debounce_time_lid_ms = GPIO_LID_DEBOUNCE_DEFAULT_MS;
 static uint32_t s_laser_trigger_cooldown_ms = GPIO_LASER_TRIGGER_COOLDOWN_DEFAULT_MS;
 
 // Laser task
@@ -126,7 +127,8 @@ static TickType_t s_laser_last_trigger_tick;
 static TickType_t s_hall_last_open_tick;
 static TickType_t s_hall_last_close_tick;
 static char s_lid_open_sound[FILE_ENTRY_NAME_MAX] = {0};
-static uint8_t s_lid_open_volume_pct = 100;
+static char s_lid_close_sound[FILE_ENTRY_NAME_MAX] = {0};
+static uint8_t s_lid_volume_pct = 100;
 
 #if CONFIG_TEST_GPIO_INJECTION
 static volatile bool s_test_laser_override_valid;
@@ -354,7 +356,7 @@ static void hall_event_task(void *arg)
 
         const TickType_t trigger_tick = evt_tick ? (TickType_t)evt_tick : xTaskGetTickCount();
         if (gpio_get_hall_level() == HALL_LID_CLOSED) {
-            s_hall_last_close_tick = trigger_tick;
+            hall_handle_close_trigger(trigger_tick);
             continue;
         }
 
@@ -433,8 +435,8 @@ static void laser_handle_blocked_trigger(TickType_t trigger_tick)
 
 static void hall_handle_open_trigger(TickType_t trigger_tick)
 {
-    const TickType_t debounce_ticks = s_debounce_time_hall_ms
-        ? pdMS_TO_TICKS(s_debounce_time_hall_ms)
+    const TickType_t debounce_ticks = s_debounce_time_lid_ms
+        ? pdMS_TO_TICKS(s_debounce_time_lid_ms)
         : 0;
 
     if (debounce_ticks > 0 &&
@@ -456,8 +458,8 @@ static void hall_handle_open_trigger(TickType_t trigger_tick)
         return;
     }
 
-    if (s_lid_open_volume_pct == 0) {
-        ESP_LOGI(TAG, "Lid opened, but lid-open volume is 0%%");
+    if (s_lid_volume_pct == 0) {
+        ESP_LOGI(TAG, "Lid opened, but lid volume is 0%%");
         return;
     }
 
@@ -472,7 +474,7 @@ static void hall_handle_open_trigger(TickType_t trigger_tick)
     audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
     audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
     esp_err_t err = audio_start_file_with_volume(s_lid_open_sound,
-                                                 s_lid_open_volume_pct,
+                                                 s_lid_volume_pct,
                                                  &start_result,
                                                  &skip_reason);
     if (err == ESP_ERR_NOT_FOUND) {
@@ -485,6 +487,64 @@ static void hall_handle_open_trigger(TickType_t trigger_tick)
         ESP_LOGW(TAG,
                  "Lid-open playback skipped for file: %s (%s)",
                  s_lid_open_sound,
+                 audio_playback_skip_reason_text(skip_reason));
+    }
+}
+
+static void hall_handle_close_trigger(TickType_t trigger_tick)
+{
+    const TickType_t debounce_ticks = s_debounce_time_lid_ms
+        ? pdMS_TO_TICKS(s_debounce_time_lid_ms)
+        : 0;
+
+    if (debounce_ticks > 0 &&
+        s_hall_last_close_tick != 0 &&
+        (trigger_tick - s_hall_last_close_tick) < debounce_ticks) {
+        return;
+    }
+    if (debounce_ticks > 0 &&
+        s_hall_last_close_tick != 0 &&
+        s_hall_last_open_tick != 0 &&
+        s_hall_last_open_tick > s_hall_last_close_tick &&
+        (trigger_tick - s_hall_last_open_tick) < debounce_ticks) {
+        return;
+    }
+    s_hall_last_close_tick = trigger_tick;
+
+    if (s_lid_close_sound[0] == '\0') {
+        ESP_LOGI(TAG, "Lid closed, but no lid-close sound is configured");
+        return;
+    }
+
+    if (s_lid_volume_pct == 0) {
+        ESP_LOGI(TAG, "Lid closed, but lid volume is 0%%");
+        return;
+    }
+
+    file_properties_t meta;
+    if (files_read_meta(s_lid_close_sound, &meta) != ESP_OK) {
+        ESP_LOGW(TAG, "Configured lid-close sound does not exist: %s", s_lid_close_sound);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Lid closed! Starting playback of %s", s_lid_close_sound);
+
+    audio_playback_start_result_t start_result = AUDIO_PLAYBACK_START_RESULT_STARTED;
+    audio_playback_skip_reason_t skip_reason = AUDIO_PLAYBACK_SKIP_NONE;
+    esp_err_t err = audio_start_file_with_volume(s_lid_close_sound,
+                                                 s_lid_volume_pct,
+                                                 &start_result,
+                                                 &skip_reason);
+    if (err == ESP_ERR_NOT_FOUND) {
+        ESP_LOGW(TAG, "Configured lid-close sound does not exist: %s", s_lid_close_sound);
+    } else if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start lid-close audio: %s", esp_err_to_name(err));
+    } else if (start_result == AUDIO_PLAYBACK_START_RESULT_STARTED) {
+        ESP_LOGI(TAG, "Playback started for lid-close sound: %s", s_lid_close_sound);
+    } else {
+        ESP_LOGW(TAG,
+                 "Lid-close playback skipped for file: %s (%s)",
+                 s_lid_close_sound,
                  audio_playback_skip_reason_text(skip_reason));
     }
 }
@@ -659,14 +719,14 @@ size_t gpio_hall_events_drain(gpio_hall_event_t *out_events, size_t max_events, 
     return gpio_input_events_drain(&s_hall_history, out_events, max_events, dropped_events);
 }
 
-void gpio_set_hall_debounce_ms(uint16_t debounce_ms)
+void gpio_set_lid_debounce_ms(uint16_t debounce_ms)
 {
-    s_debounce_time_hall_ms = debounce_ms;
+    s_debounce_time_lid_ms = debounce_ms;
 }
 
-uint16_t gpio_get_hall_debounce_ms(void)
+uint16_t gpio_get_lid_debounce_ms(void)
 {
-    return s_debounce_time_hall_ms;
+    return s_debounce_time_lid_ms;
 }
 
 esp_err_t gpio_set_lid_open_sound(const char *name)
@@ -685,9 +745,25 @@ esp_err_t gpio_set_lid_open_sound(const char *name)
     return ESP_OK;
 }
 
-void gpio_set_lid_open_volume_pct(uint8_t volume_pct)
+esp_err_t gpio_set_lid_close_sound(const char *name)
 {
-    s_lid_open_volume_pct = (volume_pct > 100U) ? 100U : volume_pct;
+    if (!name || name[0] == '\0') {
+        s_lid_close_sound[0] = '\0';
+        return ESP_OK;
+    }
+    if (strchr(name, '/') || strchr(name, '\\')) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlcpy(s_lid_close_sound, name, sizeof(s_lid_close_sound)) >= sizeof(s_lid_close_sound)) {
+        s_lid_close_sound[0] = '\0';
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return ESP_OK;
+}
+
+void gpio_set_lid_volume_pct(uint8_t volume_pct)
+{
+    s_lid_volume_pct = (volume_pct > FILE_VOLUME_MAX) ? FILE_VOLUME_MAX : volume_pct;
 }
 
 #if CONFIG_TEST_GPIO_INJECTION

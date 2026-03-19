@@ -1059,6 +1059,14 @@ esp_err_t files_get_audio_duration_ms(const char *name, uint32_t *out_duration_m
         return ESP_ERR_INVALID_STATE;
     }
 
+#if CONFIG_TEST_AUDIO_MOCK_BACKEND
+    uint32_t mock_duration_ms = mock_playback_duration_from_name_ms(name);
+    if (mock_duration_ms > 0) {
+        *out_duration_ms = mock_duration_ms;
+        return ESP_OK;
+    }
+#endif
+
     char audio_path[FILES_PATH_MAX];
     esp_err_t err = full_path_for_name(name, audio_path, sizeof(audio_path));
     if (err == ESP_OK) {
@@ -1068,14 +1076,6 @@ esp_err_t files_get_audio_duration_ms(const char *name, uint32_t *out_duration_m
         }
         err = duration_err;
     }
-
-#if CONFIG_TEST_AUDIO_MOCK_BACKEND
-    uint32_t mock_duration_ms = mock_playback_duration_from_name_ms(name);
-    if (mock_duration_ms > 0) {
-        *out_duration_ms = mock_duration_ms;
-        return ESP_OK;
-    }
-#endif
 
     return err;
 }

@@ -125,18 +125,19 @@ _Static_assert(
 
 #define AUDIO_NVS_NAMESPACE "audio"
 #define AUDIO_NVS_KEY_LASER_DEBOUNCE_MS "laser_db_ms"
-#define AUDIO_NVS_KEY_HALL_DEBOUNCE_MS "hall_db_ms"
+#define AUDIO_NVS_KEY_LID_DEBOUNCE_MS "hall_db_ms"
 #define AUDIO_NVS_KEY_LASER_COOLDOWN_MS "laser_cd_ms"
 #define AUDIO_NVS_KEY_LID_OPEN_SOUND "lid_open_sound"
-#define AUDIO_NVS_KEY_LID_OPEN_VOLUME_PCT "lid_open_vol"
+#define AUDIO_NVS_KEY_LID_CLOSE_SOUND "lid_close_sound"
+#define AUDIO_NVS_KEY_LID_VOLUME_PCT "lid_open_vol"
 #define AUDIO_DEFAULT_LASER_DEBOUNCE_MS GPIO_LASER_DEBOUNCE_DEFAULT_MS
-#define AUDIO_DEFAULT_HALL_DEBOUNCE_MS GPIO_HALL_DEBOUNCE_DEFAULT_MS
+#define AUDIO_DEFAULT_LID_DEBOUNCE_MS GPIO_LID_DEBOUNCE_DEFAULT_MS
 #define AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS GPIO_LASER_TRIGGER_COOLDOWN_DEFAULT_MS
-#define AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT 100U
+#define AUDIO_DEFAULT_LID_VOLUME_PCT 100U
 #define AUDIO_LASER_DEBOUNCE_MIN_MS 0U
 #define AUDIO_LASER_DEBOUNCE_MAX_MS 1000U
-#define AUDIO_HALL_DEBOUNCE_MIN_MS 0U
-#define AUDIO_HALL_DEBOUNCE_MAX_MS 5000U
+#define AUDIO_LID_DEBOUNCE_MIN_MS 0U
+#define AUDIO_LID_DEBOUNCE_MAX_MS 5000U
 #define SETTINGS_DEFAULT_COIN_SOUND_LABEL "Default coin sound"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -148,10 +149,11 @@ static const char *TAG = "file_server";
 static char s_http_scratch[SCRATCH_BUFSIZE];
 static bool s_boot_sound_enabled = true;
 static uint16_t s_audio_laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
-static uint16_t s_audio_hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
+static uint16_t s_audio_lid_debounce_ms = AUDIO_DEFAULT_LID_DEBOUNCE_MS;
 static uint32_t s_audio_laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
 static char s_audio_lid_open_sound[FILE_ENTRY_NAME_MAX] = {0};
-static uint8_t s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
+static char s_audio_lid_close_sound[FILE_ENTRY_NAME_MAX] = {0};
+static uint8_t s_audio_lid_volume_pct = AUDIO_DEFAULT_LID_VOLUME_PCT;
 
 static bool is_audio_filename(const char *name);
 
@@ -501,15 +503,18 @@ esp_err_t mainapp_reset_boot_defaults(void)
 static void audio_config_apply(void)
 {
     gpio_set_laser_debounce_ms(s_audio_laser_debounce_ms);
-    gpio_set_hall_debounce_ms(s_audio_hall_debounce_ms);
+    gpio_set_lid_debounce_ms(s_audio_lid_debounce_ms);
     gpio_set_laser_trigger_cooldown_ms(s_audio_laser_trigger_cooldown_ms);
     if (gpio_set_lid_open_sound(s_audio_lid_open_sound) != ESP_OK) {
         gpio_set_lid_open_sound("");
     }
-    gpio_set_lid_open_volume_pct(s_audio_lid_open_volume_pct);
+    if (gpio_set_lid_close_sound(s_audio_lid_close_sound) != ESP_OK) {
+        gpio_set_lid_close_sound("");
+    }
+    gpio_set_lid_volume_pct(s_audio_lid_volume_pct);
 }
 
-static esp_err_t audio_config_validate_lid_open_sound_name(const char *name)
+static esp_err_t audio_config_validate_lid_sound_name(const char *name)
 {
     if (!name) {
         return ESP_ERR_INVALID_ARG;
@@ -531,10 +536,11 @@ static esp_err_t audio_config_validate_lid_open_sound_name(const char *name)
 static esp_err_t audio_config_load_from_nvs(void)
 {
     s_audio_laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
-    s_audio_hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
+    s_audio_lid_debounce_ms = AUDIO_DEFAULT_LID_DEBOUNCE_MS;
     s_audio_laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
     s_audio_lid_open_sound[0] = '\0';
-    s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
+    s_audio_lid_close_sound[0] = '\0';
+    s_audio_lid_volume_pct = AUDIO_DEFAULT_LID_VOLUME_PCT;
 
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(AUDIO_NVS_NAMESPACE, NVS_READONLY, &nvs);
@@ -556,14 +562,14 @@ static esp_err_t audio_config_load_from_nvs(void)
         s_audio_laser_debounce_ms = laser_debounce_ms;
     }
 
-    uint16_t hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
-    err = nvs_get_u16(nvs, AUDIO_NVS_KEY_HALL_DEBOUNCE_MS, &hall_debounce_ms);
+    uint16_t lid_debounce_ms = AUDIO_DEFAULT_LID_DEBOUNCE_MS;
+    err = nvs_get_u16(nvs, AUDIO_NVS_KEY_LID_DEBOUNCE_MS, &lid_debounce_ms);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         nvs_close(nvs);
         return err;
     }
-    if (err == ESP_OK && hall_debounce_ms <= AUDIO_HALL_DEBOUNCE_MAX_MS) {
-        s_audio_hall_debounce_ms = hall_debounce_ms;
+    if (err == ESP_OK && lid_debounce_ms <= AUDIO_LID_DEBOUNCE_MAX_MS) {
+        s_audio_lid_debounce_ms = lid_debounce_ms;
     }
 
     uint32_t laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
@@ -598,14 +604,36 @@ static esp_err_t audio_config_load_from_nvs(void)
         }
     }
 
-    uint8_t lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
-    err = nvs_get_u8(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME_PCT, &lid_open_volume_pct);
+    size_t lid_close_sound_size = 0;
+    err = nvs_get_str(nvs, AUDIO_NVS_KEY_LID_CLOSE_SOUND, NULL, &lid_close_sound_size);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(nvs);
+        return err;
+    }
+    if (err == ESP_OK && lid_close_sound_size > 0 && lid_close_sound_size <= sizeof(s_audio_lid_close_sound)) {
+        char stored_name[FILE_ENTRY_NAME_MAX] = {0};
+        err = nvs_get_str(nvs, AUDIO_NVS_KEY_LID_CLOSE_SOUND, stored_name, &lid_close_sound_size);
+        if (err != ESP_OK) {
+            nvs_close(nvs);
+            return err;
+        }
+        if (!strchr(stored_name, '/') &&
+            !strchr(stored_name, '\\') &&
+            !strstr(stored_name, "..") &&
+            !is_meta_file(stored_name) &&
+            is_audio_filename(stored_name)) {
+            strlcpy(s_audio_lid_close_sound, stored_name, sizeof(s_audio_lid_close_sound));
+        }
+    }
+
+    uint8_t lid_volume_pct = AUDIO_DEFAULT_LID_VOLUME_PCT;
+    err = nvs_get_u8(nvs, AUDIO_NVS_KEY_LID_VOLUME_PCT, &lid_volume_pct);
     nvs_close(nvs);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         return err;
     }
     if (err == ESP_OK) {
-        s_audio_lid_open_volume_pct = (lid_open_volume_pct > 100U) ? 100U : lid_open_volume_pct;
+        s_audio_lid_volume_pct = (lid_volume_pct > FILE_VOLUME_MAX) ? FILE_VOLUME_MAX : lid_volume_pct;
     }
 
     audio_config_apply();
@@ -613,10 +641,11 @@ static esp_err_t audio_config_load_from_nvs(void)
 }
 
 static esp_err_t audio_config_store(uint16_t laser_debounce_ms,
-                                    uint16_t hall_debounce_ms,
+                                    uint16_t lid_debounce_ms,
                                     uint32_t laser_trigger_cooldown_ms,
                                     const char *lid_open_sound,
-                                    uint8_t lid_open_volume_pct)
+                                    const char *lid_close_sound,
+                                    uint8_t lid_volume_pct)
 {
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(AUDIO_NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -626,7 +655,7 @@ static esp_err_t audio_config_store(uint16_t laser_debounce_ms,
 
     err = nvs_set_u16(nvs, AUDIO_NVS_KEY_LASER_DEBOUNCE_MS, laser_debounce_ms);
     if (err == ESP_OK) {
-        err = nvs_set_u16(nvs, AUDIO_NVS_KEY_HALL_DEBOUNCE_MS, hall_debounce_ms);
+        err = nvs_set_u16(nvs, AUDIO_NVS_KEY_LID_DEBOUNCE_MS, lid_debounce_ms);
     }
     if (err == ESP_OK) {
         err = nvs_set_u32(nvs, AUDIO_NVS_KEY_LASER_COOLDOWN_MS, laser_trigger_cooldown_ms);
@@ -642,9 +671,19 @@ static esp_err_t audio_config_store(uint16_t laser_debounce_ms,
         }
     }
     if (err == ESP_OK) {
+        if (lid_close_sound && lid_close_sound[0] != '\0') {
+            err = nvs_set_str(nvs, AUDIO_NVS_KEY_LID_CLOSE_SOUND, lid_close_sound);
+        } else {
+            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_CLOSE_SOUND);
+            if (err == ESP_ERR_NVS_NOT_FOUND) {
+                err = ESP_OK;
+            }
+        }
+    }
+    if (err == ESP_OK) {
         err = nvs_set_u8(nvs,
-                         AUDIO_NVS_KEY_LID_OPEN_VOLUME_PCT,
-                         (lid_open_volume_pct > 100U) ? 100U : lid_open_volume_pct);
+                         AUDIO_NVS_KEY_LID_VOLUME_PCT,
+                         (lid_volume_pct > FILE_VOLUME_MAX) ? FILE_VOLUME_MAX : lid_volume_pct);
     }
     if (err == ESP_OK) {
         err = nvs_commit(nvs);
@@ -655,41 +694,57 @@ static esp_err_t audio_config_store(uint16_t laser_debounce_ms,
     }
 
     s_audio_laser_debounce_ms = laser_debounce_ms;
-    s_audio_hall_debounce_ms = hall_debounce_ms;
+    s_audio_lid_debounce_ms = lid_debounce_ms;
     s_audio_laser_trigger_cooldown_ms = laser_trigger_cooldown_ms;
-    s_audio_lid_open_volume_pct = (lid_open_volume_pct > 100U) ? 100U : lid_open_volume_pct;
+    s_audio_lid_volume_pct = (lid_volume_pct > FILE_VOLUME_MAX) ? FILE_VOLUME_MAX : lid_volume_pct;
     strlcpy(s_audio_lid_open_sound,
             (lid_open_sound && lid_open_sound[0] != '\0') ? lid_open_sound : "",
             sizeof(s_audio_lid_open_sound));
+    strlcpy(s_audio_lid_close_sound,
+            (lid_close_sound && lid_close_sound[0] != '\0') ? lid_close_sound : "",
+            sizeof(s_audio_lid_close_sound));
     audio_config_apply();
     return ESP_OK;
 }
 
-static esp_err_t audio_config_clear_deleted_lid_open_sound(const char *name)
+static esp_err_t audio_config_clear_deleted_lid_sound(const char *name)
 {
-    if (!name || !name[0] || s_audio_lid_open_sound[0] == '\0' || strcmp(s_audio_lid_open_sound, name) != 0) {
+    if (!name || !name[0]) {
+        return ESP_OK;
+    }
+
+    const bool clear_open = s_audio_lid_open_sound[0] != '\0' && strcmp(s_audio_lid_open_sound, name) == 0;
+    const bool clear_close = s_audio_lid_close_sound[0] != '\0' && strcmp(s_audio_lid_close_sound, name) == 0;
+    if (!clear_open && !clear_close) {
         return ESP_OK;
     }
 
     return audio_config_store(s_audio_laser_debounce_ms,
-                              s_audio_hall_debounce_ms,
+                              s_audio_lid_debounce_ms,
                               s_audio_laser_trigger_cooldown_ms,
-                              "",
-                              s_audio_lid_open_volume_pct);
+                              clear_open ? "" : s_audio_lid_open_sound,
+                              clear_close ? "" : s_audio_lid_close_sound,
+                              s_audio_lid_volume_pct);
 }
 
-static esp_err_t audio_config_update_renamed_lid_open_sound(const char *old_name, const char *new_name)
+static esp_err_t audio_config_update_renamed_lid_sound(const char *old_name, const char *new_name)
 {
-    if (!old_name || !new_name || !old_name[0] || !new_name[0] ||
-        s_audio_lid_open_sound[0] == '\0' || strcmp(s_audio_lid_open_sound, old_name) != 0) {
+    if (!old_name || !new_name || !old_name[0] || !new_name[0]) {
+        return ESP_OK;
+    }
+
+    const bool update_open = s_audio_lid_open_sound[0] != '\0' && strcmp(s_audio_lid_open_sound, old_name) == 0;
+    const bool update_close = s_audio_lid_close_sound[0] != '\0' && strcmp(s_audio_lid_close_sound, old_name) == 0;
+    if (!update_open && !update_close) {
         return ESP_OK;
     }
 
     return audio_config_store(s_audio_laser_debounce_ms,
-                              s_audio_hall_debounce_ms,
+                              s_audio_lid_debounce_ms,
                               s_audio_laser_trigger_cooldown_ms,
-                              new_name,
-                              s_audio_lid_open_volume_pct);
+                              update_open ? new_name : s_audio_lid_open_sound,
+                              update_close ? new_name : s_audio_lid_close_sound,
+                              s_audio_lid_volume_pct);
 }
 
 esp_err_t mainapp_reset_audio_defaults(void)
@@ -706,7 +761,7 @@ esp_err_t mainapp_reset_audio_defaults(void)
             err = ESP_OK;
         }
         if (err == ESP_OK) {
-            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_HALL_DEBOUNCE_MS);
+            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_DEBOUNCE_MS);
             if (err == ESP_ERR_NVS_NOT_FOUND) {
                 err = ESP_OK;
             }
@@ -724,7 +779,13 @@ esp_err_t mainapp_reset_audio_defaults(void)
             }
         }
         if (err == ESP_OK) {
-            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_OPEN_VOLUME_PCT);
+            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_CLOSE_SOUND);
+            if (err == ESP_ERR_NVS_NOT_FOUND) {
+                err = ESP_OK;
+            }
+        }
+        if (err == ESP_OK) {
+            err = nvs_erase_key(nvs, AUDIO_NVS_KEY_LID_VOLUME_PCT);
             if (err == ESP_ERR_NVS_NOT_FOUND) {
                 err = ESP_OK;
             }
@@ -739,10 +800,11 @@ esp_err_t mainapp_reset_audio_defaults(void)
     }
 
     s_audio_laser_debounce_ms = AUDIO_DEFAULT_LASER_DEBOUNCE_MS;
-    s_audio_hall_debounce_ms = AUDIO_DEFAULT_HALL_DEBOUNCE_MS;
+    s_audio_lid_debounce_ms = AUDIO_DEFAULT_LID_DEBOUNCE_MS;
     s_audio_laser_trigger_cooldown_ms = AUDIO_DEFAULT_LASER_TRIGGER_COOLDOWN_MS;
     s_audio_lid_open_sound[0] = '\0';
-    s_audio_lid_open_volume_pct = AUDIO_DEFAULT_LID_OPEN_VOLUME_PCT;
+    s_audio_lid_close_sound[0] = '\0';
+    s_audio_lid_volume_pct = AUDIO_DEFAULT_LID_VOLUME_PCT;
     audio_config_apply();
     return ESP_OK;
 }
@@ -1137,19 +1199,23 @@ static esp_err_t send_boot_config_json(httpd_req_t *req)
 static esp_err_t send_audio_config_json(httpd_req_t *req)
 {
     char lid_open_sound_esc[(FILE_ENTRY_NAME_MAX * 2) + 1];
+    char lid_close_sound_esc[(FILE_ENTRY_NAME_MAX * 2) + 1];
     json_escape_copy(s_audio_lid_open_sound, lid_open_sound_esc, sizeof(lid_open_sound_esc));
+    json_escape_copy(s_audio_lid_close_sound, lid_close_sound_esc, sizeof(lid_close_sound_esc));
 
-    char resp[512];
+    char resp[768];
     int len = snprintf(resp,
                        sizeof(resp),
-                       "{\"laser_debounce_ms\":%u,\"hall_debounce_ms\":%u,"
+                       "{\"laser_debounce_ms\":%u,\"lid_debounce_ms\":%u,"
                        "\"laser_trigger_cooldown_ms\":%u,"
-                       "\"lid_open_sound\":\"%s\",\"lid_open_volume_pct\":%u}",
+                       "\"lid_open_sound\":\"%s\",\"lid_close_sound\":\"%s\","
+                       "\"lid_volume_pct\":%u}",
                        (unsigned)s_audio_laser_debounce_ms,
-                       (unsigned)s_audio_hall_debounce_ms,
+                       (unsigned)s_audio_lid_debounce_ms,
                        (unsigned)s_audio_laser_trigger_cooldown_ms,
                        lid_open_sound_esc,
-                       (unsigned)s_audio_lid_open_volume_pct);
+                       lid_close_sound_esc,
+                       (unsigned)s_audio_lid_volume_pct);
     if (len < 0 || len >= (int)sizeof(resp)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Render failed");
         return ESP_FAIL;
@@ -1470,12 +1536,12 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
         return auth_err;
     }
 
-    if (req->content_len <= 0 || req->content_len > 640) {
+    if (req->content_len <= 0 || req->content_len > 1024) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid request body");
         return ESP_FAIL;
     }
 
-    char body[641];
+    char body[1025];
     int received = 0;
     while (received < req->content_len) {
         int r = httpd_req_recv(req, body + received, req->content_len - received);
@@ -1488,11 +1554,13 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
     body[req->content_len] = '\0';
 
     uint16_t laser_debounce_ms = s_audio_laser_debounce_ms;
-    uint16_t hall_debounce_ms = s_audio_hall_debounce_ms;
+    uint16_t lid_debounce_ms = s_audio_lid_debounce_ms;
     uint32_t laser_trigger_cooldown_ms = s_audio_laser_trigger_cooldown_ms;
     char lid_open_sound[FILE_ENTRY_NAME_MAX] = {0};
     strlcpy(lid_open_sound, s_audio_lid_open_sound, sizeof(lid_open_sound));
-    uint8_t lid_open_volume_pct = s_audio_lid_open_volume_pct;
+    char lid_close_sound[FILE_ENTRY_NAME_MAX] = {0};
+    strlcpy(lid_close_sound, s_audio_lid_close_sound, sizeof(lid_close_sound));
+    uint8_t lid_volume_pct = s_audio_lid_volume_pct;
     bool has_update = false;
 
     if (json_has_key(body, "laser_debounce_ms")) {
@@ -1507,13 +1575,14 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
         has_update = true;
     }
 
-    if (json_has_key(body, "hall_debounce_ms")) {
+    if (json_has_key(body, "lid_debounce_ms") || json_has_key(body, "hall_debounce_ms")) {
+        const char *debounce_key = json_has_key(body, "lid_debounce_ms") ? "lid_debounce_ms" : "hall_debounce_ms";
         if (!json_get_uint16_in_range(body,
-                                      "hall_debounce_ms",
-                                      AUDIO_HALL_DEBOUNCE_MIN_MS,
-                                      AUDIO_HALL_DEBOUNCE_MAX_MS,
-                                      &hall_debounce_ms)) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid hall debounce");
+                                      debounce_key,
+                                      AUDIO_LID_DEBOUNCE_MIN_MS,
+                                      AUDIO_LID_DEBOUNCE_MAX_MS,
+                                      &lid_debounce_ms)) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid debounce");
             return ESP_FAIL;
         }
         has_update = true;
@@ -1536,7 +1605,7 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid-open sound");
             return ESP_FAIL;
         }
-        esp_err_t sound_err = audio_config_validate_lid_open_sound_name(lid_open_sound);
+        esp_err_t sound_err = audio_config_validate_lid_sound_name(lid_open_sound);
         if (sound_err == ESP_ERR_NOT_FOUND) {
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Lid-open sound does not exist");
             return ESP_FAIL;
@@ -1548,15 +1617,37 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
         has_update = true;
     }
 
-    if (json_has_key(body, "lid_open_volume_pct")) {
-        int lid_open_volume_int = 0;
-        if (!json_get_int(body, "lid_open_volume_pct", &lid_open_volume_int) ||
-            lid_open_volume_int < 0 ||
-            lid_open_volume_int > 100) {
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid-open volume");
+    if (json_has_key(body, "lid_close_sound")) {
+        if (!json_get_string(body, "lid_close_sound", lid_close_sound, sizeof(lid_close_sound))) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid-close sound");
             return ESP_FAIL;
         }
-        lid_open_volume_pct = (uint8_t)lid_open_volume_int;
+        esp_err_t sound_err = audio_config_validate_lid_sound_name(lid_close_sound);
+        if (sound_err == ESP_ERR_NOT_FOUND) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Lid-close sound does not exist");
+            return ESP_FAIL;
+        }
+        if (sound_err != ESP_OK) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid-close sound");
+            return ESP_FAIL;
+        }
+        has_update = true;
+    }
+
+    if (json_has_key(body, "lid_volume_pct") ||
+        json_has_key(body, "lid_open_volume_pct") ||
+        json_has_key(body, "lid_close_volume_pct")) {
+        const char *volume_key = json_has_key(body, "lid_volume_pct")
+            ? "lid_volume_pct"
+            : (json_has_key(body, "lid_open_volume_pct") ? "lid_open_volume_pct" : "lid_close_volume_pct");
+        int lid_volume_int = 0;
+        if (!json_get_int(body, volume_key, &lid_volume_int) ||
+            lid_volume_int < 0 ||
+            lid_volume_int > FILE_VOLUME_MAX) {
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid lid volume");
+            return ESP_FAIL;
+        }
+        lid_volume_pct = (uint8_t)lid_volume_int;
         has_update = true;
     }
 
@@ -1566,22 +1657,24 @@ static esp_err_t audio_config_post_handler(httpd_req_t *req)
     }
 
     esp_err_t err = audio_config_store(laser_debounce_ms,
-                                       hall_debounce_ms,
+                                       lid_debounce_ms,
                                        laser_trigger_cooldown_ms,
                                        lid_open_sound,
-                                       lid_open_volume_pct);
+                                       lid_close_sound,
+                                       lid_volume_pct);
     if (err != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save audio config");
         return ESP_FAIL;
     }
 
     ESP_LOGI(TAG,
-             "Audio config updated: laser_debounce=%u hall_debounce=%u laser_cooldown=%u lid_open_sound=%s lid_open_volume=%u",
+             "Audio config updated: laser_debounce=%u lid_debounce=%u laser_cooldown=%u lid_open_sound=%s lid_close_sound=%s lid_volume=%u",
              (unsigned)s_audio_laser_debounce_ms,
-             (unsigned)s_audio_hall_debounce_ms,
+             (unsigned)s_audio_lid_debounce_ms,
              (unsigned)s_audio_laser_trigger_cooldown_ms,
              s_audio_lid_open_sound[0] ? s_audio_lid_open_sound : "(none)",
-             (unsigned)s_audio_lid_open_volume_pct);
+             s_audio_lid_close_sound[0] ? s_audio_lid_close_sound : "(none)",
+             (unsigned)s_audio_lid_volume_pct);
 
     return send_audio_config_json(req);
 }
@@ -2069,9 +2162,9 @@ static esp_err_t sounds_handle_delete(httpd_req_t *req, const char *filepath, co
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to delete file");
         return ESP_FAIL;
     }
-    esp_err_t audio_cfg_err = audio_config_clear_deleted_lid_open_sound(base_name);
+    esp_err_t audio_cfg_err = audio_config_clear_deleted_lid_sound(base_name);
     if (audio_cfg_err != ESP_OK) {
-        ESP_LOGE(TAG, "Deleted %s but failed to clear lid-open sound selection: %s",
+        ESP_LOGE(TAG, "Deleted %s but failed to clear lid sound selections: %s",
                  base_name, esp_err_to_name(audio_cfg_err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "File deleted but audio config update failed");
         return ESP_FAIL;
@@ -2185,9 +2278,9 @@ static esp_err_t sounds_handle_rename(httpd_req_t *req, const char *filepath, co
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Rename failed");
         return ESP_FAIL;
     }
-    esp_err_t audio_cfg_err = audio_config_update_renamed_lid_open_sound(base_name, rename_target);
+    esp_err_t audio_cfg_err = audio_config_update_renamed_lid_sound(base_name, rename_target);
     if (audio_cfg_err != ESP_OK) {
-        ESP_LOGE(TAG, "Renamed %s to %s but failed to update lid-open sound selection: %s",
+        ESP_LOGE(TAG, "Renamed %s to %s but failed to update lid sound selections: %s",
                  base_name, rename_target, esp_err_to_name(audio_cfg_err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Renamed file but audio config update failed");
         return ESP_FAIL;
@@ -3725,12 +3818,13 @@ esp_err_t start_mainapp(void)
     ESP_LOGI(TAG, "UI password lock: %s", security_is_password_set() ? "enabled" : "disabled");
     ESP_LOGI(TAG, "Startup sound: %s", s_boot_sound_enabled ? "enabled" : "disabled");
     ESP_LOGI(TAG,
-             "Playback settings: laser_debounce=%u hall_debounce=%u laser_cooldown=%u lid_open_sound=%s lid_open_volume=%u",
+             "Playback settings: laser_debounce=%u lid_debounce=%u laser_cooldown=%u lid_open_sound=%s lid_close_sound=%s lid_volume=%u",
              (unsigned)s_audio_laser_debounce_ms,
-             (unsigned)s_audio_hall_debounce_ms,
+             (unsigned)s_audio_lid_debounce_ms,
              (unsigned)s_audio_laser_trigger_cooldown_ms,
              s_audio_lid_open_sound[0] ? s_audio_lid_open_sound : "(none)",
-             (unsigned)s_audio_lid_open_volume_pct);
+             s_audio_lid_close_sound[0] ? s_audio_lid_close_sound : "(none)",
+             (unsigned)s_audio_lid_volume_pct);
 
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();

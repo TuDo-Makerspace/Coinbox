@@ -165,6 +165,9 @@ static esp_err_t load_meta_or_stat_locked(const char *name);
 static audio_playback_skip_reason_t playback_skip_reason_locked(void);
 static void clear_playback_skip_notice_locked(void);
 static void record_playback_skip_notice_locked(const char *name, audio_playback_skip_reason_t reason);
+#if CONFIG_TEST_AUDIO_MOCK_BACKEND
+static uint32_t mock_playback_duration_from_path_ms(const char *path);
+#endif
 static esp_err_t audio_start_file_internal(const char *name,
                                            const uint8_t *override_volume_pct,
                                            audio_playback_start_result_t *out_result,
@@ -1468,7 +1471,20 @@ static esp_err_t load_meta_or_stat_locked(const char *name)
     }
 
     uint32_t full_duration_ms = 0;
-    if (files_get_audio_duration_ms(name, &full_duration_ms) == ESP_OK) {
+    bool have_full_duration = false;
+#if CONFIG_TEST_AUDIO_MOCK_BACKEND
+    full_duration_ms = mock_playback_duration_from_path_ms(s_current_file_path);
+    have_full_duration = (full_duration_ms > 0);
+
+    const bool trim_requested = (props.trim_start_ms > 0 || props.trim_stop_ms > 0);
+    if (!have_full_duration && trim_requested) {
+        have_full_duration = (files_get_audio_duration_ms(name, &full_duration_ms) == ESP_OK);
+    }
+#else
+    have_full_duration = (files_get_audio_duration_ms(name, &full_duration_ms) == ESP_OK);
+#endif
+
+    if (have_full_duration) {
         uint32_t trim_start_ms = props.trim_start_ms;
         uint32_t trim_stop_ms = props.trim_stop_ms;
         if (trim_start_ms > full_duration_ms) {
@@ -2278,7 +2294,7 @@ static esp_err_t audio_start_file_internal(const char *name,
     }
 
     if (override_volume_pct) {
-        s_track_volume = clamp_percent(*override_volume_pct);
+        s_track_volume = clamp_track_volume(*override_volume_pct);
         s_volume_dirty = true;
     }
 
@@ -2328,7 +2344,7 @@ esp_err_t audio_start_file_with_volume(const char *name,
                                        audio_playback_start_result_t *out_result,
                                        audio_playback_skip_reason_t *out_skip_reason)
 {
-    uint8_t clamped_volume_pct = clamp_percent(volume_pct);
+    uint8_t clamped_volume_pct = clamp_track_volume(volume_pct);
     return audio_start_file_internal(name, &clamped_volume_pct, out_result, out_skip_reason);
 }
 

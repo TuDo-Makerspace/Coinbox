@@ -475,6 +475,27 @@
       gap: 0.45rem;
       align-items: center;
     }
+    .range-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      width: 100%;
+    }
+    .range-wrap input[type="range"] {
+      width: 100%;
+    }
+    .volume-slider .volume-overdrive-marker {
+      position: absolute;
+      left: var(--volume-overdrive-marker-left, 80%);
+      top: 50%;
+      width: 1px;
+      height: 14px;
+      transform: translate(-50%, -50%);
+      background: #94a3b8;
+      border-radius: 999px;
+      opacity: 0.8;
+      pointer-events: none;
+    }
     .nudge {
       border: none;
       background: #f1f5f9;
@@ -787,26 +808,36 @@
               <option value="">Loading sounds...</option>
             </select>
           </div>
+          <div class="playback-setting-row playback-setting-row-stack-mobile playback-section-divider">
+            <label class="playback-setting-title" for="playback-lid-close-sound">Lid closing sound</label>
+            <p class="note playback-setting-note">Play a selected sound whenever the lid is closed. Choose None to disable this event.</p>
+            <select class="playback-select playback-setting-control" id="playback-lid-close-sound" disabled>
+              <option value="">Loading sounds...</option>
+            </select>
+          </div>
           <div class="slider-row playback-section-divider">
-            <label class="playback-setting-title" for="playback-lid-open-volume">Lid opening volume</label>
-            <p class="note">Volume of the lid open sound.</p>
+            <label class="playback-setting-title" for="playback-lid-volume">Lid volume</label>
+            <p class="note">Volume of the lid opening and closing sounds.</p>
             <div class="slider-control">
-              <div class="slider-wrap">
-                <button class="nudge" id="playback-lid-open-volume-minus" type="button">-</button>
-                <input type="range" id="playback-lid-open-volume" min="0" max="100" value="100" step="1" disabled>
-                <button class="nudge" id="playback-lid-open-volume-plus" type="button">+</button>
+              <div class="slider-wrap volume-slider">
+                <button class="nudge" id="playback-lid-volume-minus" type="button">-</button>
+                <div class="range-wrap">
+                  <input type="range" id="playback-lid-volume" min="0" max="125" value="100" step="1" disabled>
+                  <span class="volume-overdrive-marker" aria-hidden="true"></span>
+                </div>
+                <button class="nudge" id="playback-lid-volume-plus" type="button">+</button>
               </div>
               <div class="slider-number-wrap">
-                <input class="slider-number" id="playback-lid-open-volume-number" type="number" min="0" max="100" step="1" inputmode="numeric" value="100" disabled>
+                <input class="slider-number" id="playback-lid-volume-number" type="number" min="0" max="125" step="1" inputmode="numeric" value="100" disabled>
                 <span class="slider-number-unit">%</span>
               </div>
             </div>
           </div>
           <div class="playback-setting-row playback-section-divider">
-            <label class="playback-setting-title" for="playback-hall-debounce-number">Lid opening debounce</label>
-            <p class="note playback-setting-note">Minimum time before the lid open sound can play again. Range: 0-5000 ms. Default: 1000 ms.</p>
+            <label class="playback-setting-title" for="playback-lid-debounce-number">Lid debounce</label>
+            <p class="note playback-setting-note">Minimum time before the lid opening or closing sound can play again. Range: 0-5000 ms. Default: 1000 ms.</p>
             <div class="slider-number-wrap playback-setting-control">
-              <input class="slider-number" id="playback-hall-debounce-number" type="number" min="0" max="5000" step="25" inputmode="numeric" value="1000" disabled>
+              <input class="slider-number" id="playback-lid-debounce-number" type="number" min="0" max="5000" step="25" inputmode="numeric" value="1000" disabled>
               <span class="slider-number-unit">ms</span>
             </div>
           </div>
@@ -1045,11 +1076,12 @@
     const networkSaveBtn = document.getElementById('network-save');
     const networkMacText = document.getElementById('network-mac');
     const playbackLidOpenSoundSelect = document.getElementById('playback-lid-open-sound');
-    const playbackLidOpenVolumeSlider = document.getElementById('playback-lid-open-volume');
-    const playbackLidOpenVolumeMinusBtn = document.getElementById('playback-lid-open-volume-minus');
-    const playbackLidOpenVolumePlusBtn = document.getElementById('playback-lid-open-volume-plus');
-    const playbackLidOpenVolumeNumber = document.getElementById('playback-lid-open-volume-number');
-    const playbackHallDebounceNumber = document.getElementById('playback-hall-debounce-number');
+    const playbackLidCloseSoundSelect = document.getElementById('playback-lid-close-sound');
+    const playbackLidVolumeSlider = document.getElementById('playback-lid-volume');
+    const playbackLidVolumeMinusBtn = document.getElementById('playback-lid-volume-minus');
+    const playbackLidVolumePlusBtn = document.getElementById('playback-lid-volume-plus');
+    const playbackLidVolumeNumber = document.getElementById('playback-lid-volume-number');
+    const playbackLidDebounceNumber = document.getElementById('playback-lid-debounce-number');
     const playbackLaserDebounceNumber = document.getElementById('playback-laser-debounce-number');
     const startupSoundInput = document.getElementById('startup-sound-enabled');
     const systemFirmwareText = document.getElementById('system-firmware');
@@ -1065,6 +1097,9 @@
     const securityPasswordConfirmInput = document.getElementById('security-password-confirm');
     const securitySaveBtn = document.getElementById('security-save');
     const securityRemoveBtn = document.getElementById('security-remove');
+    const LID_VOLUME_MAX = 125;
+    const lidVolumeMarkerPct = LID_VOLUME_MAX > 0 ? (100 / LID_VOLUME_MAX) * 100 : 50;
+    rootElement?.style?.setProperty('--volume-overdrive-marker-left', `${lidVolumeMarkerPct}%`);
     const DEVICE_INFO_TIMEOUT_MS = 5000;
     const RUNTIME_STATUS_TIMEOUT_MS = 5000;
     const LOG_POLL_MS = 2000;
@@ -1104,9 +1139,10 @@
     };
     const audioConfigSnapshot = {
       laser_debounce_ms: 30,
-      hall_debounce_ms: 1000,
+      lid_debounce_ms: 1000,
       lid_open_sound: '',
-      lid_open_volume_pct: 100,
+      lid_close_sound: '',
+      lid_volume_pct: 100,
     };
 
     function getPageBootId() {
@@ -1193,16 +1229,16 @@
       return Math.min(1000, Math.max(0, parsed));
     }
 
-    function clampHallDebounceMs(value, fallback = 1000) {
+    function clampLidDebounceMs(value, fallback = 1000) {
       const parsed = Number.parseInt(value, 10);
       if (Number.isNaN(parsed)) return fallback;
       return Math.min(5000, Math.max(0, parsed));
     }
 
-    function clampLidOpenVolumePct(value, fallback = 100) {
+    function clampLidVolumePct(value, fallback = 100) {
       const parsed = Number.parseInt(value, 10);
       if (Number.isNaN(parsed)) return fallback;
-      return Math.min(100, Math.max(0, parsed));
+      return Math.min(LID_VOLUME_MAX, Math.max(0, parsed));
     }
 
     function clampValueForInput(input, value, fallback = 0) {
@@ -1252,9 +1288,8 @@
       return true;
     }
 
-    function renderLidOpenSoundOptions(selectedValue) {
-      if (!playbackLidOpenSoundSelect) return;
-
+    function renderLidSoundOptions(select, selectedValue) {
+      if (!select) return;
       const selected = typeof selectedValue === 'string' ? selectedValue : '';
       const options = [{ name: '', label: 'None' }];
       const seen = new Set(['']);
@@ -1271,17 +1306,18 @@
         options.push({ name: selected, label: `Missing: ${selected}` });
       }
 
-      playbackLidOpenSoundSelect.innerHTML = options
+      select.innerHTML = options
         .map((entry) => `<option value="${escapeHtml(entry.name)}">${escapeHtml(entry.label)}</option>`)
         .join('');
-      playbackLidOpenSoundSelect.value = selected;
+      select.value = selected;
     }
 
     function updateAudioConfigSnapshot(data) {
       audioConfigSnapshot.laser_debounce_ms = clampLaserDebounceMs(data?.laser_debounce_ms, 30);
-      audioConfigSnapshot.hall_debounce_ms = clampHallDebounceMs(data?.hall_debounce_ms, 1000);
+      audioConfigSnapshot.lid_debounce_ms = clampLidDebounceMs(data?.lid_debounce_ms, 1000);
       audioConfigSnapshot.lid_open_sound = typeof data?.lid_open_sound === 'string' ? data.lid_open_sound : '';
-      audioConfigSnapshot.lid_open_volume_pct = clampLidOpenVolumePct(data?.lid_open_volume_pct, 100);
+      audioConfigSnapshot.lid_close_sound = typeof data?.lid_close_sound === 'string' ? data.lid_close_sound : '';
+      audioConfigSnapshot.lid_volume_pct = clampLidVolumePct(data?.lid_volume_pct, 100);
     }
 
     function currentAudioConfigDraft() {
@@ -1290,41 +1326,47 @@
           playbackLaserDebounceNumber?.value,
           audioConfigSnapshot.laser_debounce_ms,
         ),
-        hall_debounce_ms: clampHallDebounceMs(
-          playbackHallDebounceNumber?.value,
-          audioConfigSnapshot.hall_debounce_ms,
+        lid_debounce_ms: clampLidDebounceMs(
+          playbackLidDebounceNumber?.value,
+          audioConfigSnapshot.lid_debounce_ms,
         ),
         lid_open_sound: playbackLidOpenSoundSelect?.value ?? audioConfigSnapshot.lid_open_sound,
-        lid_open_volume_pct: clampLidOpenVolumePct(
-          playbackLidOpenVolumeNumber?.value,
-          audioConfigSnapshot.lid_open_volume_pct,
+        lid_close_sound: playbackLidCloseSoundSelect?.value ?? audioConfigSnapshot.lid_close_sound,
+        lid_volume_pct: clampLidVolumePct(
+          playbackLidVolumeNumber?.value,
+          audioConfigSnapshot.lid_volume_pct,
         ),
       };
     }
 
     function renderAudioConfig(data) {
       const laserDebounceMs = clampLaserDebounceMs(data?.laser_debounce_ms, 30);
-      const hallDebounceMs = clampHallDebounceMs(data?.hall_debounce_ms, 1000);
+      const lidDebounceMs = clampLidDebounceMs(data?.lid_debounce_ms, 1000);
       const lidOpenSound = typeof data?.lid_open_sound === 'string' ? data.lid_open_sound : '';
-      const lidOpenVolumePct = clampLidOpenVolumePct(data?.lid_open_volume_pct, 100);
+      const lidCloseSound = typeof data?.lid_close_sound === 'string' ? data.lid_close_sound : '';
+      const lidVolumePct = clampLidVolumePct(data?.lid_volume_pct, 100);
       const controlsDisabled = !audioConfigLoaded;
 
       syncNumberOnlyControl(playbackLaserDebounceNumber, laserDebounceMs, 30);
-      syncNumberOnlyControl(playbackHallDebounceNumber, hallDebounceMs, 1000);
-      syncRangeNumberControl(playbackLidOpenVolumeSlider, playbackLidOpenVolumeNumber, lidOpenVolumePct, 100);
-      renderLidOpenSoundOptions(lidOpenSound);
+      syncNumberOnlyControl(playbackLidDebounceNumber, lidDebounceMs, 1000);
+      syncRangeNumberControl(playbackLidVolumeSlider, playbackLidVolumeNumber, lidVolumePct, 100);
+      renderLidSoundOptions(playbackLidOpenSoundSelect, lidOpenSound);
+      renderLidSoundOptions(playbackLidCloseSoundSelect, lidCloseSound);
       [
         playbackLaserDebounceNumber,
-        playbackHallDebounceNumber,
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
-        playbackLidOpenVolumeMinusBtn,
-        playbackLidOpenVolumePlusBtn,
+        playbackLidDebounceNumber,
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
+        playbackLidVolumeMinusBtn,
+        playbackLidVolumePlusBtn,
       ].forEach((control) => {
         if (control) control.disabled = controlsDisabled;
       });
       if (playbackLidOpenSoundSelect) {
         playbackLidOpenSoundSelect.disabled = controlsDisabled || !soundOptionsLoaded;
+      }
+      if (playbackLidCloseSoundSelect) {
+        playbackLidCloseSoundSelect.disabled = controlsDisabled || !soundOptionsLoaded;
       }
     }
 
@@ -1360,7 +1402,7 @@
     }
 
     async function fetchSoundOptions() {
-      if (!playbackLidOpenSoundSelect || soundOptionsLoading) return;
+      if ((!playbackLidOpenSoundSelect && !playbackLidCloseSoundSelect) || soundOptionsLoading) return;
       soundOptionsLoading = true;
       try {
         const res = await fetch('/sounds/list', { cache: 'no-store' });
@@ -1390,14 +1432,17 @@
       if (draft.laser_debounce_ms !== audioConfigSnapshot.laser_debounce_ms) {
         payload.laser_debounce_ms = draft.laser_debounce_ms;
       }
-      if (draft.hall_debounce_ms !== audioConfigSnapshot.hall_debounce_ms) {
-        payload.hall_debounce_ms = draft.hall_debounce_ms;
+      if (draft.lid_debounce_ms !== audioConfigSnapshot.lid_debounce_ms) {
+        payload.lid_debounce_ms = draft.lid_debounce_ms;
       }
       if (draft.lid_open_sound !== audioConfigSnapshot.lid_open_sound) {
         payload.lid_open_sound = draft.lid_open_sound;
       }
-      if (draft.lid_open_volume_pct !== audioConfigSnapshot.lid_open_volume_pct) {
-        payload.lid_open_volume_pct = draft.lid_open_volume_pct;
+      if (draft.lid_close_sound !== audioConfigSnapshot.lid_close_sound) {
+        payload.lid_close_sound = draft.lid_close_sound;
+      }
+      if (draft.lid_volume_pct !== audioConfigSnapshot.lid_volume_pct) {
+        payload.lid_volume_pct = draft.lid_volume_pct;
       }
       if (Object.keys(payload).length === 0) return;
 
@@ -2868,86 +2913,89 @@
     playbackLidOpenSoundSelect?.addEventListener('change', () => {
       saveAudioConfig();
     });
-    playbackLidOpenVolumeSlider?.addEventListener('input', () => {
-      syncRangeNumberControl(
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
-        playbackLidOpenVolumeSlider.value,
-        audioConfigSnapshot.lid_open_volume_pct,
-      );
-    });
-    playbackLidOpenVolumeSlider?.addEventListener('change', () => {
+    playbackLidCloseSoundSelect?.addEventListener('change', () => {
       saveAudioConfig();
     });
-    playbackLidOpenVolumeMinusBtn?.addEventListener('click', () => {
-      const next = Number(playbackLidOpenVolumeSlider.value) - stepValueForInput(playbackLidOpenVolumeSlider, 1);
+    playbackLidVolumeSlider?.addEventListener('input', () => {
       syncRangeNumberControl(
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
+        playbackLidVolumeSlider.value,
+        audioConfigSnapshot.lid_volume_pct,
+      );
+    });
+    playbackLidVolumeSlider?.addEventListener('change', () => {
+      saveAudioConfig();
+    });
+    playbackLidVolumeMinusBtn?.addEventListener('click', () => {
+      const next = Number(playbackLidVolumeSlider.value) - stepValueForInput(playbackLidVolumeSlider, 1);
+      syncRangeNumberControl(
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
         next,
-        audioConfigSnapshot.lid_open_volume_pct,
+        audioConfigSnapshot.lid_volume_pct,
       );
       saveAudioConfig();
     });
-    playbackLidOpenVolumePlusBtn?.addEventListener('click', () => {
-      const next = Number(playbackLidOpenVolumeSlider.value) + stepValueForInput(playbackLidOpenVolumeSlider, 1);
+    playbackLidVolumePlusBtn?.addEventListener('click', () => {
+      const next = Number(playbackLidVolumeSlider.value) + stepValueForInput(playbackLidVolumeSlider, 1);
       syncRangeNumberControl(
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
         next,
-        audioConfigSnapshot.lid_open_volume_pct,
+        audioConfigSnapshot.lid_volume_pct,
       );
       saveAudioConfig();
     });
-    playbackLidOpenVolumeNumber?.addEventListener('input', () => {
-      const raw = String(playbackLidOpenVolumeNumber.value ?? '').trim();
+    playbackLidVolumeNumber?.addEventListener('input', () => {
+      const raw = String(playbackLidVolumeNumber.value ?? '').trim();
       if (raw === '') return;
       const parsed = Number.parseInt(raw, 10);
       if (Number.isNaN(parsed)) return;
       syncRangeNumberControl(
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
         parsed,
-        audioConfigSnapshot.lid_open_volume_pct,
+        audioConfigSnapshot.lid_volume_pct,
       );
     });
-    playbackLidOpenVolumeNumber?.addEventListener('blur', () => {
+    playbackLidVolumeNumber?.addEventListener('blur', () => {
       if (commitPlaybackRangeNumberInput(
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
-        audioConfigSnapshot.lid_open_volume_pct,
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
+        audioConfigSnapshot.lid_volume_pct,
       )) {
         saveAudioConfig();
       }
     });
-    playbackLidOpenVolumeNumber?.addEventListener('change', () => {
+    playbackLidVolumeNumber?.addEventListener('change', () => {
       if (commitPlaybackRangeNumberInput(
-        playbackLidOpenVolumeSlider,
-        playbackLidOpenVolumeNumber,
-        audioConfigSnapshot.lid_open_volume_pct,
+        playbackLidVolumeSlider,
+        playbackLidVolumeNumber,
+        audioConfigSnapshot.lid_volume_pct,
       )) {
         saveAudioConfig();
       }
     });
-    playbackLidOpenVolumeNumber?.addEventListener('keydown', (event) => {
+    playbackLidVolumeNumber?.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
-      playbackLidOpenVolumeNumber.blur();
+      playbackLidVolumeNumber.blur();
     });
-    playbackHallDebounceNumber?.addEventListener('blur', () => {
-      if (commitPlaybackNumberOnlyInput(playbackHallDebounceNumber, audioConfigSnapshot.hall_debounce_ms)) {
+    playbackLidDebounceNumber?.addEventListener('blur', () => {
+      if (commitPlaybackNumberOnlyInput(playbackLidDebounceNumber, audioConfigSnapshot.lid_debounce_ms)) {
         saveAudioConfig();
       }
     });
-    playbackHallDebounceNumber?.addEventListener('change', () => {
-      if (commitPlaybackNumberOnlyInput(playbackHallDebounceNumber, audioConfigSnapshot.hall_debounce_ms)) {
+    playbackLidDebounceNumber?.addEventListener('change', () => {
+      if (commitPlaybackNumberOnlyInput(playbackLidDebounceNumber, audioConfigSnapshot.lid_debounce_ms)) {
         saveAudioConfig();
       }
     });
-    playbackHallDebounceNumber?.addEventListener('keydown', (event) => {
+    playbackLidDebounceNumber?.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return;
       event.preventDefault();
-      playbackHallDebounceNumber.blur();
+      playbackLidDebounceNumber.blur();
     });
     playbackLaserDebounceNumber?.addEventListener('blur', () => {
       if (commitPlaybackNumberOnlyInput(playbackLaserDebounceNumber, audioConfigSnapshot.laser_debounce_ms)) {
