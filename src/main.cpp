@@ -710,7 +710,7 @@ void setup() {
     while (WiFi.status() != WL_CONNECTED) {
         if (millis() - tout_start >= WIFI_CONNECT_TIMEOUT) {
             fail = true;
-            return;
+            break;
         }
     }
 
@@ -726,10 +726,13 @@ void setup() {
         while(true);
     }
 
-    init_routes();
     init_prob();
-    server.begin();
-    expose_mDNS();
+
+    if (!fail) {
+        init_routes();
+        server.begin();
+        expose_mDNS();
+    }
 
     boot_done_tstamp = millis() + BOOT_TIME * 1000;
     log(("Entering boot mode, ignoring sensor input for " + std::to_string(BOOT_TIME) + " seconds\n").c_str());
