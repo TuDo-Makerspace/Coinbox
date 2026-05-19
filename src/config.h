@@ -30,6 +30,7 @@
 #define PASSWORD "REPLACE_ME_PASSWORD"
 #define STATIC_IP 192, 168, 0, 31
 #define WIFI_CONNECT_TIMEOUT 5000 // ms
+#define AP_SSID "Coinbox"          // Fallback AP SSID when STA connection fails
 #define BOOT_TIME 2
 // #define REACTIVATE_WIFI_AFTER 10000 // ms - Comment out to not reactivate WiFi automatically
 

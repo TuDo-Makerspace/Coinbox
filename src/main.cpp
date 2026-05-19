@@ -144,6 +144,7 @@ enum device_mode {
 
 device_mode mode = BOOT;
 unsigned long boot_done_tstamp;
+bool ap_mode = false; // True if WiFi fell back to AP mode after failing to join the configured network
 
 /////////////////////////////////////////////////////////////////////////////////
 // Logging Functions
@@ -715,7 +716,21 @@ void setup() {
     }
 
     if (fail) {
-        log("WiFi connection timeout, continuing without connection...\n");
+        log("WiFi connection timeout, starting fallback AP \"%s\"...\n", AP_SSID);
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_AP);
+        IPAddress ap_ip(4, 3, 2, 1);
+        IPAddress ap_gw(4, 3, 2, 1);
+        IPAddress ap_mask(255, 255, 255, 0);
+        if (!WiFi.softAPConfig(ap_ip, ap_gw, ap_mask)) {
+            log("Failed to configure AP IP\n");
+        }
+        if (WiFi.softAP(AP_SSID)) {
+            ap_mode = true;
+            log(("AP IP Address: " + std::string(WiFi.softAPIP().toString().c_str()) + "\n").c_str());
+        } else {
+            log("Failed to start fallback AP, continuing without network\n");
+        }
     } else {
         log("Connected to WiFi\n");
         log(("IP Address: " + std::string(WiFi.localIP().toString().c_str()) + "\n").c_str());
@@ -728,7 +743,7 @@ void setup() {
 
     init_prob();
 
-    if (!fail) {
+    if (!fail || ap_mode) {
         init_routes();
         server.begin();
         expose_mDNS();
@@ -825,7 +840,11 @@ void loop() {
             // WiFi interferes with audio playback, so disable it after the first coin
             if (wifi_active) {
                 server.end();
-                WiFi.disconnect(true);
+                if (ap_mode) {
+                    WiFi.softAPdisconnect(true);
+                } else {
+                    WiFi.disconnect(true);
+                }
                 WiFi.mode(WIFI_OFF);
                 mode = NORMAL;
                 wifi_active = false;
@@ -840,8 +859,14 @@ void loop() {
         else if (!wifi_active && millis() >= reactive_wifi_at) {
             // Reactivate WiFi after REACTIVATE_WIFI_AFTER ms
             log("Reactivating WiFi after %d ms\n", REACTIVATE_WIFI_AFTER);
-            WiFi.mode(WIFI_STA);
-            WiFi.begin(SSID, PASSWORD);
+            if (ap_mode) {
+                WiFi.mode(WIFI_AP);
+                WiFi.softAPConfig(IPAddress(4, 3, 2, 1), IPAddress(4, 3, 2, 1), IPAddress(255, 255, 255, 0));
+                WiFi.softAP(AP_SSID);
+            } else {
+                WiFi.mode(WIFI_STA);
+                WiFi.begin(SSID, PASSWORD);
+            }
             wifi_active = true;
             server.begin();
         }
